@@ -1,23 +1,117 @@
-name: Release
+name: Release (images + artifacts)
 
-# On every tag v* (and manual dispatch): build everything, attach release
-# artifacts to the GitHub Release, and publish all container images to GHCR.
-# Docs: docs/design/11-platform-and-cloud.md §7.
+# One publish pipeline for both event kinds (docs/design/11 §7):
+#   * push to main        -> build + publish :latest images
+#   * push tag v*          -> build + publish :latest + :<tag> images, then
+#                             create the GitHub Release with tarball artifacts
+#   * workflow_dispatch    -> same as a main push (manual re-publish)
+#
+# The concurrency group is keyed by commit SHA with cancel-in-progress, so a
+# tag pushed on a commit that just triggered the main "latest" build cancels
+# that run instead of racing it on the first-run compile and the GHCR push.
+# Buildx uses the gha cache, so subsequent runs reuse compiled layers.
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
+
+concurrency:
+  group: onyx-publish-${{ github.sha }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
   packages: write
 
+env:
+  REGISTRY: ghcr.io/innotelinc/onyx-oss-platform
+
 jobs:
-  build-artifacts:
+  publish-images:
     runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.meta.outputs.tag }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: onyx-api
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-core
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-shared
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-snapd
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-backupd
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-vmm
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-appd
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-ai
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-objectstore
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-storaged
+            dockerfile: docker/onyx-storaged.Dockerfile
+          - service: onyx-privd
+            dockerfile: docker/onyx-privd.Dockerfile
+          - service: onyx-web
+            dockerfile: docker/onyx-web/Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          IMG="${{ env.REGISTRY }}/${{ matrix.service }}"
+          echo "tags=${IMG}:latest" >> "$GITHUB_OUTPUT"
+          if [ -n "${{ steps.ver.outputs.version }}" ]; then
+            echo "tags=${IMG}:latest,${IMG}:${{ steps.ver.outputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and publish ${{ matrix.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          build-args: SERVICE=${{ matrix.service }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    # Only tagged pushes produce the GitHub Release + tarball artifacts; it
+    # waits for the images so the Release is complete when it appears.
+    needs: publish-images
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -68,63 +162,3 @@ jobs:
         with:
           files: dist/*
           generate_release_notes: true
-
-  publish-images:
-    needs: build-artifacts
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - service: onyx-api
-            dockerfile: docker/go-service.Dockerfile
-          - service: onyx-core
-            dockerfile: docker/go-service.Dockerfile
-          - service: onyx-shared
-            dockerfile: docker/go-service.Dockerfile
-          - service: onyx-snapd
-            dockerfile: docker/go-service.Dockerfile
-          - service: onyx-backupd
-            dockerfile: docker/go-service.Dockerfile
-          - service: onyx-vmm
-            dockerfile: docker/go-service.Dockerfile
-          - service: onyx-appd
-            dockerfile: docker/go-service.Dockerfile
-          - service: onyx-ai
-            dockerfile: docker/go-service.Dockerfile
-          - service: onyx-objectstore
-            dockerfile: docker/go-service.Dockerfile
-          - service: onyx-storaged
-            dockerfile: docker/onyx-storaged.Dockerfile
-          - service: onyx-privd
-            dockerfile: docker/onyx-privd.Dockerfile
-          - service: onyx-web
-            dockerfile: docker/onyx-web/Dockerfile
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and publish ${{ matrix.service }}
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          build-args: SERVICE=${{ matrix.service }}
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/innotelinc/onyx-oss-platform/${{ matrix.service }}:${{ needs.build-artifacts.outputs.tag }}
-            ghcr.io/innotelinc/onyx-oss-platform/${{ matrix.service }}:latest
