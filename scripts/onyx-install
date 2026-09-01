@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+# scripts/onyx-install — install the Onyx v0.1 skeleton services on a
+# Debian-family host (docs/design/10#1-script-installer).
+#
+# What it does:
+#   1. builds the binaries if bin/ is missing (make build),
+#   2. creates the onyx system group + unprivileged service users,
+#   3. creates the runtime dirs (/run/onyx, /mnt/onyx, /var/lib/onyx/*,
+#      /etc/onyx/conf.d) and the tmpfiles.d snippet that recreates them on
+#      every boot,
+#   4. installs the binaries to <prefix>/lib/onyx and the `onyx` CLI to
+#      <prefix>/bin/onyx,
+#   5. installs the systemd units (deploy/systemd/*.service) and enables +
+#      starts the full stack (onyx-privd -> storaged/shared -> core -> api).
+#
+# The whole controller/observer chain is unprivileged (per-service users in
+# group onyx); only onyx-privd runs as root — it is the single privilege
+# boundary (docs/design/04#7). The HTTP gateway binds 127.0.0.1 by default,
+# so nothing is exposed to the network until the user changes it.
+#
+# Usage:
+#   sudo scripts/onyx-install                    # build, install, enable, start
+#   scripts/onyx-install --destdir /tmp/stage    # stage files only (no root,
+#                                                # no users, no systemctl)
+#   sudo scripts/onyx-install --uninstall        # stop, disable, remove
+#   sudo scripts/onyx-install --install-deps     # also apt-get install the
+#                                                # optional daemon packages
+#
+# Flags:
+#   --prefix PATH   install prefix (default /usr/local)
+#   --destdir DIR   stage all file writes under DIR (packaging/tests)
+#   --install-deps  apt-get install optional packages (samba, nfs-kernel-server,
+#                   smartmontools, btrfs-progs) so onyx can actually serve
+#   --uninstall     remove what this script installed
+#   --dry-run       print what would run, change nothing
+set -euo pipefail
+
+PREFIX="${PREFIX:-/usr/local}"
+DESTDIR="${DESTDIR:-}"
+INSTALL_DEPS=0
+UNINSTALL=0
+DRY_RUN=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --prefix) PREFIX="$2"; shift 2 ;;
+    --destdir) DESTDIR="$2"; shift 2 ;;
+    --install-deps) INSTALL_DEPS=1; shift ;;
+    --uninstall) UNINSTALL=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//' | grep -v '^!' ; exit 0 ;;
+    *) echo "onyx-install: unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BIN="$ROOT/bin"
+LIB="$PREFIX/lib/onyx"
+BINCLI="$PREFIX/bin"
+UNITDIR="$PREFIX/lib/systemd/system"
+TMPFILES="$PREFIX/lib/tmpfiles.d"
+SYSTEM_USERS=(onyx-core onyx-api onyx-shared onyx-storaged)
+UNITS=(onyx-privd onyx-storaged onyx-shared onyx-core onyx-api)
+BINARIES=(onyx-privd onyx-storaged onyx-shared onyx-core onyx-api onyx)
+
+say() { printf '\033[1;34m== %s ==\033[0m\n' "$*"; }
+warn() { printf '\033[1;33m!! %s\033[0m\n' "$*" >&2; }
+
+# run: execute a real command, or echo it under --dry-run.
+run() {
+  if [ "$DRY_RUN" = 1 ]; then
+    printf '  + %s\n' "$*"
+    return 0
+  fi
+  "$@"
+}
+
+if [ "$UNINSTALL" = 1 ]; then
+  if [ -z "$DESTDIR" ] && [ "$(id -u)" != 0 ]; then
+    echo "onyx-install: --uninstall needs root (or use --destdir to stage)" >&2
+    exit 1
+  fi
+  say "uninstalling from $DESTDIR$PREFIX"
+  if [ -z "$DESTDIR" ]; then
+    run systemctl stop onyx-api onyx-core onyx-shared onyx-storaged onyx-privd 2>/dev/null || true
+    run systemctl disable onyx-api onyx-core onyx-shared onyx-storaged onyx-privd 2>/dev/null || true
+  fi
+  run rm -f "$DESTDIR$TMPFILES/onyx.conf"
+  for u in "${UNITS[@]}"; do run rm -f "$DESTDIR$UNITDIR/$u.service"; done
+  run rm -rf "$DESTDIR$LIB"
+  run rm -f "$DESTDIR$BINCLI/onyx"
+  if [ -z "$DESTDIR" ]; then
+    run rmdir /var/lib/onyx/core /var/lib/onyx/onyx-storaged /var/lib/onyx /etc/onyx/conf.d /etc/onyx 2>/dev/null || true
+    for u in "${SYSTEM_USERS[@]}"; do run userdel "$u" 2>/dev/null || true; done
+    run groupdel onyx 2>/dev/null || true
+    run systemd-tmpfiles --remove onyx.conf 2>/dev/null || true
+    run systemctl daemon-reload 2>/dev/null || true
+  fi
+  echo "uninstalled"
+  exit 0
+fi
+
+if [ -z "$DESTDIR" ] && [ "$(id -u)" != 0 ]; then
+  echo "onyx-install: needs root (or use --destdir to stage files only)" >&2
+  exit 1
+fi
+
+# --- 1. build if needed -----------------------------------------------------
+if [ ! -x "$BIN/onyx" ]; then
+  say "binaries missing — building"
+  run make -C "$ROOT" build
+fi
+for b in "${BINARIES[@]}"; do
+  [ -x "$BIN/$b" ] || { echo "onyx-install: missing $BIN/$b (make build failed?)" >&2; exit 1; }
+done
+
+# --- 2. users + group --------------------------------------------------------
+if [ -z "$DESTDIR" ] || [ "$DRY_RUN" = 1 ]; then
+  say "creating onyx group + service users"
+  run groupadd --system onyx 2>/dev/null || true
+  for u in "${SYSTEM_USERS[@]}"; do
+    run useradd --system --gid onyx --no-create-home --home-dir /nonexistent \
+      --shell /usr/sbin/nologin "$u" 2>/dev/null || true
+  done
+fi
+
+# --- 3. runtime + state dirs -------------------------------------------------
+say "creating runtime and state directories"
+# tmpfiles.d snippet recreates these on every boot; the installer creates them
+# right now so the stack starts clean even before the next reboot.
+if [ -z "$DESTDIR" ]; then
+  run systemd-tmpfiles --create onyx.conf 2>/dev/null \
+    || { run install -d -m 2770 -o root -g onyx /run/onyx
+         run install -d -m 2770 -o root -g onyx /mnt/onyx
+         run install -d -m 0750 -o root -g onyx /var/lib/onyx
+         run install -d -m 0750 -o onyx-core -g onyx /var/lib/onyx/core
+         run install -d -m 0750 -o onyx-storaged -g onyx /var/lib/onyx/onyx-storaged
+         run install -d -m 0750 -o root -g onyx /etc/onyx
+         run install -d -m 0755 -o root -g onyx /etc/onyx/conf.d; }
+fi
+
+# --- 4. files ----------------------------------------------------------------
+say "installing binaries, units, tmpfiles to $DESTDIR$PREFIX"
+run install -d -m 0755 "$DESTDIR$LIB"
+run install -d -m 0755 "$DESTDIR$BINCLI"
+run install -d -m 0755 "$DESTDIR$UNITDIR"
+run install -d -m 0755 "$DESTDIR$TMPFILES"
+for b in onyx-privd onyx-storaged onyx-shared onyx-core onyx-api; do
+  run install -m 0755 "$BIN/$b" "$DESTDIR$LIB/$b"
+done
+run install -m 0755 "$BIN/onyx" "$DESTDIR$BINCLI/onyx"
+run install -m 0644 "$ROOT/deploy/tmpfiles.d/onyx.conf" "$DESTDIR$TMPFILES/onyx.conf"
+for u in "${UNITS[@]}"; do
+  run install -m 0644 "$ROOT/deploy/systemd/$u.service" "$DESTDIR$UNITDIR/$u.service"
+done
+
+# --- 5. optional daemon packages ---------------------------------------------
+if [ "$INSTALL_DEPS" = 1 ] && [ -z "$DESTDIR" ]; then
+  say "installing optional daemon packages (samba, nfs, smartmontools, btrfs-progs)"
+  run apt-get update
+  run apt-get install -y samba nfs-kernel-server smartmontools btrfs-progs
+fi
+
+# --- 6. enable + start --------------------------------------------------------
+if [ -z "$DESTDIR" ] && [ "$DRY_RUN" = 0 ]; then
+  say "enabling and starting the onyx stack"
+  run systemctl daemon-reload
+  run systemctl enable onyx-privd onyx-storaged onyx-shared onyx-core onyx-api
+  run systemctl start onyx-privd onyx-storaged onyx-shared onyx-core onyx-api
+  sleep 1
+  echo
+  echo "onyx installed. CLI:"
+  echo "  $BINCLI/onyx status"
+  echo
+  echo "Optional daemon packages were not installed (samba, nfs-kernel-server,"
+  echo "smartmontools, btrfs-progs). Shares save to /etc/onyx/conf.d and reload"
+  echo "is attempted through privd; those daemons need to exist for serving."
+  echo "Re-run: sudo scripts/onyx-install --install-deps"
+elif [ "$DRY_RUN" = 1 ]; then
+  say "dry run complete (nothing changed)"
+else
+  say "staged under $DESTDIR (no users, no systemctl)"
+  find "$DESTDIR$PREFIX" -type f | sort | sed 's/^/  /'
+fi

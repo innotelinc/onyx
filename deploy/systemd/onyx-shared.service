@@ -1,0 +1,25 @@
+# onyx-shared — the Go share manager: renders smb.conf fragments and NFS
+# exports from the logical share model. Stateless (no own state dir); onyx-core
+# asks it for rendered config and pushes the result through onyx-privd.
+[Unit]
+Description=Onyx share config renderer
+# See docs/design/05#6-share-model.
+After=local-fs.target
+
+[Service]
+Type=simple
+User=onyx-shared
+Group=onyx
+SupplementaryGroups=onyx
+ExecStart=/usr/local/lib/onyx/onyx-shared --socket-dir /run/onyx
+Restart=always
+RestartSec=2
+UMask=0002
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/onyx
+
+[Install]
+WantedBy=multi-user.target

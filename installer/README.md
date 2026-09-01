@@ -9,9 +9,14 @@ Installation targets and flows are specced in
 2. **SBC images** — prebuilt SD/eMMC images (RPi 5, RK3588 boards).
 3. **ISO** — for x86 mini-PCs.
 
-**Status at v0.1: skeleton.** The installer's job doesn't exist yet because the
-OSTree base (`../base/`) doesn't exist yet. Design decisions that will matter
-when this is built (from doc 10):
+**Status at v0.1: script installer shipped, image builders still stubs.** The
+script installer ([`scripts/onyx-install`](../scripts/onyx-install)) turns an
+existing Debian-family host into an Onyx box: it builds, creates the
+unprivileged service users + runtime dirs, installs the binaries, systemd
+units and tmpfiles, and enables/starts the stack. What does not exist yet is
+the OSTree base (`../base/`) — the target-disk wiping, A/B image layout and
+bootloader install — because that base image doesn't exist yet.
+Design decisions that will matter when the image builders are built (from doc 10):
 
 - System on a small separate disk/SD; data pool on the big disk(s), Btrfs.
 - A/B system partitions with an atomic `ostree` root and automatic rollback on
