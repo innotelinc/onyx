@@ -18,7 +18,10 @@ export PATH       := $(TOOLS)/bin:$(TOOLS)/protoc/bin:$(PATH)
 # tonic-build (services/storaged/build.rs) uses PROTOC to find protoc.
 export PROTOC     := $(TOOLS)/protoc/bin/protoc
 
-.PHONY: bootstrap gen build check vet test dev clean
+PREFIX ?= /usr/local
+DESTDIR ?=
+
+.PHONY: bootstrap gen build check vet test dev install clean
 
 ## bootstrap — download repo-local Go + protoc toolchains and codegen plugins
 bootstrap:
@@ -61,6 +64,12 @@ test:
 dev: build
 	@bash scripts/dev.sh start
 
-## clean — remove build artifacts and dev state (keeps .tools/)
+## install — build and install the full stack as systemd services
+## (users, dirs, units; see scripts/onyx-install --help). Use DESTDIR to stage
+## files only, e.g.: make install DESTDIR=/tmp/stage
+install: build
+	@bash scripts/onyx-install --prefix $(PREFIX) $(if $(DESTDIR),--destdir $(DESTDIR))
+
+## clean — remove build artifacts, dev state and staged installs (keeps .tools/)
 clean:
 	rm -rf $(BIN) services/storaged/target services/privd/target .run

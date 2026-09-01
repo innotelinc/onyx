@@ -1,0 +1,30 @@
+# onyx-core — the Go control plane: share CRUD, the hotplug share reconciler,
+# and the config applier that renders the full smb.conf/exports via onyx-shared
+# and writes/reloads them through onyx-privd. State lives in its own SQLite DB.
+#
+# Requires the data plane (storaged) for device/pool calls, shared for config
+# rendering, and privd for config writes/reloads; ordering + restart keep the
+# chain alive across daemon crashes.
+[Unit]
+Description=Onyx control plane
+# See docs/design/04-backend-service-architecture.md.
+Requires=onyx-storaged.service onyx-shared.service onyx-privd.service
+After=onyx-storaged.service onyx-shared.service onyx-privd.service
+
+[Service]
+Type=simple
+User=onyx-core
+Group=onyx
+SupplementaryGroups=onyx
+ExecStart=/usr/local/lib/onyx/onyx-core --socket-dir /run/onyx --state-dir /var/lib/onyx/core
+Restart=always
+RestartSec=2
+UMask=0002
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/onyx/core /run/onyx
+
+[Install]
+WantedBy=multi-user.target

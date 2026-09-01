@@ -1,0 +1,26 @@
+# onyx-api — the Go HTTP gateway: REST + SSE, bound to loopback by default so
+# nothing is exposed to the network until the user chooses otherwise
+# (docs/design/07 security: no services on the wire by default).
+[Unit]
+Description=Onyx HTTP gateway
+# See docs/design/06-api-specification.md.
+Requires=onyx-core.service
+After=onyx-core.service
+
+[Service]
+Type=simple
+User=onyx-api
+Group=onyx
+SupplementaryGroups=onyx
+ExecStart=/usr/local/lib/onyx/onyx-api --listen 127.0.0.1:8080 --socket-dir /run/onyx
+Restart=always
+RestartSec=2
+UMask=0002
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/onyx
+
+[Install]
+WantedBy=multi-user.target

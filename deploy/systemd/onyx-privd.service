@@ -1,0 +1,26 @@
+# onyx-privd — the single root process (docs/design/04#7-privilege-helper).
+#
+# Everything privileged on the system flows through this allowlisted service:
+# btrfs/lsblk probing, mount/umount under /mnt/onyx, smartctl, and atomic
+# writes + validated reloads of the generated smb.conf/exports. It must run as
+# root; every other onyx service is unprivileged. The /run/onyx directory is
+# 2770 root:onyx (see deploy/tmpfiles.d) so sockets land group-owned and only
+# onyx members can reach them.
+[Unit]
+Description=Onyx privilege helper (root)
+# See docs/design/04#7-privilege-helper.
+RequiresMountsFor=/run/onyx /mnt/onyx
+After=local-fs.target
+
+[Service]
+Type=simple
+# Config dir /etc/onyx/conf.d and allowed mount root /mnt/onyx are the
+# defaults; only --config-dir is called out so the intent is explicit.
+ExecStart=/usr/local/lib/onyx/onyx-privd --socket-dir /run/onyx --config-dir /etc/onyx/conf.d
+Restart=always
+RestartSec=2
+UMask=0002
+# Root by design — this is the privilege boundary, not a sandbox.
+
+[Install]
+WantedBy=multi-user.target

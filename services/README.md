@@ -33,6 +33,13 @@ Small, single-purpose daemons (docs/design/04#1-service-inventory). Each service
 | `onyx-bus` | Go | v0.2 |
 | `onyx-privd` | Rust | v0.2 (first privileged op) |
 
+## Running as a system
+
+Each service has a systemd unit in [`deploy/systemd/`](../deploy/systemd/) plus
+a tmpfiles snippet for the runtime paths; the units chain privd →
+storaged/shared → core → api and are installed by
+[`scripts/onyx-install`](../scripts/onyx-install) (or `make install`).
+
 ## Local development
 
 ```bash

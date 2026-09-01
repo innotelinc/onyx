@@ -1,0 +1,27 @@
+# onyx-storaged — the Rust data plane: Btrfs pool registry, hotplug watcher
+# (kernel uevent netlink + periodic lsblk scan), SMART health sweep, device
+# audit trail. All privileged steps run through onyx-privd on the same socket
+# dir, which is in group onyx so the sockets are reachable.
+[Unit]
+Description=Onyx storage data plane
+# See docs/design/05-storage-subsystem.md.
+Requires=onyx-privd.service
+After=onyx-privd.service local-fs.target
+
+[Service]
+Type=simple
+User=onyx-storaged
+Group=onyx
+SupplementaryGroups=onyx
+ExecStart=/usr/local/lib/onyx/onyx-storaged --socket-dir /run/onyx --state-dir /var/lib/onyx/onyx-storaged --mount-root /mnt/onyx
+Restart=always
+RestartSec=2
+UMask=0002
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/onyx/onyx-storaged /run/onyx
+
+[Install]
+WantedBy=multi-user.target
