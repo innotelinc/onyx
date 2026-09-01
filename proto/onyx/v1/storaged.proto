@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package onyx.v1;
+
+option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+
+// Storaged owns pools, datasets, quotas and scrub
+// (docs/design/05-storage-subsystem.md). Data plane: no network listeners;
+// it is only reachable over local unix sockets from the control plane.
+service Storaged {
+  rpc ListPools(ListPoolsRequest) returns (ListPoolsResponse);
+  rpc GetPool(GetPoolRequest) returns (Pool);
+}
+
+message ListPoolsRequest {}
+
+message ListPoolsResponse {
+  repeated Pool pools = 1;
+}
+
+message GetPoolRequest {
+  string name = 1;
+}
+
+message Pool {
+  string name = 1;
+  string uuid = 2;
+  // "btrfs" (default) or "ext4".
+  string fs_type = 3;
+  uint64 total_bytes = 4;
+  uint64 used_bytes = 5;
+  // online | degraded | offline.
+  string state = 6;
+}

@@ -1,0 +1,28 @@
+[package]
+name = "onyx-storaged"
+version = "0.1.0"
+edition = "2021"
+description = "Onyx data plane: pools, datasets, quotas, scrub (docs/design/05). No network listeners; reachable only over local unix sockets."
+
+[[bin]]
+name = "onyx-storaged"
+path = "src/main.rs"
+
+[dependencies]
+tonic = "0.14.6"
+tonic-prost = "0.14.6"
+prost = "0.14.4"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+tower = { version = "0.5", features = ["util"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[build-dependencies]
+tonic-prost-build = "0.14.6"
+
+[profile.release]
+lto = "thin"
+strip = true

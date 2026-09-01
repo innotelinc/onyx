@@ -1,0 +1,13 @@
+# Repo-local toolchain (see scripts/bootstrap-tools.sh)
+.tools/
+
+# Build artifacts
+bin/
+services/*/target/
+
+# Dev runtime state (sockets, state dirs, logs)
+.run/
+
+# Go caches (kept under .tools/)
+*.swp
+.DS_Store

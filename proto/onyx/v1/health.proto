@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package onyx.v1;
+
+option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+
+// Health is implemented by every service (docs/design/04-backend-service-architecture.md#8-observability).
+// onyx-agent aggregates these into the status pill and Health card.
+service Health {
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message HealthCheckRequest {
+  // Optional: the service the caller is asking about. Empty = self.
+  string service = 1;
+}
+
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN = 0;
+    SERVING = 1;
+    NOT_SERVING = 2;
+  }
+
+  ServingStatus status = 1;
+  // Service build version (e.g. "0.1.0-dev").
+  string version = 2;
+}

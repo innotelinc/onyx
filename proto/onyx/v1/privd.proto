@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package onyx.v1;
+
+option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+
+// Privd is the privilege helper (docs/design/04-backend-service-architecture.md#7-privilege-helper).
+// It is the single root process on the system and executes a strict allowlist
+// of structured operations — never arbitrary commands, never a shell.
+// Reachable only over a local unix socket from other services.
+service Privd {
+  // Run executes one allowlisted operation with per-op argument validation.
+  rpc Run(PrivRequest) returns (PrivResponse);
+}
+
+// The closed set of operations privd knows how to execute.
+enum PrivOp {
+  PRIV_OP_UNSPECIFIED = 0;
+
+  // `btrfs filesystem show --raw` — enumerate every Btrfs filesystem on the
+  // host. No arguments. Raw byte sizes, no units.
+  BTRFS_FILESYSTEM_SHOW_RAW = 1;
+
+  // `btrfs filesystem usage -b <mountpoint>` — usage stats for one mounted
+  // pool. The single argument must be an existing path under /mnt/onyx/.
+  BTRFS_FILESYSTEM_USAGE_RAW = 2;
+}
+
+message PrivRequest {
+  PrivOp op = 1;
+  // Positional arguments; validated per-op before execution.
+  repeated string args = 2;
+}
+
+message PrivResponse {
+  // Process exit code. 0 on success; non-zero on failure.
+  int32 exit_code = 1;
+  bytes stdout = 2;
+  bytes stderr = 3;
+}

@@ -1,0 +1,25 @@
+[package]
+name = "onyx-privd"
+version = "0.1.0"
+edition = "2021"
+description = "Onyx privilege helper (docs/design/04#7): allowlisted structured commands executed as root. No shell, ever."
+
+[[bin]]
+name = "onyx-privd"
+path = "src/main.rs"
+
+[dependencies]
+tonic = "0.14.6"
+tonic-prost = "0.14.6"
+prost = "0.14.4"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "process", "time", "signal"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[build-dependencies]
+tonic-prost-build = "0.14.6"
+
+[profile.release]
+lto = "thin"
+strip = true
