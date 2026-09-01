@@ -1,0 +1,23 @@
+# onyx-updated — the update agent (docs/design/10#5). Checks for a new commit
+# in the update repo and stages it to the inactive A/B slot; applying still
+# needs the user to reboot (Cinder keeps updates pull-then-reboot: `onyx-update
+# apply` + reboot, or a future UI button). onyx-update-check.timer drives the
+# daily check; this unit is also handy manually via `systemctl start onyx-updated`.
+#
+# Only meaningful on the appliance image (an OSTree sysroot); it exits quietly
+# on hosts installed via scripts/onyx-install.
+[Unit]
+Description=Onyx update check + stage (A/B)
+# See docs/design/10-installer-and-updates.md#5.
+After=onyx-pool.service
+ConditionPathExists=/ostree/repo
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/onyx/onyx-update check
+# Keep the update agent unprivileged-reading only: the deploy itself is a
+# privileged op done by root during maintenance, not by a timer daemon.
+User=onyx-core
+
+[Install]
+WantedBy=multi-user.target

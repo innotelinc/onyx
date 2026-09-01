@@ -1,0 +1,21 @@
+# onyx-bootcheck — the boot health gate that makes A/B rollback automatic
+# (docs/design/10#5-health-gate). Starts after the API is up; onyx-bootcheck
+# verifies the full stack and, on repeated failure, reboots so the bootloader's
+# boot counting falls back to the previous deployment.
+#
+# It deliberately does NOT RequiredBy= the stack: a failed gate must be able to
+# run even when the stack is half-dead (that is the point).
+[Unit]
+Description=Onyx boot health check (A/B rollback gate)
+# See docs/design/10-installer-and-updates.md#5.
+After=onyx-api.service
+Wants=onyx-api.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/onyx/onyx-bootcheck
+# The gate may reboot; give it room to retry health checks before that.
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

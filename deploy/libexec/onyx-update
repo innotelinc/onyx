@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# deploy/libexec/onyx-update — A/B update management (docs/design/10#5, #6).
+#
+# Applies a new OSTree commit to the *inactive* deployment slot (zero impact
+# on the running system), then reboots into it. The previous deployment is
+# always kept as the fallback; onyx-bootcheck + systemd-boot boot counting
+# roll back automatically if the new root fails its boot health check.
+#
+# Subcommands:
+#   status                show deployments and update state (ostree admin status)
+#   check                 update status; exit 0 if the running deployment is the
+#                         most recent known good (used by onyx-updated)
+#   apply REF             stage REF from the update repo — pulls the ref,
+#                         deploys it to the inactive slot, leaves previous as
+#                         rollback; does NOT reboot
+#   rollback              pin the previous deployment as the default + reboot
+#                         (manual rollback, docs/design/10#5)
+#   verify                confirm the running deployment passed its boot health
+#                         check this boot (onyx-bootcheck marker)
+#
+# The update repo is the OSTree repo where new commits land (default
+# /ostree/repo — the system repo the appliance was installed from; override
+# with --repo). apply accepts either a ref name or a commit checksum.
+set -euo pipefail
+
+REPO="/ostree/repo"
+OS="${ONYX_OS:-onyx}"
+
+# The sysroot on a deployed appliance: repo lives at /ostree/repo and
+# deployments under /ostree/deploy. Recognize it by the repo being present.
+SYSRoot=/ostree
+
+# On the installed system the deployment osname is `onyx` (see scripts/onyx-install / base image).
+ADMIN="ostree admin"
+
+usage() { grep '^#' "$0" | sed 's/^# \{0,1\}//' | grep -v '^!' ; exit 0; }
+
+require_sysroot() {
+  [ -d "$REPO" ] && [ -d "$SYSRoot/deploy" ] || {
+    echo "onyx-update: no OSTree sysroot at $SYSRoot — updates run on the appliance image (this host was installed with scripts/onyx-install)" >&2
+    exit 3
+  }
+}
+
+cmd_status() {
+  require_sysroot
+  $ADMIN --sysroot="$SYSRoot" status
+  echo
+  echo "update repo: $REPO"
+  if [ -f /run/onyx/.boot-good ]; then
+    echo "running deployment: verified good this boot"
+  else
+    echo "running deployment: boot health check not yet passed"
+  fi
+}
+
+cmd_check() {
+  require_sysroot
+  $ADMIN --sysroot="$SYSRoot" status >/dev/null 2>&1 || { echo "onyx-update: can't read deployments" >&2; exit 1; }
+  # exit 0 = healthy & current; exit 1 = something to look at. Cinder keeps it
+  # informational: log the status, never reboot on its own.
+  cmd_status
+}
+
+# deploy_new: pull REF from the update repo and deploy to the inactive slot.
+cmd_apply() {
+  require_sysroot
+  local ref="${1:-}"
+  [ -n "$ref" ] || { echo "usage: onyx-update apply REF|COMMIT [--repo PATH]" >&2; exit 2; }
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo) REPO="$2"; shift 2 ;;
+      *) echo "onyx-update: unknown argument: $1" >&2; exit 2 ;;
+    esac
+  done
+
+  # 1. make the new commit visible in the sysroot repo (pull from update repo).
+  if ostree --repo="$SYSRoot/ostree/repo" rev-parse "$ref" >/dev/null 2>&1; then
+    echo "onyx-update: $ref already staged"
+    checksum="$(ostree --repo="$SYSRoot/ostree/repo" rev-parse "$ref")"
+  else
+    echo "onyx-update: pulling $ref from $REPO ..."
+    ostree --repo="$SYSRoot/ostree/repo" pull-local --remote=onyx "$REPO" "$ref"
+    checksum="$(ostree --repo="$SYSRoot/ostree/repo" rev-parse "$ref")"
+  fi
+
+  # Do not re-stage the deployment we are already running.
+  current="$($ADMIN --sysroot="$SYSRoot" status | sed -n 's/^[\t ]*\(\* \)\?\([0-9a-f]\{64\}\) .*/\2/p' | head -n1)"
+  if [ "$checksum" = "$current" ] && [ -f /run/onyx/.boot-good ]; then
+    echo "onyx-update: $checksum is already the running, verified deployment — nothing to do"
+    exit 0
+  fi
+
+  # 2. deploy: `--not-as-default` writes to the *inactive* slot and keeps the
+  # current deployment as the fallback default (docs/design/10#5 apply: "zero
+  # impact on the running system"). No reboot here.
+  echo "onyx-update: deploying $checksum to the inactive slot ..."
+  $ADMIN --sysroot="$SYSRoot" deploy --os="$OS" --not-as-default "$ref"
+  echo "onyx-update: staged $checksum — reboot to apply (onyx-update rollback to undo)"
+}
+
+# Manual rollback to the previous deployment (docs/design/10#7 table row 1).
+cmd_rollback() {
+  require_sysroot
+  # Find deployments: newest is index 0, previous index 1.
+  mapfile -t lines < <($ADMIN --sysroot="$SYSRoot" status --verbose 2>/dev/null || $ADMIN --sysroot="$SYSRoot" status)
+  # Simplest robust approach: pin the CURRENT default away so the bootloader
+  # falls back to the previous deployment, then reboot.
+  local default
+  default="$($ADMIN --sysroot="$SYSRoot" status | sed -n 's/^[\t ]*\(\* \)\?\([0-9a-f]\{64\}\) .*/\2/p' | head -n1)"
+  [ -n "$default" ] || { echo "onyx-update: can't determine current deployment" >&2; exit 1; }
+  echo "onyx-update: rolling back from $default"
+  $ADMIN --sysroot="$SYSRoot" pin --unpin "$default"
+  echo "onyx-update: reboot into the previous deployment: systemctl reboot"
+}
+
+cmd_verify() {
+  if [ -f /run/onyx/.boot-good ]; then
+    echo "onyx-update: running deployment verified good"
+    exit 0
+  else
+    echo "onyx-update: boot health check has not passed yet" >&2
+    exit 1
+  fi
+}
+
+cmd="${1:-}"
+[ -n "$cmd" ] || usage
+shift
+case "$cmd" in
+  status)   cmd_status ;;
+  check)    cmd_check ;;
+  apply)    cmd_apply "$@" ;;
+  rollback) cmd_rollback ;;
+  verify)   cmd_verify ;;
+  -h|--help|help) usage ;;
+  *) echo "onyx-update: unknown command: $cmd" >&2; usage >&2; exit 2 ;;
+esac

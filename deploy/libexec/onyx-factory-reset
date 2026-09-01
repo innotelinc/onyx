@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# deploy/libexec/onyx-factory-reset — factory reset for the Onyx appliance
+# (docs/design/10#7-factory-reset).
+#
+# Wipes the *system* partitions only: removes /etc/onyx state and the onyx
+# SQLite databases so the appliance boots fresh (first-boot wizard re-runs).
+# The data pool is untouched unless --erase-all is explicitly given.
+#
+#   onyx-factory-reset            interactive (asks, default no)
+#   onyx-factory-reset --yes      non-interactive, system-only reset
+#   onyx-factory-reset --yes --erase-all   also wipes the data pool
+#
+# After a system-only reset the appliance comes back as a fresh unit: admin
+# user is recreated by the first-boot wizard, but shares/snapshots on the
+# data pool are preserved (re-import with `onyx pool import`, docs/design/10#8).
+set -euo pipefail
+
+ERASE_ALL=0
+YES=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --erase-all) ERASE_ALL=1; shift ;;
+    --yes) YES=1; shift ;;
+    -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//' | grep -v '^!' ; exit 0 ;;
+    *) echo "onyx-factory-reset: unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+[ "$(id -u)" = 0 ] || { echo "onyx-factory-reset: needs root" >&2; exit 1; }
+
+warn() { printf '\033[1;31m!! %s\033[0m\n' "$*" >&2; }
+
+if [ "$ERASE_ALL" = 1 ]; then
+  warn "ERASE ALL: the data pool will be wiped too!"
+else
+  echo "This resets the Onyx system state (config + databases)."
+  echo "The data pool at /mnt/onyx is NOT touched."
+fi
+
+if [ "$YES" != 1 ]; then
+  read -r -p "Are you sure? Type 'yes': " ans
+  [ "$ans" = "yes" ] || { echo "aborted"; exit 1; }
+  if [ "$ERASE_ALL" = 1 ]; then
+    read -r -p "Really erase everything, including the pool? Type 'yes' again: " ans2
+    [ "$ans2" = "yes" ] || { echo "aborted"; exit 1; }
+  fi
+fi
+
+echo "== stopping onyx services =="
+systemctl stop onyx-api onyx-core onyx-shared onyx-storaged onyx-privd 2>/dev/null || true
+
+echo "== removing onyx system state =="
+rm -rf /etc/onyx /var/lib/onyx/core /var/lib/onyx/onyx-storaged /var/lib/onyx/*.db
+rm -f /var/lib/onyx/.firstboot-complete
+rm -rf /run/onyx
+systemd-tmpfiles --create onyx.conf 2>/dev/null || true
+
+if [ "$ERASE_ALL" = 1 ]; then
+  echo "== wiping data pool =="
+  for d in /mnt/onyx/@*; do
+    [ -e "$d" ] || continue
+    btrfs subvolume delete "$d" >/dev/null 2>&1 || rm -rf "$d"
+  done
+  if command -v onyx-pool >/dev/null 2>&1; then
+    dev="$(onyx-pool find 2>/dev/null || true)"
+    [ -n "$dev" ] && { umount /mnt/onyx/* 2>/dev/null || true; mkfs.btrfs -f "$dev" >/dev/null; }
+  fi
+fi
+
+echo "== done — fresh onyx on next boot (first-boot wizard will run) =="
+echo "reboot with: systemctl reboot"

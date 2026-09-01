@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# deploy/libexec/onyx-pool — bring up the Onyx data pool on boot and keep its
+# fixed subvolume layout present (docs/design/05#2).
+#
+# The pool is a Btrfs filesystem labelled ONYX_POOL_LABEL (default "onyx-pool",
+# overridable via the onyx.pool-label kernel cmdline or --label). On boot it is
+# discovered by label, mounted rw at /mnt/onyx/<pool>, and the standard system
+# subvolumes (@data @apps @backups @snapshots) are created if missing.
+#
+# Commands:
+#   onyx-pool mount     discover by label + mount + ensure layout (boot path)
+#   onyx-pool ensure    ensure the fixed subvolumes exist (idempotent; assumes
+#                       already mounted — used by the first-boot wizard)
+#   onyx-pool find      print the pool's block device path (blkid -L) or exit 1
+#
+# Safe to run any number of times; every step is idempotent. When no labelled
+# pool exists (fresh install before the wizard creates one) `mount` exits 0
+# quietly — the first-boot wizard or installer creates the pool.
+set -euo pipefail
+
+POOL_LABEL="${ONYX_POOL_LABEL:-onyx-pool}"
+
+# Kernel cmdline override: onyx.pool-label=NAME
+if [ -r /proc/cmdline ] && grep -qE '(^| )onyx\.pool-label=[^ ]+' /proc/cmdline; then
+  POOL_LABEL="$(sed -E 's/.* (onyx\.pool-label=[^ ]+).*/\1/; s/onyx\.pool-label=//' /proc/cmdline)"
+fi
+
+# A valid pool label: lowercase, short, no path chars — safe in a mountpath.
+[ "${#POOL_LABEL}" -le 32 ] || POOL_LABEL=onyx-pool
+POOL_LABEL="${POOL_LABEL//\//-}"
+POOL_NAME="${POOL_LABEL#onyx-}"
+[ -n "$POOL_NAME" ] || POOL_NAME=pool
+
+MNT="/mnt/onyx/$POOL_NAME"
+SUBVOLS=(@data @apps @backups @snapshots)
+
+# find_dev: print the block device carrying POOL_LABEL (by label), else exit 1.
+find_dev() {
+  local dev
+  dev="$(blkid -L "$POOL_LABEL" 2>/dev/null | head -n1 || true)"
+  [ -n "$dev" ] || return 1
+  echo "$dev"
+}
+
+# ensure_layout: create the fixed subvolumes under $MNT if absent.
+ensure_layout() {
+  [ -d "$MNT" ] || { echo "onyx-pool: $MNT is not mounted" >&2; return 1; }
+  for v in "${SUBVOLS[@]}"; do
+    if [ ! -d "$MNT/$v" ]; then
+      echo "onyx-pool: creating subvolume $v"
+      btrfs subvolume create "$MNT/$v" >/dev/null
+    fi
+  done
+}
+
+cmd_mount() {
+  local dev=""
+  dev="$(find_dev || true)"
+  if [ -z "$dev" ]; then
+    echo "onyx-pool: no device labelled $POOL_LABEL — nothing to mount"
+    exit 0
+  fi
+  if findmnt -rn -o TARGET "$MNT" >/dev/null 2>&1; then
+    echo "onyx-pool: $MNT already mounted"
+  else
+    echo "onyx-pool: mounting $dev ($POOL_LABEL) at $MNT"
+    mkdir -p "$MNT"
+    mount -t btrfs -o defaults,noatime "$dev" "$MNT"
+  fi
+  ensure_layout
+}
+
+cmd_ensure() {
+  ensure_layout
+}
+
+cmd_find() {
+  local dev
+  if dev="$(find_dev)"; then echo "$dev"; else exit 1; fi
+}
+
+case "${1:-mount}" in
+  mount)  cmd_mount ;;
+  ensure) cmd_ensure ;;
+  find)   cmd_find ;;
+  *) echo "usage: $0 [mount|ensure|find]" >&2; exit 2 ;;
+esac
