@@ -32,10 +32,14 @@ API, security, user management, the app ecosystem, and installer/update design.
 
 ## Status
 
-**Phase: Design + v0.1/v0.2 scaffold.** The documents in `docs/design/` are the canonical
-spec. The skeleton is landing: `onyx-core` (Go control plane), `onyx-api` (HTTP gateway),
-`onyx-shared` (Go share manager), `onyx-storaged` + `onyx-privd` (Rust data plane), and the
-`onyx` CLI, wired together via gRPC over unix sockets with `proto/` as the source of truth.
+**Phase: v0.1 "Cinder" — first working copy.** The skeleton is complete and
+installable: `onyx-core` (Go control plane), `onyx-api` (HTTP gateway),
+`onyx-shared` (Go share manager), `onyx-storaged` + `onyx-privd` (Rust data
+plane), and the `onyx` CLI, wired together via gRPC over unix sockets
+(`proto/` as the source of truth), shipped as systemd services by
+[`scripts/onyx-install`](scripts/onyx-install). What remains for Cinder per
+[the roadmap](docs/design/01-product-vision.md#7-roadmap): the bootable
+OSTree base image (`base/`) and the installer's first-boot wizard.
 
 See the [roadmap](docs/design/01-product-vision.md#7-roadmap) for milestones after Cinder.
 
@@ -97,16 +101,51 @@ NFS via `exportfs -ra`. It is change-guarded: an unchanged share set rewrites no
 failed reload always retries. Run the demo with fake `testparm`/`systemctl`/`exportfs`
 bins to see the written files and reload log.
 
+## Installing on a real host (systemd)
+
+The same skeleton installs as proper systemd services — per-service unprivileged
+users, sockets in `/run/onyx`, state in `/var/lib/onyx/*`, generated daemon
+config in `/etc/onyx/conf.d` (see [`deploy/`](deploy/README.md) for the unit
+graph and runtime layout):
+
+```bash
+sudo scripts/onyx-install            # build → users → dirs → units → enable+start
+scripts/onyx-install --destdir /tmp/stage   # stage files only (packaging/tests)
+sudo scripts/onyx-install --uninstall       # stop, disable, remove
+```
+
+Only `onyx-privd` runs as root — it is the single privilege boundary; every
+other daemon is sandboxed (`NoNewPrivileges`, strict filesystem policy). The
+API gateway binds `127.0.0.1` by default, so **nothing is exposed to the
+network until you deliberately change it**. Optional serving daemons (samba,
+nfs-kernel-server, smartmontools, btrfs-progs) are the host's packages, not
+otyx's: `sudo scripts/onyx-install --install-deps` installs them, and
+thereafter every share create/delete writes the real `smb.conf`/`exports` and
+reloads the daemons via privd (validated with `testparm` first).
+
+```bash
+onyx status        # all five daemons SERVING
+onyx pool list     # Btrfs pools (via privd)
+onyx share create media /mnt/onyx/pool1/@data/media --smb --nfs
+```
+
+## License
+
+Onyx is dual-licensed per the design (docs/design/01 §8): the core OS
+(root `LICENSE`) is **AGPL-3.0**; the SDK under `sdk/` (`sdk/LICENSE`) is
+**Apache-2.0**.
+
 ## Repo layout
 
 ```
 base/          OSTree image definition (stub)
+deploy/        systemd units + tmpfiles for the running system
 services/      onyx-api, onyx-core, onyx-shared (Go) · onyx-storaged, onyx-privd (Rust)
 proto/         gRPC contracts (source of truth) + generated stubs
 web/           Prism design system + React SPA (planned, v0.2)
-sdk/           onyx-sdk Go client + onyx CLI (TS client planned)
-installer/     ISO, SBC images, script installer (stub)
-scripts/       bootstrap + local dev runner
+sdk/           onyx-sdk Go client + onyx CLI, Apache-2.0 (TS client planned)
+installer/     ISO + SBC image design; the script installer lives in scripts/
+scripts/       bootstrap, local dev runner, onyx-install
 .tools/        repo-local toolchain (git-ignored)
 docs/          design docs, RFCs
 ```
