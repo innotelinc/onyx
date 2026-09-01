@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -125,6 +126,12 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("POST /api/v1/shares", s.handleCreateShare)
 	mux.HandleFunc("GET /api/v1/shares/{name}", s.handleShare)
 	mux.HandleFunc("DELETE /api/v1/shares/{name}", s.handleDeleteShare)
+	mux.HandleFunc("GET /api/v1/devices", s.handleDevices)
+	mux.HandleFunc("GET /api/v1/devices/{name}", s.handleDevice)
+	mux.HandleFunc("POST /api/v1/devices/{name}/attach", s.handleDeviceAttach)
+	mux.HandleFunc("POST /api/v1/devices/{name}/detach", s.handleDeviceDetach)
+	mux.HandleFunc("GET /api/v1/events", s.handleEvents)
+	mux.HandleFunc("GET /api/v1/events/stream", s.handleEventsStream)
 	s.mux = mux
 }
 
@@ -259,6 +266,132 @@ func (s *server) handlePool(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, protoMessage(resp))
 }
 
+// --- devices ---
+
+// handleDevices serves GET /api/v1/devices — every block device the data
+// plane has spotted, including mounted hotplug drives and recent removals.
+func (s *server) handleDevices(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	resp, err := s.core.ListDevices(ctx, &onyxv1.ListDevicesRequest{})
+	if err != nil {
+		s.writeGRPCError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, protoMessage(resp))
+}
+
+func (s *server) handleDevice(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	resp, err := s.core.GetDevice(ctx, &onyxv1.GetDeviceRequest{Name: r.PathValue("name")})
+	if err != nil {
+		s.writeGRPCError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, protoMessage(resp))
+}
+
+// handleDeviceAttach mounts the device and exposes it as a share. storaged's
+// failed_precondition maps to 409-conflict territory; not_found to 404.
+func (s *server) handleDeviceAttach(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	resp, err := s.core.MountDevice(ctx, &onyxv1.MountDeviceRequest{Name: r.PathValue("name")})
+	if err != nil {
+		s.writeGRPCError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, protoMessage(resp))
+}
+
+func (s *server) handleDeviceDetach(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	resp, err := s.core.UnmountDevice(ctx, &onyxv1.UnmountDeviceRequest{Name: r.PathValue("name")})
+	if err != nil {
+		s.writeGRPCError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, protoMessage(resp))
+}
+
+// --- events (audit trail + SSE live stream) ---
+
+// handleEvents serves GET /api/v1/events — the device audit trail. Query
+// params: limit (default 100), after_id (page forward from an event id),
+// kname (filter to one device).
+func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	req := &onyxv1.ListEventsRequest{}
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.ParseUint(v, 10, 32)
+		if err != nil {
+			writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "limit must be a number"})
+			return
+		}
+		req.Limit = uint32(n)
+	}
+	if v := r.URL.Query().Get("after_id"); v != "" {
+		n, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "after_id must be a number"})
+			return
+		}
+		req.AfterId = n
+	}
+	req.Kname = r.URL.Query().Get("kname")
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	resp, err := s.core.ListEvents(ctx, req)
+	if err != nil {
+		s.writeGRPCError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, protoMessage(resp))
+}
+
+// handleEventsStream serves GET /api/v1/events/stream — Server-Sent Events
+// (text/event-stream) tailing the live device event stream from
+// onyx-storaged via onyx-core. One gRPC upstream per HTTP connection; when
+// the client disconnects, the request context cancels the whole chain.
+func (s *server) handleEventsStream(w http.ResponseWriter, r *http.Request) {
+	fl, ok := w.(http.Flusher)
+	if !ok {
+		writeEnvelope(w, http.StatusInternalServerError, apiError{Code: "internal", Message: "streaming unsupported by this connection"})
+		return
+	}
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	stream, err := s.core.WatchDevices(ctx, &onyxv1.WatchDevicesRequest{})
+	if err != nil {
+		s.writeGRPCError(w, r, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	// Flush an initial comment so buffering proxies release the headers now.
+	fmt.Fprint(w, ": connected\n\n")
+	fl.Flush()
+
+	for {
+		ev, err := stream.Recv()
+		if err != nil {
+			return // client gone (ctx cancelled) or upstream closed; both are terminal
+		}
+		b, err := protojson.Marshal(ev)
+		if err != nil {
+			slog.Warn("events stream: marshal", "error", err)
+			continue
+		}
+		fmt.Fprintf(w, "data: %s\n\n", b)
+		fl.Flush()
+	}
+}
+
 // writeGRPCError maps a gRPC status to the HTTP error envelope
 // (docs/design/06#2-error-model).
 func (s *server) writeGRPCError(w http.ResponseWriter, r *http.Request, err error) {
@@ -282,6 +415,8 @@ func (s *server) writeGRPCError(w http.ResponseWriter, r *http.Request, err erro
 		code, httpStatus = "unauthenticated", http.StatusUnauthorized
 	case codes.AlreadyExists:
 		code, httpStatus = "already_exists", http.StatusConflict
+	case codes.FailedPrecondition:
+		code, httpStatus = "failed_precondition", http.StatusConflict
 	}
 	writeEnvelope(w, httpStatus, apiError{
 		Code:      code,

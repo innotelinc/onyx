@@ -45,6 +45,10 @@ var migrations = []string{
 		protocols  TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL DEFAULT (datetime('now'))
 	);`,
+	// v3: shares gain an ownership marker. "manual" (default) = created by a
+	// user/CLI and never touched automatically; "device:<kname>" = created by
+	// the hotplug reconciler, which deletes exactly those on detach.
+	`ALTER TABLE shares ADD COLUMN source TEXT NOT NULL DEFAULT 'manual';`,
 }
 
 func migrate(db *sql.DB) error {

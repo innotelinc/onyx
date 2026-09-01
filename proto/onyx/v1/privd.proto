@@ -24,6 +24,38 @@ enum PrivOp {
   // `btrfs filesystem usage -b <mountpoint>` — usage stats for one mounted
   // pool. The single argument must be an existing path under /mnt/onyx/.
   BTRFS_FILESYSTEM_USAGE_RAW = 2;
+
+  // `lsblk -n -P -b -o KNAME,TYPE,FSTYPE,LABEL,UUID,SIZE,MOUNTPOINT` —
+  // enumerate every block device with filesystem+label+uuid info. No
+  // arguments; scanning is unprivileged but probing filesystems over /dev
+  // needs root, so it runs inside privd.
+  LSBLK_RAW = 3;
+
+  // `mount <device> <mountpoint>` — attach one validated device at one
+  // validated mountpoint under /mnt/onyx/. Creates the mountpoint directory.
+  // The device argument must be an existing block device under /dev/; the
+  // mountpoint must resolve inside /mnt/onyx/.
+  MOUNT_BLOCK = 4;
+
+  // `umount <mountpoint>` — detach one device mounted under /mnt/onyx/.
+  // Safe to call after an unplug (the kernel keeps the mount alive).
+  UNMOUNT_BLOCK = 5;
+
+  // `smartctl -H -A <device>` — SMART health + attributes (temperature).
+  // The single argument must be a validated block device under /dev/.
+  SMART_INFO_RAW = 6;
+
+  // `write <target> <content>` — atomically write one generated daemon
+  // config (docs/design/04#4, conf.d). target is "smb" (smb.conf) or "nfs"
+  // (exports); the full file content travels as the second argument and is
+  // size-capped. The path is fixed by the target — callers never pass a path.
+  WRITE_DAEMON_CONFIG = 7;
+
+  // `reload <targets...>` — validate and reload daemons after a config write
+  // (docs/design/02#6 step 4). "smb": `testparm -s <smb.conf>` first, then
+  // `systemctl reload smbd`. "nfs": `exportfs -ra`. Fails closed: no reload
+  // unless validation passes.
+  RELOAD_DAEMONS = 8;
 }
 
 message PrivRequest {

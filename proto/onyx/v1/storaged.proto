@@ -10,6 +10,17 @@ option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
 service Storaged {
   rpc ListPools(ListPoolsRequest) returns (ListPoolsResponse);
   rpc GetPool(GetPoolRequest) returns (Pool);
+  rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
+  rpc GetDevice(GetDeviceRequest) returns (Device);
+  rpc MountDevice(MountDeviceRequest) returns (Device);
+  rpc UnmountDevice(UnmountDeviceRequest) returns (Device);
+
+  // ListEvents returns the device audit trail (attach/detach/health/error),
+  // newest-first unless after_id is given (then oldest-first from that id).
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
+
+  // WatchDevices streams hotplug + health events as they happen.
+  rpc WatchDevices(WatchDevicesRequest) returns (stream DeviceEvent);
 }
 
 message ListPoolsRequest {}
@@ -32,3 +43,92 @@ message Pool {
   // online | degraded | offline.
   string state = 6;
 }
+
+// A block device (disk or partition) the data plane has detected
+// (docs/design/05#7-disk-management). Devices are discovered by watching
+// /sys/class/block plus `lsblk` (run inside onyx-privd); the scanner mounts
+// hotplugged removable devices automatically so they are usable immediately.
+// Devices stay listed after removal so the UI can show what disappeared.
+message Device {
+  // Stable id used for shares and the API: label slug, else short UUID,
+  // else kernel name (e.g. "usb-data", "aabbccdd", "sdb1").
+  string name = 1;
+  // Kernel name, e.g. "sdb1". The registry key.
+  string kname = 2;
+  // /dev path, e.g. "/dev/sdb1".
+  string path = 3;
+  // disk | part | rom | ...
+  string type = 4;
+  // Filesystem type, e.g. "vfat", "ext4"; empty when unformatted.
+  string fs_type = 5;
+  // Volume label; empty when unlabeled.
+  string label = 6;
+  // Filesystem UUID; empty when unknown.
+  string uuid = 7;
+  uint64 size_bytes = 8;
+  // Mountpoint under /mnt/onyx when onyx mounted it; unchanged otherwise.
+  string mountpoint = 9;
+  // True when the whole disk is a removable device (USB, SD card, ...).
+  bool removable = 10;
+  // Present when the device is attached. "detached" entries persist briefly
+  // so the UI/API can surface a removal.
+  string state = 11;
+  // Why onyx attaches it: "removable" (auto-mounted hotplug), "all"
+  // (--auto-attach=all), or "manual" (user requested, or pinned by
+  // `onyx device detach` until an explicit re-attach).
+  string auto = 12;
+  // Drive health as last checked by the SMART sweep: ok | degraded |
+  // unknown (unsupported device, or not yet checked).
+  string health_status = 13;
+  // SMART temperature in °C; 0 when unknown.
+  uint32 temperature_c = 14;
+}
+
+// One entry of the device audit trail (docs/design/04#8-observability).
+// Events are appended by storaged as they are observed: attach (mounted,
+// detail = mountpoint), detach (detail = unplugged, or "detached (auto off)"
+// for a manual detach), health (detail like "ok temp=38C"), error (attach
+// failures).
+message DeviceEvent {
+  // Monotonic id; feed this back to ListEvents after_id to page the trail.
+  uint64 id = 1;
+  // UTC timestamp, "YYYY-MM-DD HH:MM:SS".
+  string ts = 2;
+  string kname = 3;
+  string name = 4;
+  string event = 5;
+  string detail = 6;
+}
+
+message ListDevicesRequest {}
+
+message ListDevicesResponse {
+  repeated Device devices = 1;
+}
+
+message GetDeviceRequest {
+  string name = 1;
+}
+
+message MountDeviceRequest {
+  string name = 1;
+}
+
+message UnmountDeviceRequest {
+  string name = 1;
+}
+
+message ListEventsRequest {
+  // 0 = default (100).
+  uint32 limit = 1;
+  // When > 0, return events with id > after_id (oldest-first, for paging).
+  uint64 after_id = 2;
+  // Optional: filter to one device kname.
+  string kname = 3;
+}
+
+message ListEventsResponse {
+  repeated DeviceEvent events = 1;
+}
+
+message WatchDevicesRequest {}

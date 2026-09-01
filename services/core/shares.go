@@ -91,11 +91,12 @@ func (s *server) CreateShare(ctx context.Context, req *onyxv1.CreateShareRequest
 	if err != nil {
 		return nil, err
 	}
-	// Best-effort: generate the daemon config via onyx-shared. On failure the
-	// share still exists (intent recorded); reconciliation will retry later.
-	if s.shared != nil {
-		if _, err := s.shared.RenderConfig(ctx, &onyxv1.RenderConfigRequest{Share: share}); err != nil {
-			slogWarn("render config for share", "share", req.Name, "error", err)
+	// Sync the daemon config: render -> write -> reload through privd
+	// (docs/design/02#6 steps 3-4). On failure the share still exists (intent
+	// recorded); the reconciler's periodic apply retries.
+	if s.config != nil {
+		if err := s.config.apply(ctx); err != nil {
+			slogWarn("apply daemon config after create", "share", req.Name, "error", err)
 		}
 	}
 	return share, nil
@@ -143,6 +144,13 @@ func (s *server) DeleteShare(ctx context.Context, req *onyxv1.DeleteShareRequest
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return nil, status.Errorf(codes.NotFound, "share %q does not exist", req.Name)
+	}
+	// The share is gone: rewrite smb.conf/exports and reload so the removed
+	// share stops being served (change-guarded, so no-ops if unrelated).
+	if s.config != nil {
+		if err := s.config.apply(ctx); err != nil {
+			slogWarn("apply daemon config after delete", "share", req.Name, "error", err)
+		}
 	}
 	return &onyxv1.DeleteShareResponse{}, nil
 }

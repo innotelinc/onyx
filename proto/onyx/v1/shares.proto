@@ -17,10 +17,16 @@ service CoreShares {
 }
 
 // Shared renders per-daemon configuration from a Share. It never touches
-// daemons itself; writing config and reloading goes through onyx-privd in a
-// later milestone (docs/design/02#6).
+// daemons itself; onyx-core writes the rendered config and reloads the
+// daemons through onyx-privd (docs/design/02#6 steps 3-4).
 service Shared {
   rpc RenderConfig(RenderConfigRequest) returns (RenderConfigResponse);
+  // RenderAll renders the complete daemon config files for the current share
+  // set (docs/design/02#6 step 3): a full smb.conf (global section + every
+  // share) and a full exports file. onyx-core feeds this straight to
+  // onyx-privd's WRITE_DAEMON_CONFIG, so reload sees exactly what the UI
+  // configures.
+  rpc RenderAll(RenderAllRequest) returns (RenderAllResponse);
 }
 
 enum ShareProtocol {
@@ -62,6 +68,17 @@ message DeleteShareRequest {
 }
 
 message DeleteShareResponse {}
+
+message RenderAllRequest {
+  repeated Share shares = 1;
+}
+
+message RenderAllResponse {
+  // Complete /etc/onyx/conf.d/smb.conf content.
+  string smb_conf = 1;
+  // Complete /etc/onyx/conf.d/exports content.
+  string nfs_exports = 2;
+}
 
 // --- onyx-shared ---
 

@@ -231,6 +231,623 @@ func (x *Pool) GetState() string {
 	return ""
 }
 
+// A block device (disk or partition) the data plane has detected
+// (docs/design/05#7-disk-management). Devices are discovered by watching
+// /sys/class/block plus `lsblk` (run inside onyx-privd); the scanner mounts
+// hotplugged removable devices automatically so they are usable immediately.
+// Devices stay listed after removal so the UI can show what disappeared.
+type Device struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Stable id used for shares and the API: label slug, else short UUID,
+	// else kernel name (e.g. "usb-data", "aabbccdd", "sdb1").
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Kernel name, e.g. "sdb1". The registry key.
+	Kname string `protobuf:"bytes,2,opt,name=kname,proto3" json:"kname,omitempty"`
+	// /dev path, e.g. "/dev/sdb1".
+	Path string `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
+	// disk | part | rom | ...
+	Type string `protobuf:"bytes,4,opt,name=type,proto3" json:"type,omitempty"`
+	// Filesystem type, e.g. "vfat", "ext4"; empty when unformatted.
+	FsType string `protobuf:"bytes,5,opt,name=fs_type,json=fsType,proto3" json:"fs_type,omitempty"`
+	// Volume label; empty when unlabeled.
+	Label string `protobuf:"bytes,6,opt,name=label,proto3" json:"label,omitempty"`
+	// Filesystem UUID; empty when unknown.
+	Uuid      string `protobuf:"bytes,7,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SizeBytes uint64 `protobuf:"varint,8,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	// Mountpoint under /mnt/onyx when onyx mounted it; unchanged otherwise.
+	Mountpoint string `protobuf:"bytes,9,opt,name=mountpoint,proto3" json:"mountpoint,omitempty"`
+	// True when the whole disk is a removable device (USB, SD card, ...).
+	Removable bool `protobuf:"varint,10,opt,name=removable,proto3" json:"removable,omitempty"`
+	// Present when the device is attached. "detached" entries persist briefly
+	// so the UI/API can surface a removal.
+	State string `protobuf:"bytes,11,opt,name=state,proto3" json:"state,omitempty"`
+	// Why onyx attaches it: "removable" (auto-mounted hotplug), "all"
+	// (--auto-attach=all), or "manual" (user requested, or pinned by
+	// `onyx device detach` until an explicit re-attach).
+	Auto string `protobuf:"bytes,12,opt,name=auto,proto3" json:"auto,omitempty"`
+	// Drive health as last checked by the SMART sweep: ok | degraded |
+	// unknown (unsupported device, or not yet checked).
+	HealthStatus string `protobuf:"bytes,13,opt,name=health_status,json=healthStatus,proto3" json:"health_status,omitempty"`
+	// SMART temperature in °C; 0 when unknown.
+	TemperatureC  uint32 `protobuf:"varint,14,opt,name=temperature_c,json=temperatureC,proto3" json:"temperature_c,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Device) Reset() {
+	*x = Device{}
+	mi := &file_onyx_v1_storaged_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Device) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Device) ProtoMessage() {}
+
+func (x *Device) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_storaged_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Device.ProtoReflect.Descriptor instead.
+func (*Device) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *Device) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *Device) GetKname() string {
+	if x != nil {
+		return x.Kname
+	}
+	return ""
+}
+
+func (x *Device) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *Device) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *Device) GetFsType() string {
+	if x != nil {
+		return x.FsType
+	}
+	return ""
+}
+
+func (x *Device) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *Device) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *Device) GetSizeBytes() uint64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+func (x *Device) GetMountpoint() string {
+	if x != nil {
+		return x.Mountpoint
+	}
+	return ""
+}
+
+func (x *Device) GetRemovable() bool {
+	if x != nil {
+		return x.Removable
+	}
+	return false
+}
+
+func (x *Device) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *Device) GetAuto() string {
+	if x != nil {
+		return x.Auto
+	}
+	return ""
+}
+
+func (x *Device) GetHealthStatus() string {
+	if x != nil {
+		return x.HealthStatus
+	}
+	return ""
+}
+
+func (x *Device) GetTemperatureC() uint32 {
+	if x != nil {
+		return x.TemperatureC
+	}
+	return 0
+}
+
+// One entry of the device audit trail (docs/design/04#8-observability).
+// Events are appended by storaged as they are observed: attach (mounted,
+// detail = mountpoint), detach (detail = unplugged, or "detached (auto off)"
+// for a manual detach), health (detail like "ok temp=38C"), error (attach
+// failures).
+type DeviceEvent struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Monotonic id; feed this back to ListEvents after_id to page the trail.
+	Id uint64 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	// UTC timestamp, "YYYY-MM-DD HH:MM:SS".
+	Ts            string `protobuf:"bytes,2,opt,name=ts,proto3" json:"ts,omitempty"`
+	Kname         string `protobuf:"bytes,3,opt,name=kname,proto3" json:"kname,omitempty"`
+	Name          string `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	Event         string `protobuf:"bytes,5,opt,name=event,proto3" json:"event,omitempty"`
+	Detail        string `protobuf:"bytes,6,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeviceEvent) Reset() {
+	*x = DeviceEvent{}
+	mi := &file_onyx_v1_storaged_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeviceEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeviceEvent) ProtoMessage() {}
+
+func (x *DeviceEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_storaged_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeviceEvent.ProtoReflect.Descriptor instead.
+func (*DeviceEvent) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *DeviceEvent) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *DeviceEvent) GetTs() string {
+	if x != nil {
+		return x.Ts
+	}
+	return ""
+}
+
+func (x *DeviceEvent) GetKname() string {
+	if x != nil {
+		return x.Kname
+	}
+	return ""
+}
+
+func (x *DeviceEvent) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DeviceEvent) GetEvent() string {
+	if x != nil {
+		return x.Event
+	}
+	return ""
+}
+
+func (x *DeviceEvent) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+type ListDevicesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListDevicesRequest) Reset() {
+	*x = ListDevicesRequest{}
+	mi := &file_onyx_v1_storaged_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListDevicesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListDevicesRequest) ProtoMessage() {}
+
+func (x *ListDevicesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_storaged_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListDevicesRequest.ProtoReflect.Descriptor instead.
+func (*ListDevicesRequest) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{6}
+}
+
+type ListDevicesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Devices       []*Device              `protobuf:"bytes,1,rep,name=devices,proto3" json:"devices,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListDevicesResponse) Reset() {
+	*x = ListDevicesResponse{}
+	mi := &file_onyx_v1_storaged_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListDevicesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListDevicesResponse) ProtoMessage() {}
+
+func (x *ListDevicesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_storaged_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListDevicesResponse.ProtoReflect.Descriptor instead.
+func (*ListDevicesResponse) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ListDevicesResponse) GetDevices() []*Device {
+	if x != nil {
+		return x.Devices
+	}
+	return nil
+}
+
+type GetDeviceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetDeviceRequest) Reset() {
+	*x = GetDeviceRequest{}
+	mi := &file_onyx_v1_storaged_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetDeviceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetDeviceRequest) ProtoMessage() {}
+
+func (x *GetDeviceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_storaged_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetDeviceRequest.ProtoReflect.Descriptor instead.
+func (*GetDeviceRequest) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *GetDeviceRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type MountDeviceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MountDeviceRequest) Reset() {
+	*x = MountDeviceRequest{}
+	mi := &file_onyx_v1_storaged_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MountDeviceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MountDeviceRequest) ProtoMessage() {}
+
+func (x *MountDeviceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_storaged_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MountDeviceRequest.ProtoReflect.Descriptor instead.
+func (*MountDeviceRequest) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *MountDeviceRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type UnmountDeviceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnmountDeviceRequest) Reset() {
+	*x = UnmountDeviceRequest{}
+	mi := &file_onyx_v1_storaged_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnmountDeviceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnmountDeviceRequest) ProtoMessage() {}
+
+func (x *UnmountDeviceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_storaged_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnmountDeviceRequest.ProtoReflect.Descriptor instead.
+func (*UnmountDeviceRequest) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *UnmountDeviceRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type ListEventsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 0 = default (100).
+	Limit uint32 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	// When > 0, return events with id > after_id (oldest-first, for paging).
+	AfterId uint64 `protobuf:"varint,2,opt,name=after_id,json=afterId,proto3" json:"after_id,omitempty"`
+	// Optional: filter to one device kname.
+	Kname         string `protobuf:"bytes,3,opt,name=kname,proto3" json:"kname,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListEventsRequest) Reset() {
+	*x = ListEventsRequest{}
+	mi := &file_onyx_v1_storaged_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListEventsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListEventsRequest) ProtoMessage() {}
+
+func (x *ListEventsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_storaged_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListEventsRequest.ProtoReflect.Descriptor instead.
+func (*ListEventsRequest) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ListEventsRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListEventsRequest) GetAfterId() uint64 {
+	if x != nil {
+		return x.AfterId
+	}
+	return 0
+}
+
+func (x *ListEventsRequest) GetKname() string {
+	if x != nil {
+		return x.Kname
+	}
+	return ""
+}
+
+type ListEventsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Events        []*DeviceEvent         `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListEventsResponse) Reset() {
+	*x = ListEventsResponse{}
+	mi := &file_onyx_v1_storaged_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListEventsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListEventsResponse) ProtoMessage() {}
+
+func (x *ListEventsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_storaged_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListEventsResponse.ProtoReflect.Descriptor instead.
+func (*ListEventsResponse) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ListEventsResponse) GetEvents() []*DeviceEvent {
+	if x != nil {
+		return x.Events
+	}
+	return nil
+}
+
+type WatchDevicesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WatchDevicesRequest) Reset() {
+	*x = WatchDevicesRequest{}
+	mi := &file_onyx_v1_storaged_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WatchDevicesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WatchDevicesRequest) ProtoMessage() {}
+
+func (x *WatchDevicesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_storaged_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WatchDevicesRequest.ProtoReflect.Descriptor instead.
+func (*WatchDevicesRequest) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{13}
+}
+
 var File_onyx_v1_storaged_proto protoreflect.FileDescriptor
 
 const file_onyx_v1_storaged_proto_rawDesc = "" +
@@ -249,10 +866,59 @@ const file_onyx_v1_storaged_proto_rawDesc = "" +
 	"totalBytes\x12\x1d\n" +
 	"\n" +
 	"used_bytes\x18\x05 \x01(\x04R\tusedBytes\x12\x14\n" +
-	"\x05state\x18\x06 \x01(\tR\x05state2\x81\x01\n" +
+	"\x05state\x18\x06 \x01(\tR\x05state\"\xee\x02\n" +
+	"\x06Device\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
+	"\x05kname\x18\x02 \x01(\tR\x05kname\x12\x12\n" +
+	"\x04path\x18\x03 \x01(\tR\x04path\x12\x12\n" +
+	"\x04type\x18\x04 \x01(\tR\x04type\x12\x17\n" +
+	"\afs_type\x18\x05 \x01(\tR\x06fsType\x12\x14\n" +
+	"\x05label\x18\x06 \x01(\tR\x05label\x12\x12\n" +
+	"\x04uuid\x18\a \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"size_bytes\x18\b \x01(\x04R\tsizeBytes\x12\x1e\n" +
+	"\n" +
+	"mountpoint\x18\t \x01(\tR\n" +
+	"mountpoint\x12\x1c\n" +
+	"\tremovable\x18\n" +
+	" \x01(\bR\tremovable\x12\x14\n" +
+	"\x05state\x18\v \x01(\tR\x05state\x12\x12\n" +
+	"\x04auto\x18\f \x01(\tR\x04auto\x12#\n" +
+	"\rhealth_status\x18\r \x01(\tR\fhealthStatus\x12#\n" +
+	"\rtemperature_c\x18\x0e \x01(\rR\ftemperatureC\"\x85\x01\n" +
+	"\vDeviceEvent\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x0e\n" +
+	"\x02ts\x18\x02 \x01(\tR\x02ts\x12\x14\n" +
+	"\x05kname\x18\x03 \x01(\tR\x05kname\x12\x12\n" +
+	"\x04name\x18\x04 \x01(\tR\x04name\x12\x14\n" +
+	"\x05event\x18\x05 \x01(\tR\x05event\x12\x16\n" +
+	"\x06detail\x18\x06 \x01(\tR\x06detail\"\x14\n" +
+	"\x12ListDevicesRequest\"@\n" +
+	"\x13ListDevicesResponse\x12)\n" +
+	"\adevices\x18\x01 \x03(\v2\x0f.onyx.v1.DeviceR\adevices\"&\n" +
+	"\x10GetDeviceRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"(\n" +
+	"\x12MountDeviceRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"*\n" +
+	"\x14UnmountDeviceRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"Z\n" +
+	"\x11ListEventsRequest\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\rR\x05limit\x12\x19\n" +
+	"\bafter_id\x18\x02 \x01(\x04R\aafterId\x12\x14\n" +
+	"\x05kname\x18\x03 \x01(\tR\x05kname\"B\n" +
+	"\x12ListEventsResponse\x12,\n" +
+	"\x06events\x18\x01 \x03(\v2\x14.onyx.v1.DeviceEventR\x06events\"\x15\n" +
+	"\x13WatchDevicesRequest2\x8f\x04\n" +
 	"\bStoraged\x12B\n" +
 	"\tListPools\x12\x19.onyx.v1.ListPoolsRequest\x1a\x1a.onyx.v1.ListPoolsResponse\x121\n" +
-	"\aGetPool\x12\x17.onyx.v1.GetPoolRequest\x1a\r.onyx.v1.PoolB+Z)onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
+	"\aGetPool\x12\x17.onyx.v1.GetPoolRequest\x1a\r.onyx.v1.Pool\x12H\n" +
+	"\vListDevices\x12\x1b.onyx.v1.ListDevicesRequest\x1a\x1c.onyx.v1.ListDevicesResponse\x127\n" +
+	"\tGetDevice\x12\x19.onyx.v1.GetDeviceRequest\x1a\x0f.onyx.v1.Device\x12;\n" +
+	"\vMountDevice\x12\x1b.onyx.v1.MountDeviceRequest\x1a\x0f.onyx.v1.Device\x12?\n" +
+	"\rUnmountDevice\x12\x1d.onyx.v1.UnmountDeviceRequest\x1a\x0f.onyx.v1.Device\x12E\n" +
+	"\n" +
+	"ListEvents\x12\x1a.onyx.v1.ListEventsRequest\x1a\x1b.onyx.v1.ListEventsResponse\x12D\n" +
+	"\fWatchDevices\x12\x1c.onyx.v1.WatchDevicesRequest\x1a\x14.onyx.v1.DeviceEvent0\x01B+Z)onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 
 var (
 	file_onyx_v1_storaged_proto_rawDescOnce sync.Once
@@ -266,24 +932,48 @@ func file_onyx_v1_storaged_proto_rawDescGZIP() []byte {
 	return file_onyx_v1_storaged_proto_rawDescData
 }
 
-var file_onyx_v1_storaged_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_onyx_v1_storaged_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_onyx_v1_storaged_proto_goTypes = []any{
-	(*ListPoolsRequest)(nil),  // 0: onyx.v1.ListPoolsRequest
-	(*ListPoolsResponse)(nil), // 1: onyx.v1.ListPoolsResponse
-	(*GetPoolRequest)(nil),    // 2: onyx.v1.GetPoolRequest
-	(*Pool)(nil),              // 3: onyx.v1.Pool
+	(*ListPoolsRequest)(nil),     // 0: onyx.v1.ListPoolsRequest
+	(*ListPoolsResponse)(nil),    // 1: onyx.v1.ListPoolsResponse
+	(*GetPoolRequest)(nil),       // 2: onyx.v1.GetPoolRequest
+	(*Pool)(nil),                 // 3: onyx.v1.Pool
+	(*Device)(nil),               // 4: onyx.v1.Device
+	(*DeviceEvent)(nil),          // 5: onyx.v1.DeviceEvent
+	(*ListDevicesRequest)(nil),   // 6: onyx.v1.ListDevicesRequest
+	(*ListDevicesResponse)(nil),  // 7: onyx.v1.ListDevicesResponse
+	(*GetDeviceRequest)(nil),     // 8: onyx.v1.GetDeviceRequest
+	(*MountDeviceRequest)(nil),   // 9: onyx.v1.MountDeviceRequest
+	(*UnmountDeviceRequest)(nil), // 10: onyx.v1.UnmountDeviceRequest
+	(*ListEventsRequest)(nil),    // 11: onyx.v1.ListEventsRequest
+	(*ListEventsResponse)(nil),   // 12: onyx.v1.ListEventsResponse
+	(*WatchDevicesRequest)(nil),  // 13: onyx.v1.WatchDevicesRequest
 }
 var file_onyx_v1_storaged_proto_depIdxs = []int32{
-	3, // 0: onyx.v1.ListPoolsResponse.pools:type_name -> onyx.v1.Pool
-	0, // 1: onyx.v1.Storaged.ListPools:input_type -> onyx.v1.ListPoolsRequest
-	2, // 2: onyx.v1.Storaged.GetPool:input_type -> onyx.v1.GetPoolRequest
-	1, // 3: onyx.v1.Storaged.ListPools:output_type -> onyx.v1.ListPoolsResponse
-	3, // 4: onyx.v1.Storaged.GetPool:output_type -> onyx.v1.Pool
-	3, // [3:5] is the sub-list for method output_type
-	1, // [1:3] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	3,  // 0: onyx.v1.ListPoolsResponse.pools:type_name -> onyx.v1.Pool
+	4,  // 1: onyx.v1.ListDevicesResponse.devices:type_name -> onyx.v1.Device
+	5,  // 2: onyx.v1.ListEventsResponse.events:type_name -> onyx.v1.DeviceEvent
+	0,  // 3: onyx.v1.Storaged.ListPools:input_type -> onyx.v1.ListPoolsRequest
+	2,  // 4: onyx.v1.Storaged.GetPool:input_type -> onyx.v1.GetPoolRequest
+	6,  // 5: onyx.v1.Storaged.ListDevices:input_type -> onyx.v1.ListDevicesRequest
+	8,  // 6: onyx.v1.Storaged.GetDevice:input_type -> onyx.v1.GetDeviceRequest
+	9,  // 7: onyx.v1.Storaged.MountDevice:input_type -> onyx.v1.MountDeviceRequest
+	10, // 8: onyx.v1.Storaged.UnmountDevice:input_type -> onyx.v1.UnmountDeviceRequest
+	11, // 9: onyx.v1.Storaged.ListEvents:input_type -> onyx.v1.ListEventsRequest
+	13, // 10: onyx.v1.Storaged.WatchDevices:input_type -> onyx.v1.WatchDevicesRequest
+	1,  // 11: onyx.v1.Storaged.ListPools:output_type -> onyx.v1.ListPoolsResponse
+	3,  // 12: onyx.v1.Storaged.GetPool:output_type -> onyx.v1.Pool
+	7,  // 13: onyx.v1.Storaged.ListDevices:output_type -> onyx.v1.ListDevicesResponse
+	4,  // 14: onyx.v1.Storaged.GetDevice:output_type -> onyx.v1.Device
+	4,  // 15: onyx.v1.Storaged.MountDevice:output_type -> onyx.v1.Device
+	4,  // 16: onyx.v1.Storaged.UnmountDevice:output_type -> onyx.v1.Device
+	12, // 17: onyx.v1.Storaged.ListEvents:output_type -> onyx.v1.ListEventsResponse
+	5,  // 18: onyx.v1.Storaged.WatchDevices:output_type -> onyx.v1.DeviceEvent
+	11, // [11:19] is the sub-list for method output_type
+	3,  // [3:11] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_onyx_v1_storaged_proto_init() }
@@ -297,7 +987,7 @@ func file_onyx_v1_storaged_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_onyx_v1_storaged_proto_rawDesc), len(file_onyx_v1_storaged_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
