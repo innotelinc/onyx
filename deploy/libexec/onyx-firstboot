@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# deploy/libexec/onyx-firstboot — first-boot wizard for the Onyx appliance
+# (docs/design/10#4).
+#
+# Runs once from onyx-firstboot.service when /var/lib/onyx/.firstboot-complete
+# is absent. It is the console/seed half of the wizard — the interactive web
+# wizard (2FA, storage tour, app carousel) ships with onyx-api user management
+# in v0.2; at Cinder this seeds the system into a usable, safe state:
+#
+#   1. hostname        onyx.hostname= kernel cmdline, --hostname, default "onyx"
+#   2. admin user      onyx.admin-user= / onyx.admin-password= kernel cmdline,
+#                      --admin-user/--admin-password, or an interactive prompt
+#   3. data pool       mounts the labelled Btrfs pool and creates the fixed
+#                      subvolume layout (@data @apps @backups @snapshots)
+#   4. seed state      /var/lib/onyx/.firstboot-complete marker (idempotent)
+#
+# Flags:
+#   --hostname NAME     system hostname (default "onyx")
+#   --admin-user NAME   admin account to create (default "admin")
+#   --admin-password X  password for the admin account. If omitted and stdin is
+#                       a TTY, prompt; if omitted non-interactively, generate a
+#                       random one and print it (image installs should pass a
+#                       seed on the kernel cmdline instead).
+#   --pool-label LABEL  data pool label (default onyx-pool, see onyx-pool)
+#   --yes               never prompt; accept defaults / generated password
+#   --skip-pool         don't touch the data pool (host installs without one)
+set -euo pipefail
+
+MARKER="/var/lib/onyx/.firstboot-complete"
+HOSTNAME_VAL="onyx"
+ADMIN_USER="admin"
+ADMIN_PASSWORD=""
+POOL_LABEL="${ONYX_POOL_LABEL:-onyx-pool}"
+SKIP_POOL=0
+YES=0
+ARGS=("$@")
+
+# Pull kernel cmdline seeds (onyx.*=) first; explicit flags win.
+if [ -r /proc/cmdline ]; then
+  for kv in $(cat /proc/cmdline); do
+    case "$kv" in
+      onyx.hostname=*)   HOSTNAME_VAL="${kv#onyx.hostname=}" ;;
+      onyx.admin-user=*) ADMIN_USER="${kv#onyx.admin-user=}" ;;
+      onyx.admin-password=*) ADMIN_PASSWORD="${kv#onyx.admin-password=}" ;;
+      onyx.pool-label=*) POOL_LABEL="${kv#onyx.pool-label=}" ;;
+    esac
+  done
+fi
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --hostname) HOSTNAME_VAL="$2"; shift 2 ;;
+    --admin-user) ADMIN_USER="$2"; shift 2 ;;
+    --admin-password) ADMIN_PASSWORD="$2"; shift 2 ;;
+    --pool-label) POOL_LABEL="$2"; shift 2 ;;
+    --skip-pool) SKIP_POOL=1; shift ;;
+    --yes) YES=1; shift ;;
+    -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//' | grep -v '^!' ; exit 0 ;;
+    *) echo "onyx-firstboot: unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+say() { printf '\033[1;34m:: %s\033[0m\n' "$*"; }
+
+if [ -f "$MARKER" ]; then
+  echo "onyx-firstboot: already complete ($MARKER exists)"
+  exit 0
+fi
+
+[ -w / ] || { echo "onyx-firstboot: needs root" >&2; exit 1; }
+
+# --- 1. hostname -----------------------------------------------------------
+say "hostname: $HOSTNAME_VAL"
+if [ "$(hostname 2>/dev/null || true)" != "$HOSTNAME_VAL" ]; then
+  echo "$HOSTNAME_VAL" >/etc/hostname
+  hostname "$HOSTNAME_VAL" 2>/dev/null || true
+  if command -v hostnamectl >/dev/null 2>&1; then
+    hostnamectl set-hostname "$HOSTNAME_VAL" 2>/dev/null || true
+  fi
+fi
+
+# --- 2. admin user ---------------------------------------------------------
+sanitize_user() {
+  # usernames: lowercase alnum + underscore, start with a letter
+  local u="$1"
+  u="$(printf '%s' "$u" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9_')"
+  case "$u" in
+    [0-9_]*|"") echo "admin"; return ;;
+  esac
+  echo "$u"
+}
+ADMIN_USER="$(sanitize_user "$ADMIN_USER")"
+
+if id "$ADMIN_USER" >/dev/null 2>&1; then
+  say "admin user $ADMIN_USER already exists"
+else
+  say "creating admin user: $ADMIN_USER"
+  useradd -m -G onyx -s /bin/bash "$ADMIN_USER"
+fi
+
+if [ -z "$ADMIN_PASSWORD" ]; then
+  if [ -t 0 ] && [ "$YES" = 0 ]; then
+    read -r -s -p "Password for $ADMIN_USER: " ADMIN_PASSWORD; echo
+    [ -n "$ADMIN_PASSWORD" ] || { echo "onyx-firstboot: empty password" >&2; exit 1; }
+  else
+    ADMIN_PASSWORD="$(head -c 16 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 16)"
+    say "generated password for $ADMIN_USER: $ADMIN_PASSWORD (change it after login)"
+  fi
+fi
+echo "$ADMIN_USER:$ADMIN_PASSWORD" | chpasswd
+
+# --- 3. data pool ----------------------------------------------------------
+if [ "$SKIP_POOL" = 0 ]; then
+  say "data pool: $POOL_LABEL (onyx-pool ensure)"
+  ONYX_POOL_LABEL="$POOL_LABEL" /usr/local/lib/onyx/onyx-pool mount \
+    || echo "onyx-firstboot: no labelled pool yet — create one with: onyx-install --create-pool <dev>" >&2
+fi
+
+# --- 4. mark complete ------------------------------------------------------
+touch "$MARKER"
+say "first boot complete — onyx is ready"
+echo
+echo "  CLI:     onyx status / onyx pool list / onyx share list"
+echo "  API:     http://$(hostname):8080 (loopback only by default)"

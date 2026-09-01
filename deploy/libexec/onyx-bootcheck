@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# deploy/libexec/onyx-bootcheck — automatic rollback health gate
+# (docs/design/10#5-health-gate, #7-rollback).
+#
+# After boot, verifies the onyx stack actually came up. If the running
+# deployment is unhealthy after $ONYX_BOOTCHECK_RETRIES (default 3) checks
+# over ~20 s, it records the failure in the deployment's boot log and reboots —
+# the bootloader's A/B boot counting then attempts the previous deployment,
+# which is exactly the "automatic rollback on failed boot health check"
+# behaviour from docs/design/10#5.
+#
+# The check is deliberately conservative: only the five onyx daemons must be
+# active (a healthy deployment must at least run its own control plane; pool
+# and share health is a data-plane concern and never forces an OS rollback).
+#
+# On success a marker is written to /run so the update pipeline can see the
+# deployment was verified ("boot-good" semantics for `onyx update status`).
+set -euo pipefail
+
+RETRIES="${ONYX_BOOTCHECK_RETRIES:-3}"
+SLEEP="${ONYX_BOOTCHECK_SLEEP:-20}"
+MARKER="/run/onyx/.boot-good"
+UNITS="onyx-privd onyx-storaged onyx-shared onyx-core onyx-api"
+
+is_healthy() {
+  local all_ok=1
+  for u in $UNITS; do
+    if ! systemctl is-active --quiet "$u" 2>/dev/null; then
+      echo "onyx-bootcheck: $u not active" >&2
+      all_ok=0
+    fi
+  done
+  [ "$all_ok" = 1 ]
+}
+
+# After how long is the stack expected to be up? The units chain privd ->
+# storaged/shared -> core -> api with Restart=always, so failures self-heal;
+# skip the grace period entirely and just retry.
+echo "onyx-bootcheck: verifying onyx stack (${RETRIES}x every ${SLEEP}s) ..."
+n=0
+while [ "$n" -lt "$RETRIES" ]; do
+  if is_healthy; then
+    mkdir -p /run/onyx
+    touch "$MARKER"
+    echo "onyx-bootcheck: stack healthy — deployment verified good"
+    exit 0
+  fi
+  n=$((n + 1))
+  [ "$n" -lt "$RETRIES" ] && sleep "$SLEEP"
+done
+
+echo "onyx-bootcheck: UNHEALTHY after ${RETRIES} checks — rebooting into previous deployment" >&2
+logger -t onyx-bootcheck "boot health check failed: rolling back"
+# systemd-boot boot counting decrements the current entry; next boot falls back
+# to the previous deployment automatically.
+systemctl reboot

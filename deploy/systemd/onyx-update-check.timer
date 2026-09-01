@@ -1,0 +1,14 @@
+# onyx-update-check — daily update check (docs/design/10#5: "scheduled default
+# daily"). Fires onyx-updated.service, which stages any new commit to the
+# inactive A/B slot without touching the running system.
+[Unit]
+Description=Onyx daily update check
+# See docs/design/10-installer-and-updates.md#5.
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
