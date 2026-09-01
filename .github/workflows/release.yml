@@ -1,0 +1,130 @@
+name: Release
+
+# On every tag v* (and manual dispatch): build everything, attach release
+# artifacts to the GitHub Release, and publish all container images to GHCR.
+# Docs: docs/design/11-platform-and-cloud.md §7.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-artifacts:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache repo-local toolchain (.tools)
+        uses: actions/cache@v4
+        with:
+          path: .tools
+          key: onyx-tools-${{ runner.os }}-${{ hashFiles('scripts/bootstrap-tools.sh', 'go.mod', 'go.sum') }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/storaged/target
+            services/privd/target
+          key: onyx-cargo-${{ runner.os }}-${{ hashFiles('services/storaged/Cargo.lock', 'services/privd/Cargo.lock') }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Bootstrap toolchain
+        run: make bootstrap
+
+      - name: Regenerate protobuf stubs
+        run: make gen
+
+      - name: Vet + test
+        run: make check
+
+      - name: Build all binaries
+        run: make build
+
+      - name: Package release artifacts
+        id: meta
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          tar -czf "dist/onyx-bin-${TAG}-linux-amd64.tar.gz" bin/
+          tar -czf "dist/onyx-deploy-${TAG}.tar.gz" deploy/ scripts/ docs/design/11-platform-and-cloud.md docker-compose.yml setup.sh
+          (cd dist && sha256sum *.tar.gz > sha256sums.txt)
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+  publish-images:
+    needs: build-artifacts
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: onyx-api
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-core
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-shared
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-snapd
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-backupd
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-vmm
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-appd
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-ai
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-objectstore
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-storaged
+            dockerfile: docker/onyx-storaged.Dockerfile
+          - service: onyx-privd
+            dockerfile: docker/onyx-privd.Dockerfile
+          - service: onyx-web
+            dockerfile: docker/onyx-web/Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish ${{ matrix.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          build-args: SERVICE=${{ matrix.service }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/innotelinc/onyx-oss-platform/${{ matrix.service }}:${{ needs.build-artifacts.outputs.tag }}
+            ghcr.io/innotelinc/onyx-oss-platform/${{ matrix.service }}:latest

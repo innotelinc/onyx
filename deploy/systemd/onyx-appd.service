@@ -1,0 +1,23 @@
+# onyx-appd — application/container management (docs/design/11 §6.4). v0.1
+# skeleton; the signed app store + compose runtime land with v0.4.
+[Unit]
+Description=Onyx application service
+After=local-fs.target onyx-pool.service
+
+[Service]
+Type=simple
+User=onyx-appd
+Group=onyx
+SupplementaryGroups=onyx
+ExecStart=/usr/local/lib/onyx/onyx-appd --socket-dir /run/onyx --state-dir /var/lib/onyx/appd
+Restart=always
+RestartSec=2
+UMask=0002
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/onyx /var/lib/onyx/appd
+
+[Install]
+WantedBy=multi-user.target

@@ -1,58 +1,120 @@
-# Onyx — Online Storage System
+# ONYX — Online Storage System — Platform
 
-**An open-source NAS operating system that feels like a modern app, not an enterprise
-appliance.**
+**A next-generation storage and infrastructure platform that replaces TrueNAS and
+ZimaOS — enterprise-grade storage, virtualization, object storage, backup
+management, cloud synchronization, and application hosting in one self-hosted
+stack.**
 
-Onyx is a lightweight, privacy-first NAS OS for people who want a private file server on
-hardware they already own — a Raspberry Pi, a mini-PC, an old laptop. It competes with
-TrueNAS, OpenMediaVault, CasaOS, and ZimaOS on the home-to-small-office tier, combining:
+Primary domain: `onyx.innotel.us`
 
-- **Storage safety** (Btrfs snapshots, checksums, quotas, scrub) that TrueNAS-class systems
-  are known for, at a fraction of the hardware cost,
-- **App hosting** (Docker + a curated, sandboxed app store) at CasaOS/ZimaOS levels of ease,
-- **A modern interface** (the *Prism* design system) inspired by Linear, GitHub, Arc,
-  VisionOS, and Windows 11 — keyboard-first, calm, and dense.
+| Service | URL | Backed by |
+|---------|-----|-----------|
+| App (web UI) | `https://app.onyx.innotel.us` | `onyx-web` (SPA, v0.2) |
+| API gateway | `https://api.onyx.innotel.us` | `onyx-api` |
+| Identity / SSO | `https://auth.onyx.innotel.us` | Authentik |
+| Storage (S3-compatible) | `https://storage.onyx.innotel.us` | `onyx-objectstore` |
+| Backup | `https://backup.onyx.innotel.us` | `onyx-backupd` |
+| Admin | `https://admin.onyx.innotel.us` | `onyx-api` (admin surface) |
+
+All traffic terminates TLS at **Nginx Proxy Manager**, which is provisioned
+automatically by `setup.sh` (via `scripts/npm-proxy-hosts.py`) with a
+Let's Encrypt **wildcard certificate** for `*.onyx.innotel.us`, issued through
+a **TSIG (RFC 2136) DNS-01 challenge** against your DNS server — the same
+pattern used across the innotelinc platform projects.
+
+## Platform stack
+
+- **Identity:** [Authentik](https://goauthentik.io) — OIDC/SSO for every
+  service (`auth.onyx.innotel.us`); `scripts/provision-authentik.sh` creates
+  the ONYX application + OAuth2 provider automatically.
+- **Reverse proxy:** Nginx Proxy Manager, provisioned via its API —
+  wildcard cert, proxy hosts for all six subdomains, WebSocket support.
+- **Runtime:** every service is containerized (Docker); the appliance image
+  (`base/`) still ships the native systemd deployment for bare metal.
+- **Storage core:** Btrfs pools, snapshots, backups, hotplug device handling,
+  share generation (SMB/NFS/FTP/SFTP/WebDAV/Rsync from one logical model).
+- **Platform services:** virtualization (`onyx-vmm`), container management
+  (`onyx-appd`), object storage + hybrid cloud (`onyx-objectstore`), AI Storage
+  Advisor + Backup Intelligence (`onyx-ai`).
+- **CI/CD:** GitHub Actions builds, checks, and publishes container images to
+  GHCR and attaches release artifacts to every tagged build.
+
+## What it is
+
+ONYX is a lightweight, privacy-first NAS *and* infrastructure platform for
+hardware you already own — a mini-PC, a server, an old laptop. It combines:
+
+- **Storage safety** (Btrfs snapshots, checksums, quotas, scrub) that
+  TrueNAS-class systems are known for, at a fraction of the hardware cost,
+- **App + VM hosting** (Docker containers + `onyx-appd`, virtualization via
+  `onyx-vmm`) at CasaOS/ZimaOS levels of ease,
+- **A modern interface** (the *Prism* design system) inspired by Linear, GitHub,
+  Arc, VisionOS, and Windows 11 — keyboard-first, calm, and dense.
 
 **Key properties**
 
 - ⚡ Boots in under a minute, idles under 512 MB RAM
-- 🔒 Safe by default: snapshots on, atomic A/B updates with auto-rollback, no protocols
-  exposed until you enable them
+- 🔒 Safe by default: snapshots on, atomic A/B updates with auto-rollback, no
+  protocols exposed until you enable them
 - 📁 SMB, NFS, FTP, SFTP, WebDAV, and Rsync from one logical share model
 - 🧩 Modular: small, single-purpose services (Go + Rust) behind one typed API
-- 📦 App store with signed, sandboxed containers
-- 🤖 Optional AI-assisted administration, local-first (or BYO-key remote)
-- 🏠 No cloud account required, no telemetry by default, AGPL-3.0 core
+- 🏠 SSO everywhere via Authentik (OIDC), no cloud account required
+- 🤖 AI Storage Advisor + Backup Intelligence, local-first (or BYO-key remote)
+- 🗄️ S3-compatible object storage + hybrid cloud sync (`onyx-objectstore`)
+- 🔄 Automated releases: GHCR images + tarball artifacts on every tag
 
 ## Design documents
 
-The full specification lives in [`docs/design/`](docs/design/README.md) — ten documents
-covering product vision, architecture, the Prism design system, backend services, storage,
-API, security, user management, the app ecosystem, and installer/update design.
+The full specification lives in [`docs/design/`](docs/design/README.md) —
+eleven documents covering product vision, architecture, the Prism design
+system, backend services, storage, API, security, user management, the app
+ecosystem, installer/update design, and the new **platform & cloud layer**
+(`11-platform-and-cloud.md`: Authentik, NPM provisioning, wildcard TSIG certs,
+subdomain routing, Dockerized deployment, virtualization, container
+management, AI advisor, object storage + hybrid cloud).
 
 ## Status
 
-**Phase: v0.1 "Cinder" — first working copy: done.** The skeleton is complete
-and installable: `onyx-core` (Go control plane), `onyx-api` (HTTP gateway),
-`onyx-shared` (Go share manager), `onyx-storaged` + `onyx-privd` (Rust data
-plane), and the `onyx` CLI, wired together via gRPC over unix sockets
-(`proto/` as the source of truth), shipped as systemd services by
-[`scripts/onyx-install`](scripts/onyx-install). The bootable OSTree base image
-(`base/`) composes a Debian Trixie rootfs with the onyx stack, a kernel, and a
-bootloader; `base/image/assemble-boot.sh` produces the A/B sysroot (two
-OSTree deployments + systemd-boot BLS entries, rollback via `onyx-bootcheck`
-+ boot counting). The appliance first-boot wizard (`onyx-firstboot.service`)
-seeds hostname, admin user and data pool on the first boot; the data pool
-auto-mounts (`onyx-pool.service`) and updates stage into the inactive slot
-(`onyx-update`, daily `onyx-update-check.timer`). Per
-[the roadmap](docs/design/01-product-vision.md#7-roadmap), Cinder is complete;
-see it for the milestones after.
+**Phase: v0.1 "Cinder" — core skeleton + platform layer.** The appliance
+skeleton is complete and installable: `onyx-core` (Go control plane),
+`onyx-api` (HTTP gateway), `onyx-shared` (Go share manager), `onyx-storaged` +
+`onyx-privd` (Rust data plane), and the `onyx` CLI, wired together via gRPC
+over unix sockets (`proto/` as the source of truth), shipped as systemd
+services by [`scripts/onyx-install`](scripts/onyx-install). The bootable OSTree
+base image (`base/`) composes a Debian Trixie rootfs with the onyx stack, a
+kernel, and a bootloader with A/B rollback.
 
-Next milestone: [v0.2 "Flint"](docs/design/01-product-vision.md#7-roadmap) — the web
-UI (Prism), file explorer, SMB/NFS shares UX, users & permissions, and the
-interactive web first-boot wizard on top of this base.
+On top of that, the **platform layer** is in place:
 
-## Building and running (dev)
+- `docker/` + `docker-compose.yml` — every daemon containerized, with
+  Authentik (postgres + redis + server + worker) and Nginx Proxy Manager.
+- [`setup.sh`](setup.sh) — one-command deploy: env generation, `docker compose
+  up`, Authentik bootstrap + ONYX OIDC provider, then NPM provisioning
+  (wildcard `*.onyx.innotel.us` cert via TSIG, six proxy hosts).
+- [`scripts/npm-proxy-hosts.py`](scripts/npm-proxy-hosts.py) — NPM API client:
+  login, wildcard certificate request (Let's Encrypt DNS-01 over RFC 2136),
+  idempotent proxy-host create/update for every subdomain.
+- `.github/workflows/` — CI (bootstrap → vet → test → build) and release
+  (tagged builds publish GHCR images and attach tarball + checksum artifacts).
+- New platform daemons (`onyx-snapd`, `onyx-backupd`, `onyx-vmm`, `onyx-appd`,
+  `onyx-ai`, `onyx-objectstore`) as compilable gRPC service skeletons with
+  proto contracts — see [`services/README.md`](services/README.md).
+
+Next milestone: [v0.2 "Flint"](docs/design/01-product-vision.md#7-roadmap) —
+the web UI (Prism), file explorer, SMB/NFS shares UX, users & permissions, and
+the interactive web first-boot wizard on top of this base.
+
+## Quick start (Docker platform)
+
+```bash
+cp .env.example .env        # edit: DOMAIN, NPM creds, TSIG key, Authentik secrets
+./setup.sh                  # compose up → Authentik bootstrap → NPM provision
+```
+
+`setup.sh` is idempotent: safe to re-run; it prints the final URL table
+(`app`/`api`/`auth`/`storage`/`backup`/`admin` on `onyx.innotel.us`).
+
+## Building and running (dev, native)
 
 ```bash
 make bootstrap   # repo-local Go + protoc toolchain into .tools/ (no system installs)
@@ -85,37 +147,24 @@ polling) plus `lsblk` (through `onyx-privd`); the moment a drive appears it is
 mounted under `/mnt/onyx/` and right away exposed as an SMB+NFS share —
 `onyx share list` shows it live almost instantly, and unplugging detects the
 removal, unmounts it, and removes the share. A slow periodic scan (5 s) is
-kept as a safety net and is the only trigger where netlink is unavailable.
-Removable devices (USB/SD) auto-attach by default; hotplugged internal drives
-attach with `onyx device attach` (or run storaged with `--auto-attach=all`).
-Call `scripts/hotplug-demo.sh` for a scripted plug/unplug lifecycle demo.
+kept as a safety net. Removable devices (USB/SD) auto-attach by default;
+hotplugged internal drives attach with `onyx device attach`. Call
+`scripts/hotplug-demo.sh` for a scripted plug/unplug lifecycle demo.
 
-vFAT/exFAT USB sticks are mounted with `uid`/`gid`/`umask` (default 1000:100, umask 002) so the
-share's users can actually write to them instead of root-owned files; configure with storaged's
-`--mount-uid`, `--mount-gid`, `--fat-umask` (privd allowlists exactly those option tokens).
-
-**Hotplug + health events are an API-visible audit stream.** Every attach, detach and SMART
-health result is persisted (`/api/v1/events`, `onyx events`) and tailed live via
-Server-Sent Events (`/api/v1/events/stream`, `onyx events --stream`). Drive health comes from
-`smartctl -H -A` run inside `onyx-privd` (new allowlisted op): `onyx device show` reports the
-health verdict and temperature, with periodic re-checks (`--device-health-interval-ms`).
-
-**Generating shares actually writes real daemon config.** Every share mutation — creating or
-`deleting a share, and the hotplug reconciler — runs the full docs/design/02 §6 pipeline:
-`onyx-core` renders the complete `smb.conf` (global section + every SMB share) and
-`exports` (unique fsids) via `onyx-shared`'s `RenderAll`, `onyx-privd` writes changed files
-atomically (default `/etc/onyx/conf.d/`, overridable with privd's `--config-dir`), and
-reloads the affected daemons — `testparm` validation first, then `systemctl reload smbd`;
-NFS via `exportfs -ra`. It is change-guarded: an unchanged share set rewrites nothing, and a
-failed reload always retries. Run the demo with fake `testparm`/`systemctl`/`exportfs`
-bins to see the written files and reload log.
+**Generating shares actually writes real daemon config.** Every share mutation
+runs the full pipeline: `onyx-core` renders the complete `smb.conf` (global +
+every SMB share) and `exports` (unique fsids) via `onyx-shared`'s `RenderAll`,
+`onyx-privd` writes changed files atomically (default `/etc/onyx/conf.d/`),
+and reloads the affected daemons — `testparm` validation first, then
+`systemctl reload smbd`; NFS via `exportfs -ra`. It is change-guarded: an
+unchanged share set rewrites nothing, and a failed reload always retries.
 
 ## Installing on a real host (systemd)
 
-The same skeleton installs as proper systemd services — per-service unprivileged
-users, sockets in `/run/onyx`, state in `/var/lib/onyx/*`, generated daemon
-config in `/etc/onyx/conf.d` (see [`deploy/`](deploy/README.md) for the unit
-graph and runtime layout):
+The same skeleton installs as proper systemd services — per-service
+unprivileged users, sockets in `/run/onyx`, state in `/var/lib/onyx/*`,
+generated daemon config in `/etc/onyx/conf.d` (see [`deploy/`](deploy/README.md)
+for the unit graph and runtime layout):
 
 ```bash
 sudo scripts/onyx-install            # build → users → dirs → units → enable+start
@@ -128,33 +177,30 @@ other daemon is sandboxed (`NoNewPrivileges`, strict filesystem policy). The
 API gateway binds `127.0.0.1` by default, so **nothing is exposed to the
 network until you deliberately change it**. Optional serving daemons (samba,
 nfs-kernel-server, smartmontools, btrfs-progs) are the host's packages, not
-otyx's: `sudo scripts/onyx-install --install-deps` installs them, and
-thereafter every share create/delete writes the real `smb.conf`/`exports` and
-reloads the daemons via privd (validated with `testparm` first).
-
-```bash
-onyx status        # all five daemons SERVING
-onyx pool list     # Btrfs pools (via privd)
-onyx share create media /mnt/onyx/pool1/@data/media --smb --nfs
-```
+onyx's: `sudo scripts/onyx-install --install-deps` installs them.
 
 ## License
 
-Onyx is dual-licensed per the design (docs/design/01 §8): the core OS
+ONYX is dual-licensed per the design (docs/design/01 §8): the core OS
 (root `LICENSE`) is **AGPL-3.0**; the SDK under `sdk/` (`sdk/LICENSE`) is
-**Apache-2.0**.
+**Apache-2.0**. No third-party author attributions are asserted; the project
+is owned by its operators.
 
 ## Repo layout
 
 ```
 base/          OSTree image definition (compose scaffold: manifest + compose.sh + seed)
 deploy/        systemd units + tmpfiles for the running system
-services/      onyx-api, onyx-core, onyx-shared (Go) · onyx-storaged, onyx-privd (Rust)
+docker/        per-service Dockerfiles for the containerized platform
+services/      onyx-api, onyx-core, onyx-shared, onyx-snapd, onyx-backupd, onyx-vmm,
+               onyx-appd, onyx-ai, onyx-objectstore (Go) · onyx-storaged, onyx-privd (Rust)
 proto/         gRPC contracts (source of truth) + generated stubs
 web/           Prism design system + React SPA (planned, v0.2)
 sdk/           onyx-sdk Go client + onyx CLI, Apache-2.0 (TS client planned)
 installer/     ISO + SBC image design; the script installer lives in scripts/
-scripts/       bootstrap, local dev runner, onyx-install
+scripts/       bootstrap, local dev runner, onyx-install, npm-proxy-hosts.py,
+               provision-authentik.sh
+.github/       CI + release workflows (GHCR images, release artifacts)
 .tools/        repo-local toolchain (git-ignored)
 docs/          design docs, RFCs
 ```

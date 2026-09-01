@@ -1,0 +1,16 @@
+# Repo-local toolchain + build artifacts (never ship into image contexts)
+.tools/
+bin/
+services/*/target/
+base/repo/
+base/image/sysroot/
+.run/
+
+# Git + editor cruft
+.git/
+.gitignore
+*.swp
+.DS_Store
+
+# Secrets never enter build contexts
+.env

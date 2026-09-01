@@ -1,0 +1,69 @@
+name: Images (latest)
+
+# Publish :latest container images for every platform service on each main
+# push, so `setup.sh` always deploys the current trunk build.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  packages: write
+
+jobs:
+  publish-latest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: onyx-api
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-core
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-shared
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-snapd
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-backupd
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-vmm
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-appd
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-ai
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-objectstore
+            dockerfile: docker/go-service.Dockerfile
+          - service: onyx-storaged
+            dockerfile: docker/onyx-storaged.Dockerfile
+          - service: onyx-privd
+            dockerfile: docker/onyx-privd.Dockerfile
+          - service: onyx-web
+            dockerfile: docker/onyx-web/Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish ${{ matrix.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          build-args: SERVICE=${{ matrix.service }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/innotelinc/onyx-oss-platform/${{ matrix.service }}:latest

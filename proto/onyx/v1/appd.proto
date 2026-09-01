@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package onyx.v1;
+
+option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+
+// Appd manages applications and containers from the signed app store
+// (docs/design/09-app-ecosystem.md) and the platform's container runtime
+// (docs/design/11-platform-and-cloud.md#64-onyx-appd).
+service Appd {
+  rpc ListApps(ListAppsRequest) returns (ListAppsResponse);
+  rpc InstallApp(InstallAppRequest) returns (App);
+  rpc UninstallApp(UninstallAppRequest) returns (UninstallAppResponse);
+  rpc ListContainers(ListContainersRequest) returns (ListContainersResponse);
+  rpc StartContainer(StartContainerRequest) returns (Container);
+  rpc StopContainer(StopContainerRequest) returns (Container);
+  rpc RestartContainer(RestartContainerRequest) returns (Container);
+}
+
+message App {
+  string id = 1;
+  string name = 2;
+  string version = 3;
+  string description = 4;
+  // Compose manifest (signed, from the store).
+  string manifest = 5;
+  string status = 6; // not_installed | installed | updating
+  string installed_at = 7;
+}
+
+message ListAppsRequest {}
+
+message ListAppsResponse {
+  repeated App apps = 1;
+}
+
+message InstallAppRequest {
+  string app_id = 1;
+  string version = 2;
+}
+
+message UninstallAppRequest {
+  string app_id = 1;
+  // Also remove the app's data volumes.
+  bool purge_data = 2;
+}
+
+message UninstallAppResponse {
+  bool uninstalled = 1;
+}
+
+message Container {
+  string id = 1;
+  string name = 2;
+  string image = 3;
+  string status = 4; // created | running | paused | exited | error
+  string app_id = 5;
+}
+
+message ListContainersRequest {
+  // Filter by app; empty = all.
+  string app_id = 1;
+}
+
+message ListContainersResponse {
+  repeated Container containers = 1;
+}
+
+message StartContainerRequest {
+  string id = 1;
+}
+
+message StopContainerRequest {
+  string id = 1;
+}
+
+message RestartContainerRequest {
+  string id = 1;
+}
