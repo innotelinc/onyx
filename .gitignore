@@ -5,6 +5,11 @@
 bin/
 services/*/target/
 
+# OSTree image compose outputs (base/compose.sh + assemble-boot.sh); keep the
+# assember script itself tracked.
+base/repo/
+base/image/sysroot/
+
 # Dev runtime state (sockets, state dirs, logs)
 .run/
 

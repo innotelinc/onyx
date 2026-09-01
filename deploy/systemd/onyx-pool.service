@@ -1,0 +1,21 @@
+# onyx-pool — data pool auto-mount + fixed subvolume layout (docs/design/05#2,
+# docs/design/10#2). Runs once at boot BEFORE the onyx stack: discovers the
+# labelled Btrfs pool (default label "onyx-pool", see onyx-pool), mounts it at
+# /mnt/onyx/<pool>, and creates the @data/@apps/@backups/@snapshots subvolumes
+# if missing. Idempotent; exits 0 when no pool exists yet (first boot — the
+# first-boot wizard or scripts/onyx-install --create-pool provisions it).
+[Unit]
+Description=Onyx data pool auto-mount (btrfs)
+# See docs/design/05-storage-subsystem.md#2 and docs/design/10#2.
+DefaultDependencies=no
+After=systemd-udevd.service local-fs.target
+Before=onyx-privd.service
+ConditionPathExists=/sbin/blkid
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/onyx/onyx-pool mount
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

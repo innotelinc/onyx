@@ -1,0 +1,23 @@
+# onyx-firstboot — the first-boot wizard (docs/design/10#4). Runs once the
+# first time the appliance boots (guarded by the /var/lib/onyx/.firstboot-complete
+# marker the wizard creates); every later boot skips it (ConditionPathExists).
+# The wizard sets hostname, creates the admin user (kernel cmdline seeds or
+# interactive), and brings up the data pool layout; the interactive web wizard
+# ships with onyx-api user management in v0.2.
+[Unit]
+Description=Onyx first-boot wizard (once)
+# See docs/design/10-installer-and-updates.md#4.
+ConditionPathExists=!/var/lib/onyx/.firstboot-complete
+After=local-fs.target
+Wants=onyx-pool.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/onyx/onyx-firstboot
+StandardInput=tty
+TTYPath=/dev/console
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target
