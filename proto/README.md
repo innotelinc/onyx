@@ -11,6 +11,7 @@ onyx/v1/health.proto     Health RPC implemented by every service (docs/design/04
 onyx/v1/core.proto       onyx-core — orchestrator: status, policy, forwarding
 onyx/v1/storaged.proto   onyx-storaged — pools, datasets, scrutiny (docs/design/05)
 onyx/v1/privd.proto      onyx-privd — allowlisted privileged operations (docs/design/04 §7)
+onyx/v1/shares.proto     shares — logical share model, CoreShares CRUD, onyx-shared config render (docs/design/05 §6)
 ```
 
 Codegen:

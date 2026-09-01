@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"onyx.dev/onyx/sdk/go/client"
@@ -31,6 +32,10 @@ Commands:
   status      show aggregate service health
   pool list   list storage pools
   pool show   show one storage pool (<name>)
+  share create  create a share
+  share list    list shares
+  share show    show one share (<name>)
+  share delete  delete a share (<name>)
   help        show this help
 
 Flags:
@@ -81,6 +86,8 @@ func run(args []string) int {
 		err = cmdStatus(ctx, c, jsonMode)
 	case "pool":
 		err = cmdPool(ctx, c, jsonMode, fs.Args()[1:])
+	case "share":
+		err = cmdShare(ctx, c, jsonMode, fs.Args()[1:])
 	case "help", "-h", "--help":
 		fs.Usage()
 		return 0
@@ -174,6 +181,129 @@ func cmdPoolShow(ctx context.Context, c *client.Client, jsonOut bool, name strin
 	fmt.Printf("Total:  %d bytes\n", pool.TotalBytes)
 	fmt.Printf("Used:   %d bytes\n", pool.UsedBytes)
 	return nil
+}
+
+func cmdShare(ctx context.Context, c *client.Client, jsonOut bool, args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: onyx share create|list|show|delete [args] [--json]")
+	}
+	switch args[0] {
+	case "list":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: onyx share list [--json]")
+		}
+		return cmdShareList(ctx, c, jsonOut)
+	case "show":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: onyx share show <name> [--json]")
+		}
+		return cmdShareShow(ctx, c, jsonOut, args[1])
+	case "delete":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: onyx share delete <name>")
+		}
+		return cmdShareDelete(ctx, c, args[1])
+	case "create":
+		return cmdShareCreate(ctx, c, jsonOut, args[1:])
+	default:
+		return fmt.Errorf("unknown share command %q (usage: onyx share create|list|show|delete)", args[0])
+	}
+}
+
+func cmdShareList(ctx context.Context, c *client.Client, jsonOut bool) error {
+	s, err := c.ListShares(ctx)
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		return printJSON(s)
+	}
+	if len(s.Shares) == 0 {
+		fmt.Println("no shares")
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tPATH\tREADONLY\tPROTOCOLS")
+	for _, share := range s.Shares {
+		fmt.Fprintf(w, "%s\t%s\t%v\t%s\n", share.Name, share.Path, share.Readonly, friendlyProtocols(share.Protocols))
+	}
+	return w.Flush()
+}
+
+func cmdShareShow(ctx context.Context, c *client.Client, jsonOut bool, name string) error {
+	share, err := c.GetShare(ctx, name)
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		return printJSON(share)
+	}
+	fmt.Printf("Name:     %s\n", share.Name)
+	fmt.Printf("Path:     %s\n", share.Path)
+	fmt.Printf("Comment:  %s\n", share.Comment)
+	fmt.Printf("Readonly: %v\n", share.Readonly)
+	fmt.Printf("Protocols:%s\n", friendlyProtocols(share.Protocols))
+	return nil
+}
+
+func cmdShareCreate(ctx context.Context, c *client.Client, jsonOut bool, args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("usage: onyx share create <name> <path> [--comment TEXT] [--readonly] [--smb|--nfs] [--json]")
+	}
+	name, path := args[0], args[1]
+	req := &client.CreateShareRequest{Name: name, Path: path}
+	var protocols []client.ShareProtocol
+	for i := 2; i < len(args); i++ {
+		switch args[i] {
+		case "--comment":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--comment requires a value")
+			}
+			i++
+			req.Comment = args[i]
+		case "--readonly":
+			req.Readonly = true
+		case "--smb":
+			protocols = append(protocols, client.ProtocolSMB)
+		case "--nfs":
+			protocols = append(protocols, client.ProtocolNFS)
+		default:
+			return fmt.Errorf("unknown flag %q", args[i])
+		}
+	}
+	if len(protocols) == 0 {
+		protocols = []client.ShareProtocol{client.ProtocolSMB}
+	}
+	req.Protocols = protocols
+
+	created, err := c.CreateShare(ctx, req)
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		return printJSON(created)
+	}
+	fmt.Printf("created share %q (%s)\n", created.Name, created.Path)
+	return nil
+}
+
+func cmdShareDelete(ctx context.Context, c *client.Client, name string) error {
+	if err := c.DeleteShare(ctx, name); err != nil {
+		return err
+	}
+	fmt.Printf("deleted share %q\n", name)
+	return nil
+}
+
+// friendlyProtocols renders proto enum names ("SHARE_PROTOCOL_SMB") as
+// lowercase protocol names ("smb, nfs") for human output.
+func friendlyProtocols(ps []client.ShareProtocol) string {
+	names := make([]string, 0, len(ps))
+	for _, p := range ps {
+		s := strings.ToLower(strings.TrimPrefix(string(p), "SHARE_PROTOCOL_"))
+		names = append(names, s)
+	}
+	return strings.Join(names, ", ")
 }
 
 func printJSON(v any) error {

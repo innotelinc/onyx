@@ -13,7 +13,7 @@ SOCK_DIR="$(cd "${ONYX_SOCKET_DIR:-$RUN/onyx}" 2>/dev/null && pwd || realpath -m
 STATE_DIR="$(realpath -m "${ONYX_STATE_DIR:-$RUN/state}")"
 API_LISTEN="${ONYX_API_LISTEN:-127.0.0.1:8080}"
 
-SERVICES=(onyx-privd onyx-storaged onyx-core onyx-api)
+SERVICES=(onyx-privd onyx-storaged onyx-shared onyx-core onyx-api)
 
 mkdir -p "$SOCK_DIR" "$STATE_DIR"
 
@@ -51,6 +51,16 @@ start() {
   # wait for the storaged socket before starting core (core forwards to it)
   for _ in $(seq 1 40); do
     [ -S "$SOCK_DIR/onyx-storaged.sock" ] && break
+    sleep 0.25
+  done
+
+  # onyx-shared (Go share manager)
+  "$BIN/onyx-shared" --socket-dir "$SOCK_DIR" >"$RUN/onyx-shared.log" 2>&1 &
+  echo $! >"$RUN/onyx-shared.pid"
+
+  # wait for the shared socket before starting core (core calls it on create)
+  for _ in $(seq 1 40); do
+    [ -S "$SOCK_DIR/onyx-shared.sock" ] && break
     sleep 0.25
   done
 

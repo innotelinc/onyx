@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package onyx.v1;
+
+option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+
+// Shares are the single logical share model (docs/design/05#6-sharing-protocols):
+// one share, exposed over any enabled protocol. onyx-core owns the intent
+// (SQLite) and policy; onyx-shared translates a share into per-daemon config.
+// The HTTP gateway talks only to onyx-core; onyx-shared is reached over the
+// local unix socket.
+service CoreShares {
+  rpc CreateShare(CreateShareRequest) returns (Share);
+  rpc ListShares(ListSharesRequest) returns (ListSharesResponse);
+  rpc GetShare(GetShareRequest) returns (Share);
+  rpc DeleteShare(DeleteShareRequest) returns (DeleteShareResponse);
+}
+
+// Shared renders per-daemon configuration from a Share. It never touches
+// daemons itself; writing config and reloading goes through onyx-privd in a
+// later milestone (docs/design/02#6).
+service Shared {
+  rpc RenderConfig(RenderConfigRequest) returns (RenderConfigResponse);
+}
+
+enum ShareProtocol {
+  SHARE_PROTOCOL_UNSPECIFIED = 0;
+  SHARE_PROTOCOL_SMB = 1;
+  SHARE_PROTOCOL_NFS = 2;
+}
+
+// A logical share. `name` is a stable id (^[a-z0-9_-]{1,64}$); `path` is the
+// dataset directory it maps to (absolute, under /mnt/onyx in production).
+message Share {
+  string name = 1;
+  string path = 2;
+  string comment = 3;
+  bool readonly = 4;
+  repeated ShareProtocol protocols = 5;
+}
+
+message CreateShareRequest {
+  string name = 1;
+  string path = 2;
+  string comment = 3;
+  bool readonly = 4;
+  repeated ShareProtocol protocols = 5;
+}
+
+message ListSharesRequest {}
+
+message ListSharesResponse {
+  repeated Share shares = 1;
+}
+
+message GetShareRequest {
+  string name = 1;
+}
+
+message DeleteShareRequest {
+  string name = 1;
+}
+
+message DeleteShareResponse {}
+
+// --- onyx-shared ---
+
+message RenderConfigRequest {
+  Share share = 1;
+}
+
+// Generated daemon fragments for the share. Empty string = protocol not
+// enabled for this share.
+message RenderConfigResponse {
+  // smb.conf share-section fragment (docs/design/05#6, SMB row).
+  string smb_conf = 1;
+  // /etc/exports fragment (docs/design/05#6, NFS row).
+  string nfs_exports = 2;
+}

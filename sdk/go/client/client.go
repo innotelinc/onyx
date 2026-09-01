@@ -168,14 +168,99 @@ func (c *Client) GetPool(ctx context.Context, name string) (*Pool, error) {
 	return &p, nil
 }
 
+// ShareProtocol identifies a protocol a share is exposed over.
+type ShareProtocol string
+
+const (
+	ProtocolSMB ShareProtocol = "SMB"
+	ProtocolNFS ShareProtocol = "NFS"
+)
+
+// Share mirrors onyx.v1.Share (protojson camelCase; protocols as enum names).
+type Share struct {
+	Name      string          `json:"name"`
+	Path      string          `json:"path"`
+	Comment   string          `json:"comment"`
+	Readonly  bool            `json:"readonly"`
+	Protocols []ShareProtocol `json:"protocols"`
+}
+
+// Shares is the response of GET /api/v1/shares.
+type Shares struct {
+	Shares []Share `json:"shares"`
+}
+
+// CreateShareRequest is the body of POST /api/v1/shares.
+type CreateShareRequest struct {
+	Name      string          `json:"name"`
+	Path      string          `json:"path"`
+	Comment   string          `json:"comment"`
+	Readonly  bool            `json:"readonly"`
+	Protocols []ShareProtocol `json:"protocols"`
+}
+
+// CreateShare creates a share (POST /api/v1/shares).
+func (c *Client) CreateShare(ctx context.Context, req *CreateShareRequest) (*Share, error) {
+	var out Share
+	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/shares", req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListShares returns all shares (GET /api/v1/shares).
+func (c *Client) ListShares(ctx context.Context) (*Shares, error) {
+	var s Shares
+	if err := c.getJSON(ctx, "/api/v1/shares", &s); err != nil {
+		return nil, err
+	}
+	if s.Shares == nil {
+		s.Shares = []Share{}
+	}
+	return &s, nil
+}
+
+// GetShare returns one share by name (GET /api/v1/shares/{name}).
+func (c *Client) GetShare(ctx context.Context, name string) (*Share, error) {
+	var s Share
+	if err := c.getJSON(ctx, "/api/v1/shares/"+url.PathEscape(name), &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// DeleteShare deletes a share (DELETE /api/v1/shares/{name}).
+func (c *Client) DeleteShare(ctx context.Context, name string) error {
+	return c.delete(ctx, "/api/v1/shares/"+url.PathEscape(name))
+}
+
 // --- plumbing ---
 
 func (c *Client) getJSON(ctx context.Context, path string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint+path, nil)
+	return c.doJSON(ctx, http.MethodGet, path, nil, out)
+}
+
+func (c *Client) delete(ctx context.Context, path string) error {
+	return c.doJSON(ctx, http.MethodDelete, path, nil, nil)
+}
+
+func (c *Client) doJSON(ctx context.Context, method, path string, in, out any) error {
+	var body io.Reader
+	if in != nil {
+		b, err := json.Marshal(in)
+		if err != nil {
+			return &Error{Err: err}
+		}
+		body = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.endpoint+path, body)
 	if err != nil {
 		return &Error{Err: err}
 	}
 	req.Header.Set("Accept", "application/json")
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
@@ -185,7 +270,7 @@ func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return &Error{Err: err}
 	}
@@ -194,19 +279,29 @@ func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 		var env struct {
 			Error *APIError `json:"error"`
 		}
-		if json.Unmarshal(body, &env) == nil && env.Error != nil {
+		if json.Unmarshal(bodyBytes, &env) == nil && env.Error != nil {
 			return env.Error
 		}
-		return &Error{Err: fmt.Errorf("HTTP %d: %s", resp.StatusCode, bytes.TrimSpace(body))}
+		return &Error{Err: fmt.Errorf("HTTP %d: %s", resp.StatusCode, bytes.TrimSpace(bodyBytes))}
 	}
-	if err := json.Unmarshal(body, out); err != nil {
+	if out == nil {
+		return nil
+	}
+	if err := json.Unmarshal(bodyBytes, out); err != nil {
 		return &Error{Err: fmt.Errorf("decode %s: %w", path, err)}
 	}
 
 	// protojson omits empty repeated fields, which unmarshal to nil slices;
 	// normalize so callers always see [] instead of null (lists are lists).
-	if p, ok := out.(*Pools); ok && p.Pools == nil {
-		p.Pools = []Pool{}
+	switch o := out.(type) {
+	case *Pools:
+		if o.Pools == nil {
+			o.Pools = []Pool{}
+		}
+	case *Shares:
+		if o.Shares == nil {
+			o.Shares = []Share{}
+		}
 	}
 	return nil
 }

@@ -12,8 +12,9 @@ Small, single-purpose daemons (docs/design/04#1-service-inventory). Each service
 
 | Service | Lang | Location | What it does today |
 |---------|------|----------|--------------------|
-| `onyx-core` | Go | [`core/`](core/) | gRPC `Health` + `Core` (SystemStatus, ListPools forwarding); SQLite state dir init |
-| `onyx-api`  | Go | [`api/`](api/) | HTTP gateway: `/api/v1/system/version`, `/api/v1/system/status`, `/api/v1/pools`, `/healthz`; error envelope per docs/design/06 |
+| `onyx-core` | Go | [`core/`](core/) | gRPC `Health` + `Core` + `CoreShares` (SystemStatus, pool forwarding, share CRUD in SQLite); SQLite state dir init |
+| `onyx-api`  | Go | [`api/`](api/) | HTTP gateway: `/api/v1/system/*`, `/api/v1/pools`, `/api/v1/shares`, `/healthz`; error envelope per docs/design/06 |
+| `onyx-shared` | Go | [`shared/`](shared/) | Share manager: renders per-protocol daemon config (smb.conf fragments, NFS exports) from the logical share model |
 | `onyx-storaged` | Rust | [`storaged/`](storaged/) | gRPC `Health` + `Storaged`; real Btrfs pool discovery via `onyx-privd`, cached in a SQLite registry (TTL refresh) |
 | `onyx-privd` | Rust | [`privd/`](privd/) | Root privilege helper: allowlisted `btrfs` ops (`show --raw`, `usage -b`) with per-op validation, no-shell exec, timeout |
 

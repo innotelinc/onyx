@@ -2,24 +2,30 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"time"
 
 	onyxv1 "onyx.dev/onyx/proto/gen/go/onyx/v1"
 )
 
-// server implements Health and Core (proto/onyx/v1).
+// server implements Health, Core, and CoreShares (proto/onyx/v1).
 type server struct {
 	onyxv1.UnimplementedHealthServer
 	onyxv1.UnimplementedCoreServer
+	onyxv1.UnimplementedCoreSharesServer
 
+	db             *sql.DB
+	shared         onyxv1.SharedClient
 	storaged       onyxv1.StoragedClient
 	storagedHealth onyxv1.HealthClient
+	sharedHealth   onyxv1.HealthClient
 	privdHealth    onyxv1.HealthClient
 }
 
 var _ onyxv1.HealthServer = (*server)(nil)
 var _ onyxv1.CoreServer = (*server)(nil)
+var _ onyxv1.CoreSharesServer = (*server)(nil)
 
 func (s *server) Check(_ context.Context, _ *onyxv1.HealthCheckRequest) (*onyxv1.HealthCheckResponse, error) {
 	return &onyxv1.HealthCheckResponse{
@@ -35,6 +41,9 @@ func (s *server) SystemStatus(ctx context.Context, _ *onyxv1.SystemStatusRequest
 		{Name: "onyx-core", Version: version, Status: onyxv1.HealthCheckResponse_SERVING},
 	}
 	if st := healthOf(ctx, s.storagedHealth, "onyx-storaged", 2*time.Second); st != nil {
+		services = append(services, st)
+	}
+	if st := healthOf(ctx, s.sharedHealth, "onyx-shared", 2*time.Second); st != nil {
 		services = append(services, st)
 	}
 	if st := healthOf(ctx, s.privdHealth, "onyx-privd", 2*time.Second); st != nil {
