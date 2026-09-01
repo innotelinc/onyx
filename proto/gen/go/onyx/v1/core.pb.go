@@ -182,11 +182,18 @@ const file_onyx_v1_core_proto_rawDesc = "" +
 	"\rServiceStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12B\n" +
-	"\x06status\x18\x03 \x01(\x0e2*.onyx.v1.HealthCheckResponse.ServingStatusR\x06status2\xca\x01\n" +
+	"\x06status\x18\x03 \x01(\x0e2*.onyx.v1.HealthCheckResponse.ServingStatusR\x06status2\xd8\x04\n" +
 	"\x04Core\x12K\n" +
 	"\fSystemStatus\x12\x1c.onyx.v1.SystemStatusRequest\x1a\x1d.onyx.v1.SystemStatusResponse\x12B\n" +
 	"\tListPools\x12\x19.onyx.v1.ListPoolsRequest\x1a\x1a.onyx.v1.ListPoolsResponse\x121\n" +
-	"\aGetPool\x12\x17.onyx.v1.GetPoolRequest\x1a\r.onyx.v1.PoolB+Z)onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
+	"\aGetPool\x12\x17.onyx.v1.GetPoolRequest\x1a\r.onyx.v1.Pool\x12H\n" +
+	"\vListDevices\x12\x1b.onyx.v1.ListDevicesRequest\x1a\x1c.onyx.v1.ListDevicesResponse\x127\n" +
+	"\tGetDevice\x12\x19.onyx.v1.GetDeviceRequest\x1a\x0f.onyx.v1.Device\x12;\n" +
+	"\vMountDevice\x12\x1b.onyx.v1.MountDeviceRequest\x1a\x0f.onyx.v1.Device\x12?\n" +
+	"\rUnmountDevice\x12\x1d.onyx.v1.UnmountDeviceRequest\x1a\x0f.onyx.v1.Device\x12E\n" +
+	"\n" +
+	"ListEvents\x12\x1a.onyx.v1.ListEventsRequest\x1a\x1b.onyx.v1.ListEventsResponse\x12D\n" +
+	"\fWatchDevices\x12\x1c.onyx.v1.WatchDevicesRequest\x1a\x14.onyx.v1.DeviceEvent0\x01B+Z)onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 
 var (
 	file_onyx_v1_core_proto_rawDescOnce sync.Once
@@ -208,23 +215,45 @@ var file_onyx_v1_core_proto_goTypes = []any{
 	(HealthCheckResponse_ServingStatus)(0), // 3: onyx.v1.HealthCheckResponse.ServingStatus
 	(*ListPoolsRequest)(nil),               // 4: onyx.v1.ListPoolsRequest
 	(*GetPoolRequest)(nil),                 // 5: onyx.v1.GetPoolRequest
-	(*ListPoolsResponse)(nil),              // 6: onyx.v1.ListPoolsResponse
-	(*Pool)(nil),                           // 7: onyx.v1.Pool
+	(*ListDevicesRequest)(nil),             // 6: onyx.v1.ListDevicesRequest
+	(*GetDeviceRequest)(nil),               // 7: onyx.v1.GetDeviceRequest
+	(*MountDeviceRequest)(nil),             // 8: onyx.v1.MountDeviceRequest
+	(*UnmountDeviceRequest)(nil),           // 9: onyx.v1.UnmountDeviceRequest
+	(*ListEventsRequest)(nil),              // 10: onyx.v1.ListEventsRequest
+	(*WatchDevicesRequest)(nil),            // 11: onyx.v1.WatchDevicesRequest
+	(*ListPoolsResponse)(nil),              // 12: onyx.v1.ListPoolsResponse
+	(*Pool)(nil),                           // 13: onyx.v1.Pool
+	(*ListDevicesResponse)(nil),            // 14: onyx.v1.ListDevicesResponse
+	(*Device)(nil),                         // 15: onyx.v1.Device
+	(*ListEventsResponse)(nil),             // 16: onyx.v1.ListEventsResponse
+	(*DeviceEvent)(nil),                    // 17: onyx.v1.DeviceEvent
 }
 var file_onyx_v1_core_proto_depIdxs = []int32{
-	2, // 0: onyx.v1.SystemStatusResponse.services:type_name -> onyx.v1.ServiceStatus
-	3, // 1: onyx.v1.ServiceStatus.status:type_name -> onyx.v1.HealthCheckResponse.ServingStatus
-	0, // 2: onyx.v1.Core.SystemStatus:input_type -> onyx.v1.SystemStatusRequest
-	4, // 3: onyx.v1.Core.ListPools:input_type -> onyx.v1.ListPoolsRequest
-	5, // 4: onyx.v1.Core.GetPool:input_type -> onyx.v1.GetPoolRequest
-	1, // 5: onyx.v1.Core.SystemStatus:output_type -> onyx.v1.SystemStatusResponse
-	6, // 6: onyx.v1.Core.ListPools:output_type -> onyx.v1.ListPoolsResponse
-	7, // 7: onyx.v1.Core.GetPool:output_type -> onyx.v1.Pool
-	5, // [5:8] is the sub-list for method output_type
-	2, // [2:5] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	2,  // 0: onyx.v1.SystemStatusResponse.services:type_name -> onyx.v1.ServiceStatus
+	3,  // 1: onyx.v1.ServiceStatus.status:type_name -> onyx.v1.HealthCheckResponse.ServingStatus
+	0,  // 2: onyx.v1.Core.SystemStatus:input_type -> onyx.v1.SystemStatusRequest
+	4,  // 3: onyx.v1.Core.ListPools:input_type -> onyx.v1.ListPoolsRequest
+	5,  // 4: onyx.v1.Core.GetPool:input_type -> onyx.v1.GetPoolRequest
+	6,  // 5: onyx.v1.Core.ListDevices:input_type -> onyx.v1.ListDevicesRequest
+	7,  // 6: onyx.v1.Core.GetDevice:input_type -> onyx.v1.GetDeviceRequest
+	8,  // 7: onyx.v1.Core.MountDevice:input_type -> onyx.v1.MountDeviceRequest
+	9,  // 8: onyx.v1.Core.UnmountDevice:input_type -> onyx.v1.UnmountDeviceRequest
+	10, // 9: onyx.v1.Core.ListEvents:input_type -> onyx.v1.ListEventsRequest
+	11, // 10: onyx.v1.Core.WatchDevices:input_type -> onyx.v1.WatchDevicesRequest
+	1,  // 11: onyx.v1.Core.SystemStatus:output_type -> onyx.v1.SystemStatusResponse
+	12, // 12: onyx.v1.Core.ListPools:output_type -> onyx.v1.ListPoolsResponse
+	13, // 13: onyx.v1.Core.GetPool:output_type -> onyx.v1.Pool
+	14, // 14: onyx.v1.Core.ListDevices:output_type -> onyx.v1.ListDevicesResponse
+	15, // 15: onyx.v1.Core.GetDevice:output_type -> onyx.v1.Device
+	15, // 16: onyx.v1.Core.MountDevice:output_type -> onyx.v1.Device
+	15, // 17: onyx.v1.Core.UnmountDevice:output_type -> onyx.v1.Device
+	16, // 18: onyx.v1.Core.ListEvents:output_type -> onyx.v1.ListEventsResponse
+	17, // 19: onyx.v1.Core.WatchDevices:output_type -> onyx.v1.DeviceEvent
+	11, // [11:20] is the sub-list for method output_type
+	2,  // [2:11] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_onyx_v1_core_proto_init() }

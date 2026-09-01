@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -23,11 +25,13 @@ const version = "0.1.0-dev"
 
 func main() {
 	var (
-		socketDir    = flag.String("socket-dir", "/run/onyx", "directory for onyx unix sockets")
-		stateDir     = flag.String("state-dir", "/var/lib/onyx/core", "service state directory (SQLite)")
-		storagedSock = flag.String("storaged-socket", "", "onyx-storaged socket (default: <socket-dir>/onyx-storaged.sock)")
-		privdSock    = flag.String("privd-socket", "", "onyx-privd socket (default: <socket-dir>/onyx-privd.sock)")
-		sharedSock   = flag.String("shared-socket", "", "onyx-shared socket (default: <socket-dir>/onyx-shared.sock)")
+		socketDir      = flag.String("socket-dir", "/run/onyx", "directory for onyx unix sockets")
+		stateDir       = flag.String("state-dir", "/var/lib/onyx/core", "service state directory (SQLite)")
+		storagedSock   = flag.String("storaged-socket", "", "onyx-storaged socket (default: <socket-dir>/onyx-storaged.sock)")
+		privdSock      = flag.String("privd-socket", "", "onyx-privd socket (default: <socket-dir>/onyx-privd.sock)")
+		sharedSock     = flag.String("shared-socket", "", "onyx-shared socket (default: <socket-dir>/onyx-shared.sock)")
+		reconcileEvery = flag.Duration("device-reconcile-interval", 2*time.Second, "how often shares are reconciled with the hotplug device list")
+		mountRoot      = flag.String("device-mount-root", "/mnt/onyx", "only drives mounted under this root become auto shares")
 	)
 	flag.Parse()
 
@@ -80,18 +84,42 @@ func main() {
 	}
 	defer sharedConn.Close()
 
+	sharedClient := onyxv1.NewSharedClient(sharedConn)
+	privdClient := onyxv1.NewPrivdClient(privdConn)
+	applier := newConfigApplier(db, sharedClient, privdClient)
+
 	gs := grpc.NewServer()
 	srv := &server{
 		db:             db,
-		shared:         onyxv1.NewSharedClient(sharedConn),
 		storaged:       onyxv1.NewStoragedClient(storagedConn),
 		storagedHealth: onyxv1.NewHealthClient(storagedConn),
 		sharedHealth:   onyxv1.NewHealthClient(sharedConn),
 		privdHealth:    onyxv1.NewHealthClient(privdConn),
+		config:         applier,
 	}
 	onyxv1.RegisterHealthServer(gs, srv)
 	onyxv1.RegisterCoreServer(gs, srv)
 	onyxv1.RegisterCoreSharesServer(gs, srv)
+
+	// The hotplug reconciler turns mounted devices into shares automatically
+	// and removes them on detach; it runs for the lifetime of core.
+	reconcilerCtx, stopReconciler := context.WithCancel(context.Background())
+	rc := &deviceReconciler{
+		db:        db,
+		storaged:  onyxv1.NewStoragedClient(storagedConn),
+		config:    applier,
+		mountRoot: *mountRoot,
+	}
+	go rc.run(reconcilerCtx, *reconcileEvery)
+
+	// Bring the daemon config in sync with whatever shares already exist on
+	// boot (privd/shared may not be healthy yet — the reconcile loop retries
+	// if this first pass fails).
+	go func() {
+		if err := applier.apply(context.Background()); err != nil {
+			slog.Warn("initial daemon config apply deferred", "error", err)
+		}
+	}()
 
 	sock := absSocketPath(*socketDir, "onyx-core.sock")
 	_ = os.Remove(sock) // stale socket from a previous run
@@ -107,6 +135,7 @@ func main() {
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 		<-sig
 		slog.Info("shutting down")
+		stopReconciler()
 		gs.GracefulStop()
 	}()
 

@@ -16,11 +16,11 @@ type server struct {
 	onyxv1.UnimplementedCoreSharesServer
 
 	db             *sql.DB
-	shared         onyxv1.SharedClient
 	storaged       onyxv1.StoragedClient
 	storagedHealth onyxv1.HealthClient
 	sharedHealth   onyxv1.HealthClient
 	privdHealth    onyxv1.HealthClient
+	config         *configApplier
 }
 
 var _ onyxv1.HealthServer = (*server)(nil)

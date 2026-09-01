@@ -32,9 +32,11 @@ start() {
 
   # onyx-privd (Rust privilege helper, the one root process).
   # ONYX_PRIVD_BTRFS_BIN overrides the btrfs binary for sandbox testing.
+  # Written daemon config (smb.conf/exports) lands under .run/, never /etc.
   local btrfs_arg=()
   [ -n "${ONYX_PRIVD_BTRFS_BIN:-}" ] && btrfs_arg=(--btrfs-bin "$ONYX_PRIVD_BTRFS_BIN")
-  "$BIN/onyx-privd" --socket-dir "$SOCK_DIR" "${btrfs_arg[@]}" >"$RUN/onyx-privd.log" 2>&1 &
+  "$BIN/onyx-privd" --socket-dir "$SOCK_DIR" --config-dir "$RUN/conf.d" "${btrfs_arg[@]}" \
+    >"$RUN/onyx-privd.log" 2>&1 &
   echo $! >"$RUN/onyx-privd.pid"
 
   # wait for the privd socket before starting storaged (it scans via privd)

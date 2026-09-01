@@ -19,9 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Core_SystemStatus_FullMethodName = "/onyx.v1.Core/SystemStatus"
-	Core_ListPools_FullMethodName    = "/onyx.v1.Core/ListPools"
-	Core_GetPool_FullMethodName      = "/onyx.v1.Core/GetPool"
+	Core_SystemStatus_FullMethodName  = "/onyx.v1.Core/SystemStatus"
+	Core_ListPools_FullMethodName     = "/onyx.v1.Core/ListPools"
+	Core_GetPool_FullMethodName       = "/onyx.v1.Core/GetPool"
+	Core_ListDevices_FullMethodName   = "/onyx.v1.Core/ListDevices"
+	Core_GetDevice_FullMethodName     = "/onyx.v1.Core/GetDevice"
+	Core_MountDevice_FullMethodName   = "/onyx.v1.Core/MountDevice"
+	Core_UnmountDevice_FullMethodName = "/onyx.v1.Core/UnmountDevice"
+	Core_ListEvents_FullMethodName    = "/onyx.v1.Core/ListEvents"
+	Core_WatchDevices_FullMethodName  = "/onyx.v1.Core/WatchDevices"
 )
 
 // CoreClient is the client API for Core service.
@@ -39,6 +45,20 @@ type CoreClient interface {
 	ListPools(ctx context.Context, in *ListPoolsRequest, opts ...grpc.CallOption) (*ListPoolsResponse, error)
 	// GetPool returns one pool by name, forwarded to onyx-storaged.
 	GetPool(ctx context.Context, in *GetPoolRequest, opts ...grpc.CallOption) (*Pool, error)
+	// ListDevices returns every block device the data plane has detected
+	// (attached, mounted or recently detached), forwarded to onyx-storaged.
+	ListDevices(ctx context.Context, in *ListDevicesRequest, opts ...grpc.CallOption) (*ListDevicesResponse, error)
+	// GetDevice returns one device by name, forwarded to onyx-storaged.
+	GetDevice(ctx context.Context, in *GetDeviceRequest, opts ...grpc.CallOption) (*Device, error)
+	// MountDevice explicitly attaches one device, forwarded to onyx-storaged.
+	MountDevice(ctx context.Context, in *MountDeviceRequest, opts ...grpc.CallOption) (*Device, error)
+	// UnmountDevice detaches one device, forwarded to onyx-storaged.
+	UnmountDevice(ctx context.Context, in *UnmountDeviceRequest, opts ...grpc.CallOption) (*Device, error)
+	// ListEvents pages the device audit trail, forwarded to onyx-storaged.
+	ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (*ListEventsResponse, error)
+	// WatchDevices tails the live hotplug + health event stream, forwarded
+	// from onyx-storaged (the gateway exposes it as SSE).
+	WatchDevices(ctx context.Context, in *WatchDevicesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DeviceEvent], error)
 }
 
 type coreClient struct {
@@ -79,6 +99,75 @@ func (c *coreClient) GetPool(ctx context.Context, in *GetPoolRequest, opts ...gr
 	return out, nil
 }
 
+func (c *coreClient) ListDevices(ctx context.Context, in *ListDevicesRequest, opts ...grpc.CallOption) (*ListDevicesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListDevicesResponse)
+	err := c.cc.Invoke(ctx, Core_ListDevices_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coreClient) GetDevice(ctx context.Context, in *GetDeviceRequest, opts ...grpc.CallOption) (*Device, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Device)
+	err := c.cc.Invoke(ctx, Core_GetDevice_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coreClient) MountDevice(ctx context.Context, in *MountDeviceRequest, opts ...grpc.CallOption) (*Device, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Device)
+	err := c.cc.Invoke(ctx, Core_MountDevice_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coreClient) UnmountDevice(ctx context.Context, in *UnmountDeviceRequest, opts ...grpc.CallOption) (*Device, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Device)
+	err := c.cc.Invoke(ctx, Core_UnmountDevice_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coreClient) ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (*ListEventsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListEventsResponse)
+	err := c.cc.Invoke(ctx, Core_ListEvents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coreClient) WatchDevices(ctx context.Context, in *WatchDevicesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DeviceEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Core_ServiceDesc.Streams[0], Core_WatchDevices_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchDevicesRequest, DeviceEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Core_WatchDevicesClient = grpc.ServerStreamingClient[DeviceEvent]
+
 // CoreServer is the server API for Core service.
 // All implementations must embed UnimplementedCoreServer
 // for forward compatibility.
@@ -94,6 +183,20 @@ type CoreServer interface {
 	ListPools(context.Context, *ListPoolsRequest) (*ListPoolsResponse, error)
 	// GetPool returns one pool by name, forwarded to onyx-storaged.
 	GetPool(context.Context, *GetPoolRequest) (*Pool, error)
+	// ListDevices returns every block device the data plane has detected
+	// (attached, mounted or recently detached), forwarded to onyx-storaged.
+	ListDevices(context.Context, *ListDevicesRequest) (*ListDevicesResponse, error)
+	// GetDevice returns one device by name, forwarded to onyx-storaged.
+	GetDevice(context.Context, *GetDeviceRequest) (*Device, error)
+	// MountDevice explicitly attaches one device, forwarded to onyx-storaged.
+	MountDevice(context.Context, *MountDeviceRequest) (*Device, error)
+	// UnmountDevice detaches one device, forwarded to onyx-storaged.
+	UnmountDevice(context.Context, *UnmountDeviceRequest) (*Device, error)
+	// ListEvents pages the device audit trail, forwarded to onyx-storaged.
+	ListEvents(context.Context, *ListEventsRequest) (*ListEventsResponse, error)
+	// WatchDevices tails the live hotplug + health event stream, forwarded
+	// from onyx-storaged (the gateway exposes it as SSE).
+	WatchDevices(*WatchDevicesRequest, grpc.ServerStreamingServer[DeviceEvent]) error
 	mustEmbedUnimplementedCoreServer()
 }
 
@@ -112,6 +215,24 @@ func (UnimplementedCoreServer) ListPools(context.Context, *ListPoolsRequest) (*L
 }
 func (UnimplementedCoreServer) GetPool(context.Context, *GetPoolRequest) (*Pool, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetPool not implemented")
+}
+func (UnimplementedCoreServer) ListDevices(context.Context, *ListDevicesRequest) (*ListDevicesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListDevices not implemented")
+}
+func (UnimplementedCoreServer) GetDevice(context.Context, *GetDeviceRequest) (*Device, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetDevice not implemented")
+}
+func (UnimplementedCoreServer) MountDevice(context.Context, *MountDeviceRequest) (*Device, error) {
+	return nil, status.Error(codes.Unimplemented, "method MountDevice not implemented")
+}
+func (UnimplementedCoreServer) UnmountDevice(context.Context, *UnmountDeviceRequest) (*Device, error) {
+	return nil, status.Error(codes.Unimplemented, "method UnmountDevice not implemented")
+}
+func (UnimplementedCoreServer) ListEvents(context.Context, *ListEventsRequest) (*ListEventsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListEvents not implemented")
+}
+func (UnimplementedCoreServer) WatchDevices(*WatchDevicesRequest, grpc.ServerStreamingServer[DeviceEvent]) error {
+	return status.Error(codes.Unimplemented, "method WatchDevices not implemented")
 }
 func (UnimplementedCoreServer) mustEmbedUnimplementedCoreServer() {}
 func (UnimplementedCoreServer) testEmbeddedByValue()              {}
@@ -188,6 +309,107 @@ func _Core_GetPool_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Core_ListDevices_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListDevicesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).ListDevices(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_ListDevices_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).ListDevices(ctx, req.(*ListDevicesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Core_GetDevice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetDeviceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).GetDevice(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_GetDevice_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).GetDevice(ctx, req.(*GetDeviceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Core_MountDevice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MountDeviceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).MountDevice(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_MountDevice_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).MountDevice(ctx, req.(*MountDeviceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Core_UnmountDevice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnmountDeviceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).UnmountDevice(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_UnmountDevice_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).UnmountDevice(ctx, req.(*UnmountDeviceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Core_ListEvents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListEventsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).ListEvents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_ListEvents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).ListEvents(ctx, req.(*ListEventsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Core_WatchDevices_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchDevicesRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(CoreServer).WatchDevices(m, &grpc.GenericServerStream[WatchDevicesRequest, DeviceEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Core_WatchDevicesServer = grpc.ServerStreamingServer[DeviceEvent]
+
 // Core_ServiceDesc is the grpc.ServiceDesc for Core service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -207,7 +429,33 @@ var Core_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "GetPool",
 			Handler:    _Core_GetPool_Handler,
 		},
+		{
+			MethodName: "ListDevices",
+			Handler:    _Core_ListDevices_Handler,
+		},
+		{
+			MethodName: "GetDevice",
+			Handler:    _Core_GetDevice_Handler,
+		},
+		{
+			MethodName: "MountDevice",
+			Handler:    _Core_MountDevice_Handler,
+		},
+		{
+			MethodName: "UnmountDevice",
+			Handler:    _Core_UnmountDevice_Handler,
+		},
+		{
+			MethodName: "ListEvents",
+			Handler:    _Core_ListEvents_Handler,
+		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "WatchDevices",
+			Handler:       _Core_WatchDevices_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "onyx/v1/core.proto",
 }

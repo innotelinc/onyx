@@ -19,8 +19,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Storaged_ListPools_FullMethodName = "/onyx.v1.Storaged/ListPools"
-	Storaged_GetPool_FullMethodName   = "/onyx.v1.Storaged/GetPool"
+	Storaged_ListPools_FullMethodName     = "/onyx.v1.Storaged/ListPools"
+	Storaged_GetPool_FullMethodName       = "/onyx.v1.Storaged/GetPool"
+	Storaged_ListDevices_FullMethodName   = "/onyx.v1.Storaged/ListDevices"
+	Storaged_GetDevice_FullMethodName     = "/onyx.v1.Storaged/GetDevice"
+	Storaged_MountDevice_FullMethodName   = "/onyx.v1.Storaged/MountDevice"
+	Storaged_UnmountDevice_FullMethodName = "/onyx.v1.Storaged/UnmountDevice"
+	Storaged_ListEvents_FullMethodName    = "/onyx.v1.Storaged/ListEvents"
+	Storaged_WatchDevices_FullMethodName  = "/onyx.v1.Storaged/WatchDevices"
 )
 
 // StoragedClient is the client API for Storaged service.
@@ -33,6 +39,15 @@ const (
 type StoragedClient interface {
 	ListPools(ctx context.Context, in *ListPoolsRequest, opts ...grpc.CallOption) (*ListPoolsResponse, error)
 	GetPool(ctx context.Context, in *GetPoolRequest, opts ...grpc.CallOption) (*Pool, error)
+	ListDevices(ctx context.Context, in *ListDevicesRequest, opts ...grpc.CallOption) (*ListDevicesResponse, error)
+	GetDevice(ctx context.Context, in *GetDeviceRequest, opts ...grpc.CallOption) (*Device, error)
+	MountDevice(ctx context.Context, in *MountDeviceRequest, opts ...grpc.CallOption) (*Device, error)
+	UnmountDevice(ctx context.Context, in *UnmountDeviceRequest, opts ...grpc.CallOption) (*Device, error)
+	// ListEvents returns the device audit trail (attach/detach/health/error),
+	// newest-first unless after_id is given (then oldest-first from that id).
+	ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (*ListEventsResponse, error)
+	// WatchDevices streams hotplug + health events as they happen.
+	WatchDevices(ctx context.Context, in *WatchDevicesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DeviceEvent], error)
 }
 
 type storagedClient struct {
@@ -63,6 +78,75 @@ func (c *storagedClient) GetPool(ctx context.Context, in *GetPoolRequest, opts .
 	return out, nil
 }
 
+func (c *storagedClient) ListDevices(ctx context.Context, in *ListDevicesRequest, opts ...grpc.CallOption) (*ListDevicesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListDevicesResponse)
+	err := c.cc.Invoke(ctx, Storaged_ListDevices_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *storagedClient) GetDevice(ctx context.Context, in *GetDeviceRequest, opts ...grpc.CallOption) (*Device, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Device)
+	err := c.cc.Invoke(ctx, Storaged_GetDevice_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *storagedClient) MountDevice(ctx context.Context, in *MountDeviceRequest, opts ...grpc.CallOption) (*Device, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Device)
+	err := c.cc.Invoke(ctx, Storaged_MountDevice_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *storagedClient) UnmountDevice(ctx context.Context, in *UnmountDeviceRequest, opts ...grpc.CallOption) (*Device, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Device)
+	err := c.cc.Invoke(ctx, Storaged_UnmountDevice_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *storagedClient) ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (*ListEventsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListEventsResponse)
+	err := c.cc.Invoke(ctx, Storaged_ListEvents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *storagedClient) WatchDevices(ctx context.Context, in *WatchDevicesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DeviceEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Storaged_ServiceDesc.Streams[0], Storaged_WatchDevices_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchDevicesRequest, DeviceEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Storaged_WatchDevicesClient = grpc.ServerStreamingClient[DeviceEvent]
+
 // StoragedServer is the server API for Storaged service.
 // All implementations must embed UnimplementedStoragedServer
 // for forward compatibility.
@@ -73,6 +157,15 @@ func (c *storagedClient) GetPool(ctx context.Context, in *GetPoolRequest, opts .
 type StoragedServer interface {
 	ListPools(context.Context, *ListPoolsRequest) (*ListPoolsResponse, error)
 	GetPool(context.Context, *GetPoolRequest) (*Pool, error)
+	ListDevices(context.Context, *ListDevicesRequest) (*ListDevicesResponse, error)
+	GetDevice(context.Context, *GetDeviceRequest) (*Device, error)
+	MountDevice(context.Context, *MountDeviceRequest) (*Device, error)
+	UnmountDevice(context.Context, *UnmountDeviceRequest) (*Device, error)
+	// ListEvents returns the device audit trail (attach/detach/health/error),
+	// newest-first unless after_id is given (then oldest-first from that id).
+	ListEvents(context.Context, *ListEventsRequest) (*ListEventsResponse, error)
+	// WatchDevices streams hotplug + health events as they happen.
+	WatchDevices(*WatchDevicesRequest, grpc.ServerStreamingServer[DeviceEvent]) error
 	mustEmbedUnimplementedStoragedServer()
 }
 
@@ -88,6 +181,24 @@ func (UnimplementedStoragedServer) ListPools(context.Context, *ListPoolsRequest)
 }
 func (UnimplementedStoragedServer) GetPool(context.Context, *GetPoolRequest) (*Pool, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetPool not implemented")
+}
+func (UnimplementedStoragedServer) ListDevices(context.Context, *ListDevicesRequest) (*ListDevicesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListDevices not implemented")
+}
+func (UnimplementedStoragedServer) GetDevice(context.Context, *GetDeviceRequest) (*Device, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetDevice not implemented")
+}
+func (UnimplementedStoragedServer) MountDevice(context.Context, *MountDeviceRequest) (*Device, error) {
+	return nil, status.Error(codes.Unimplemented, "method MountDevice not implemented")
+}
+func (UnimplementedStoragedServer) UnmountDevice(context.Context, *UnmountDeviceRequest) (*Device, error) {
+	return nil, status.Error(codes.Unimplemented, "method UnmountDevice not implemented")
+}
+func (UnimplementedStoragedServer) ListEvents(context.Context, *ListEventsRequest) (*ListEventsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListEvents not implemented")
+}
+func (UnimplementedStoragedServer) WatchDevices(*WatchDevicesRequest, grpc.ServerStreamingServer[DeviceEvent]) error {
+	return status.Error(codes.Unimplemented, "method WatchDevices not implemented")
 }
 func (UnimplementedStoragedServer) mustEmbedUnimplementedStoragedServer() {}
 func (UnimplementedStoragedServer) testEmbeddedByValue()                  {}
@@ -146,6 +257,107 @@ func _Storaged_GetPool_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Storaged_ListDevices_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListDevicesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StoragedServer).ListDevices(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Storaged_ListDevices_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StoragedServer).ListDevices(ctx, req.(*ListDevicesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Storaged_GetDevice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetDeviceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StoragedServer).GetDevice(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Storaged_GetDevice_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StoragedServer).GetDevice(ctx, req.(*GetDeviceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Storaged_MountDevice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MountDeviceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StoragedServer).MountDevice(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Storaged_MountDevice_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StoragedServer).MountDevice(ctx, req.(*MountDeviceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Storaged_UnmountDevice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnmountDeviceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StoragedServer).UnmountDevice(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Storaged_UnmountDevice_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StoragedServer).UnmountDevice(ctx, req.(*UnmountDeviceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Storaged_ListEvents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListEventsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StoragedServer).ListEvents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Storaged_ListEvents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StoragedServer).ListEvents(ctx, req.(*ListEventsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Storaged_WatchDevices_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchDevicesRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(StoragedServer).WatchDevices(m, &grpc.GenericServerStream[WatchDevicesRequest, DeviceEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Storaged_WatchDevicesServer = grpc.ServerStreamingServer[DeviceEvent]
+
 // Storaged_ServiceDesc is the grpc.ServiceDesc for Storaged service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -161,7 +373,33 @@ var Storaged_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "GetPool",
 			Handler:    _Storaged_GetPool_Handler,
 		},
+		{
+			MethodName: "ListDevices",
+			Handler:    _Storaged_ListDevices_Handler,
+		},
+		{
+			MethodName: "GetDevice",
+			Handler:    _Storaged_GetDevice_Handler,
+		},
+		{
+			MethodName: "MountDevice",
+			Handler:    _Storaged_MountDevice_Handler,
+		},
+		{
+			MethodName: "UnmountDevice",
+			Handler:    _Storaged_UnmountDevice_Handler,
+		},
+		{
+			MethodName: "ListEvents",
+			Handler:    _Storaged_ListEvents_Handler,
+		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "WatchDevices",
+			Handler:       _Storaged_WatchDevices_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "onyx/v1/storaged.proto",
 }

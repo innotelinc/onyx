@@ -248,6 +248,7 @@ var CoreShares_ServiceDesc = grpc.ServiceDesc{
 
 const (
 	Shared_RenderConfig_FullMethodName = "/onyx.v1.Shared/RenderConfig"
+	Shared_RenderAll_FullMethodName    = "/onyx.v1.Shared/RenderAll"
 )
 
 // SharedClient is the client API for Shared service.
@@ -255,10 +256,16 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // Shared renders per-daemon configuration from a Share. It never touches
-// daemons itself; writing config and reloading goes through onyx-privd in a
-// later milestone (docs/design/02#6).
+// daemons itself; onyx-core writes the rendered config and reloads the
+// daemons through onyx-privd (docs/design/02#6 steps 3-4).
 type SharedClient interface {
 	RenderConfig(ctx context.Context, in *RenderConfigRequest, opts ...grpc.CallOption) (*RenderConfigResponse, error)
+	// RenderAll renders the complete daemon config files for the current share
+	// set (docs/design/02#6 step 3): a full smb.conf (global section + every
+	// share) and a full exports file. onyx-core feeds this straight to
+	// onyx-privd's WRITE_DAEMON_CONFIG, so reload sees exactly what the UI
+	// configures.
+	RenderAll(ctx context.Context, in *RenderAllRequest, opts ...grpc.CallOption) (*RenderAllResponse, error)
 }
 
 type sharedClient struct {
@@ -279,15 +286,31 @@ func (c *sharedClient) RenderConfig(ctx context.Context, in *RenderConfigRequest
 	return out, nil
 }
 
+func (c *sharedClient) RenderAll(ctx context.Context, in *RenderAllRequest, opts ...grpc.CallOption) (*RenderAllResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RenderAllResponse)
+	err := c.cc.Invoke(ctx, Shared_RenderAll_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SharedServer is the server API for Shared service.
 // All implementations must embed UnimplementedSharedServer
 // for forward compatibility.
 //
 // Shared renders per-daemon configuration from a Share. It never touches
-// daemons itself; writing config and reloading goes through onyx-privd in a
-// later milestone (docs/design/02#6).
+// daemons itself; onyx-core writes the rendered config and reloads the
+// daemons through onyx-privd (docs/design/02#6 steps 3-4).
 type SharedServer interface {
 	RenderConfig(context.Context, *RenderConfigRequest) (*RenderConfigResponse, error)
+	// RenderAll renders the complete daemon config files for the current share
+	// set (docs/design/02#6 step 3): a full smb.conf (global section + every
+	// share) and a full exports file. onyx-core feeds this straight to
+	// onyx-privd's WRITE_DAEMON_CONFIG, so reload sees exactly what the UI
+	// configures.
+	RenderAll(context.Context, *RenderAllRequest) (*RenderAllResponse, error)
 	mustEmbedUnimplementedSharedServer()
 }
 
@@ -300,6 +323,9 @@ type UnimplementedSharedServer struct{}
 
 func (UnimplementedSharedServer) RenderConfig(context.Context, *RenderConfigRequest) (*RenderConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RenderConfig not implemented")
+}
+func (UnimplementedSharedServer) RenderAll(context.Context, *RenderAllRequest) (*RenderAllResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RenderAll not implemented")
 }
 func (UnimplementedSharedServer) mustEmbedUnimplementedSharedServer() {}
 func (UnimplementedSharedServer) testEmbeddedByValue()                {}
@@ -340,6 +366,24 @@ func _Shared_RenderConfig_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Shared_RenderAll_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RenderAllRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SharedServer).RenderAll(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Shared_RenderAll_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SharedServer).RenderAll(ctx, req.(*RenderAllRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Shared_ServiceDesc is the grpc.ServiceDesc for Shared service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -350,6 +394,10 @@ var Shared_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RenderConfig",
 			Handler:    _Shared_RenderConfig_Handler,
+		},
+		{
+			MethodName: "RenderAll",
+			Handler:    _Shared_RenderAll_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

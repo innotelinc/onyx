@@ -49,7 +49,7 @@ build: gen
 ## check — vet + test all Go and Rust code
 check: vet test
 	@cd services/storaged && cargo test --quiet
-	@cd services/privd && cargo check --quiet
+	@cd services/privd && cargo test --quiet
 
 vet:
 	$(GO) vet ./...
