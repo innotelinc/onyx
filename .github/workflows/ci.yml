@@ -52,3 +52,31 @@ jobs:
           bash -n setup.sh scripts/provision-authentik.sh
           python3 -m py_compile scripts/npm-proxy-hosts.py
           docker compose config --quiet
+
+  docker-build:
+    # Fast image sanity build (no push) so Dockerfile regressions — like a
+    # wrong SERVICE->dir mapping — fail on the PR instead of the release run.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Go daemon image (onyx-api)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/go-service.Dockerfile
+          build-args: SERVICE=onyx-api
+          push: false
+          cache-from: type=gha
+
+      - name: Build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/onyx-web/Dockerfile
+          push: false
+          cache-from: type=gha
