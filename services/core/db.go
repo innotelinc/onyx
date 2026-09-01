@@ -35,6 +35,16 @@ var migrations = []string{
 		status     TEXT NOT NULL DEFAULT 'unknown',
 		updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 	);`,
+	// v2: shares — the logical share model (docs/design/05#6). protocols is a
+	// comma-separated list of enabled protocol names (smb,nfs).
+	`CREATE TABLE IF NOT EXISTS shares (
+		name       TEXT PRIMARY KEY,
+		path       TEXT NOT NULL,
+		comment    TEXT NOT NULL DEFAULT '',
+		readonly   INTEGER NOT NULL DEFAULT 0,
+		protocols  TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL DEFAULT (datetime('now'))
+	);`,
 }
 
 func migrate(db *sql.DB) error {

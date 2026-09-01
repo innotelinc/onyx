@@ -22,13 +22,14 @@ import (
 const version = "0.1.0-dev"
 
 func main() {
-var (
-	socketDir   = flag.String("socket-dir", "/run/onyx", "directory for onyx unix sockets")
-	stateDir    = flag.String("state-dir", "/var/lib/onyx/core", "service state directory (SQLite)")
-	storagedSock = flag.String("storaged-socket", "", "onyx-storaged socket (default: <socket-dir>/onyx-storaged.sock)")
-	privdSock    = flag.String("privd-socket", "", "onyx-privd socket (default: <socket-dir>/onyx-privd.sock)")
-)
-flag.Parse()
+	var (
+		socketDir    = flag.String("socket-dir", "/run/onyx", "directory for onyx unix sockets")
+		stateDir     = flag.String("state-dir", "/var/lib/onyx/core", "service state directory (SQLite)")
+		storagedSock = flag.String("storaged-socket", "", "onyx-storaged socket (default: <socket-dir>/onyx-storaged.sock)")
+		privdSock    = flag.String("privd-socket", "", "onyx-privd socket (default: <socket-dir>/onyx-privd.sock)")
+		sharedSock   = flag.String("shared-socket", "", "onyx-shared socket (default: <socket-dir>/onyx-shared.sock)")
+	)
+	flag.Parse()
 
 	if err := os.MkdirAll(*socketDir, 0o750); err != nil {
 		fatal("create socket dir", err)
@@ -41,6 +42,9 @@ flag.Parse()
 	}
 	if *privdSock == "" {
 		*privdSock = absSocketPath(*socketDir, "onyx-privd.sock")
+	}
+	if *sharedSock == "" {
+		*sharedSock = absSocketPath(*socketDir, "onyx-shared.sock")
 	}
 
 	db, err := openDB(*stateDir)
@@ -67,14 +71,27 @@ flag.Parse()
 	}
 	defer privdConn.Close()
 
+	sharedConn, err := grpc.NewClient(
+		"unix://"+*sharedSock,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		fatal("dial shared", err)
+	}
+	defer sharedConn.Close()
+
 	gs := grpc.NewServer()
 	srv := &server{
+		db:             db,
+		shared:         onyxv1.NewSharedClient(sharedConn),
 		storaged:       onyxv1.NewStoragedClient(storagedConn),
 		storagedHealth: onyxv1.NewHealthClient(storagedConn),
+		sharedHealth:   onyxv1.NewHealthClient(sharedConn),
 		privdHealth:    onyxv1.NewHealthClient(privdConn),
 	}
 	onyxv1.RegisterHealthServer(gs, srv)
 	onyxv1.RegisterCoreServer(gs, srv)
+	onyxv1.RegisterCoreSharesServer(gs, srv)
 
 	sock := absSocketPath(*socketDir, "onyx-core.sock")
 	_ = os.Remove(sock) // stale socket from a previous run

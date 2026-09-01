@@ -58,8 +58,9 @@ func main() {
 	defer coreConn.Close()
 
 	core := onyxv1.NewCoreClient(coreConn)
+	coreShares := onyxv1.NewCoreSharesClient(coreConn)
 
-	srv := &server{core: core, version: version}
+	srv := &server{core: core, coreShares: coreShares, version: version}
 	srv.registerRoutes()
 
 	httpSrv := &http.Server{
@@ -106,9 +107,10 @@ func fatal(what string, err error) {
 
 // server is the HTTP handler; it forwards to onyx-core.
 type server struct {
-	core    onyxv1.CoreClient
-	version string
-	mux     *http.ServeMux
+	core       onyxv1.CoreClient
+	coreShares onyxv1.CoreSharesClient
+	version    string
+	mux        *http.ServeMux
 }
 
 func (s *server) registerRoutes() {
@@ -119,6 +121,10 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("GET /api/v1/system/status", s.handleStatus)
 	mux.HandleFunc("GET /api/v1/pools", s.handlePools)
 	mux.HandleFunc("GET /api/v1/pools/{name}", s.handlePool)
+	mux.HandleFunc("GET /api/v1/shares", s.handleShares)
+	mux.HandleFunc("POST /api/v1/shares", s.handleCreateShare)
+	mux.HandleFunc("GET /api/v1/shares/{name}", s.handleShare)
+	mux.HandleFunc("DELETE /api/v1/shares/{name}", s.handleDeleteShare)
 	s.mux = mux
 }
 
@@ -164,6 +170,82 @@ func (s *server) handlePools(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, protoMessage(resp))
 }
 
+func (s *server) handleShares(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	resp, err := s.coreShares.ListShares(ctx, &onyxv1.ListSharesRequest{})
+	if err != nil {
+		s.writeGRPCError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, protoMessage(resp))
+}
+
+// createShareBody is the wire form of a share-create request. Protocols use
+// friendly names ("smb", "nfs") rather than proto enum values.
+type createShareBody struct {
+	Name      string   `json:"name"`
+	Path      string   `json:"path"`
+	Comment   string   `json:"comment"`
+	Readonly  bool     `json:"readonly"`
+	Protocols []string `json:"protocols"`
+}
+
+func (s *server) handleCreateShare(w http.ResponseWriter, r *http.Request) {
+	var body createShareBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "invalid JSON body: " + err.Error()})
+		return
+	}
+	req := &onyxv1.CreateShareRequest{
+		Name:     body.Name,
+		Path:     body.Path,
+		Comment:  body.Comment,
+		Readonly: body.Readonly,
+	}
+	for _, p := range body.Protocols {
+		switch strings.ToLower(p) {
+		case "smb":
+			req.Protocols = append(req.Protocols, onyxv1.ShareProtocol_SHARE_PROTOCOL_SMB)
+		case "nfs":
+			req.Protocols = append(req.Protocols, onyxv1.ShareProtocol_SHARE_PROTOCOL_NFS)
+		default:
+			writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: fmt.Sprintf("unknown protocol %q (expected smb or nfs)", p)})
+			return
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	resp, err := s.coreShares.CreateShare(ctx, req)
+	if err != nil {
+		s.writeGRPCError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, protoMessage(resp))
+}
+
+func (s *server) handleShare(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	resp, err := s.coreShares.GetShare(ctx, &onyxv1.GetShareRequest{Name: r.PathValue("name")})
+	if err != nil {
+		s.writeGRPCError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, protoMessage(resp))
+}
+
+func (s *server) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	_, err := s.coreShares.DeleteShare(ctx, &onyxv1.DeleteShareRequest{Name: r.PathValue("name")})
+	if err != nil {
+		s.writeGRPCError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": r.PathValue("name")})
+}
+
 // handlePool serves GET /api/v1/pools/{name}; storaged's not_found propagates
 // as a 404 via writeGRPCError (docs/design/06#2-error-model).
 func (s *server) handlePool(w http.ResponseWriter, r *http.Request) {
@@ -198,6 +280,8 @@ func (s *server) writeGRPCError(w http.ResponseWriter, r *http.Request, err erro
 		code, httpStatus = "permission_denied", http.StatusForbidden
 	case codes.Unauthenticated:
 		code, httpStatus = "unauthenticated", http.StatusUnauthorized
+	case codes.AlreadyExists:
+		code, httpStatus = "already_exists", http.StatusConflict
 	}
 	writeEnvelope(w, httpStatus, apiError{
 		Code:      code,
