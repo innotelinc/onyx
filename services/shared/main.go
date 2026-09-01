@@ -1,8 +1,8 @@
 // Command onyx-shared is the share manager (docs/design/04#1): it translates
 // the logical share model (docs/design/05#6) into per-daemon config fragments
 // (smb.conf share sections, /etc/exports entries). It never starts or reloads
-// daemons itself — that goes through onyx-privd in a later milestone
-// (docs/design/02#6, step 4).
+// daemons itself — onyx-core writes the rendered config and reloads
+// smbd/exportfs through onyx-privd (docs/design/02#6 steps 3-4).
 package main
 
 import (
@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -97,6 +98,87 @@ func (s *server) Check(_ context.Context, _ *onyxv1.HealthCheckRequest) (*onyxv1
 	}, nil
 }
 
+// RenderAll renders the complete daemon config files for the current share set
+// (docs/design/02#6 step 3): a full smb.conf (global section + every SMB
+// share) and a full exports file. Deterministic and idempotent: the same share
+// set always renders the same bytes, so onyx-core can diff before writing.
+// fsids are unique across the whole file (collisions on the hash resolve to
+// the next free slot, deterministically — shares are processed in name order).
+func (s *server) RenderAll(_ context.Context, req *onyxv1.RenderAllRequest) (*onyxv1.RenderAllResponse, error) {
+	shares := req.GetShares()
+
+	// Deterministic order for both files: sort copies by name.
+	sorted := make([]*onyxv1.Share, len(shares))
+	copy(sorted, shares)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+
+	var (
+		b     strings.Builder
+		exp   strings.Builder
+		taken = map[int]bool{}
+	)
+
+	for _, share := range sorted {
+		if hasProto(share, onyxv1.ShareProtocol_SHARE_PROTOCOL_SMB) {
+			b.WriteString(renderSmbConf(share))
+			b.WriteString("\n")
+		}
+	}
+
+	for _, share := range sorted {
+		if !hasProto(share, onyxv1.ShareProtocol_SHARE_PROTOCOL_NFS) {
+			continue
+		}
+		fsid := 100 + fnvShare(share.Name)
+		// Resolve hash collisions deterministically (sorted order → stable).
+		for taken[fsid] {
+			fsid++
+		}
+		taken[fsid] = true
+		exp.WriteString(renderNfsExportsFSID(share, fsid))
+	}
+
+	resp := &onyxv1.RenderAllResponse{
+		// Always emit the global skeleton — even with zero SMB shares, reload
+		// must validate a real file rather than an empty one.
+		SmbConf: globalSkeleton() + b.String(),
+	}
+	if exp.Len() > 0 {
+		resp.NfsExports = exp.String()
+	}
+	return resp, nil
+}
+
+// globalSkeleton is the [global] section Samba needs regardless of the share
+// set (docs/design/05#6 SMB row: SMB2/3 default, SMB1 disabled, user auth).
+func globalSkeleton() string {
+	return "# Onyx-generated Samba configuration. Managed by onyx-shared / onyx-core;\n" +
+		"# do not edit by hand. (docs/design/02-technical-architecture#6)\n" +
+		"[global]\n" +
+		"\tworkgroup = WORKGROUP\n" +
+		"\tserver string = Onyx NAS\n" +
+		"\tsecurity = user\n" +
+		"\tmap to guest = never\n" +
+		"\tpassdb backend = tdbsam\n" +
+		"\tserver min protocol = SMB2\n" +
+		"\tserver max protocol = SMB3\n" +
+		"\tlog file = /var/log/samba/log.%m\n" +
+		"\tlogging = file\n" +
+		"\tsmb ports = 445\n" +
+		"\n" +
+		"# The Onyx share sections below are generated per share (docs/design/05#6).\n" +
+		"\n"
+}
+
+func hasProto(share *onyxv1.Share, p onyxv1.ShareProtocol) bool {
+	for _, q := range share.Protocols {
+		if q == p {
+			return true
+		}
+	}
+	return false
+}
+
 // RenderConfig produces daemon fragments for the share's enabled protocols
 // (docs/design/05#6). Configuration is deterministic and idempotent — the same
 // share always renders the same fragments, so reconciliation can diff them.
@@ -142,6 +224,12 @@ func renderNfsExports(share *onyxv1.Share) string {
 	// fsid = 100 + stable hash of the share name, so exports are stable across
 	// renames of the export file.
 	fsid := 100 + fnvShare(share.Name)
+	return renderNfsExportsFSID(share, fsid)
+}
+
+// renderNfsExportsFSID is renderNfsExports with an explicit fsid (used by
+// RenderAll to guarantee uniqueness across the whole exports file).
+func renderNfsExportsFSID(share *onyxv1.Share, fsid int) string {
 	opts := "rw"
 	if share.Readonly {
 		opts = "ro"

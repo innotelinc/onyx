@@ -12,11 +12,11 @@ Small, single-purpose daemons (docs/design/04#1-service-inventory). Each service
 
 | Service | Lang | Location | What it does today |
 |---------|------|----------|--------------------|
-| `onyx-core` | Go | [`core/`](core/) | gRPC `Health` + `Core` + `CoreShares` (SystemStatus, pool forwarding, share CRUD in SQLite); SQLite state dir init |
-| `onyx-api`  | Go | [`api/`](api/) | HTTP gateway: `/api/v1/system/*`, `/api/v1/pools`, `/api/v1/shares`, `/healthz`; error envelope per docs/design/06 |
-| `onyx-shared` | Go | [`shared/`](shared/) | Share manager: renders per-protocol daemon config (smb.conf fragments, NFS exports) from the logical share model |
-| `onyx-storaged` | Rust | [`storaged/`](storaged/) | gRPC `Health` + `Storaged`; real Btrfs pool discovery via `onyx-privd`, cached in a SQLite registry (TTL refresh) |
-| `onyx-privd` | Rust | [`privd/`](privd/) | Root privilege helper: allowlisted `btrfs` ops (`show --raw`, `usage -b`) with per-op validation, no-shell exec, timeout |
+| `onyx-core` | Go | [`core/`](core/) | gRPC `Health` + `Core` + `CoreShares` (SystemStatus, pool/device forwarding, share CRUD in SQLite) + hotplug reconciler that auto-creates/removes shares for mounted drives; **config applier** — renders the full share set via onyx-shared and writes/reloads the daemon config through onyx-privd (change-guarded); SQLite state dir init |
+| `onyx-api`  | Go | [`api/`](api/) | HTTP gateway: `/api/v1/system/*`, `/api/v1/pools`, `/api/v1/shares`, `/api/v1/devices*`, `/healthz`; error envelope per docs/design/06 |
+| `onyx-shared` | Go | [`shared/`](shared/) | Share manager: renders per-protocol daemon config (smb.conf fragments, NFS exports) from the logical share model; `RenderAll` produces the complete smb.conf + exports files (deterministic, unique fsids) |
+| `onyx-storaged` | Rust | [`storaged/`](storaged/) | gRPC `Health` + `Storaged`; Btrfs pool discovery via `onyx-privd`, cached in a SQLite registry (TTL refresh); **hotplug watcher** — kernel uevent (netlink) driven, scans `lsblk`, auto-mounts removable drives under `/mnt/onyx/` via privd, unmounts on detach; slow periodic scan as fallback; SMART health sweep + persistent audit trail (ListEvents/WatchDevices) |
+| `onyx-privd` | Rust | [`privd/`](privd/) | Root privilege helper: allowlisted ops with per-op validation, no-shell exec, timeout — `btrfs` (`show --raw`, `usage -b`), block device ops (`lsblk` scan, `mount`/`umount` with allowlisted uid/gid/umask options), `smartctl -H -A` health probe, **atomic daemon-config write** (`WRITE_DAEMON_CONFIG`: smb.conf/exports under `--config-dir`) + **validated reloads** (`RELOAD_DAEMONS`: `testparm` → `systemctl reload smbd`, `exportfs -ra`) |
 
 ## Planned (roadmap)
 

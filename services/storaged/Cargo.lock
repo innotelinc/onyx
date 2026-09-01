@@ -532,6 +532,7 @@ name = "onyx-storaged"
 version = "0.1.0"
 dependencies = [
  "hyper-util",
+ "libc",
  "prost",
  "rusqlite",
  "tokio",
@@ -958,6 +959,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

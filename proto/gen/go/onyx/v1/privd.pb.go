@@ -32,6 +32,32 @@ const (
 	// `btrfs filesystem usage -b <mountpoint>` — usage stats for one mounted
 	// pool. The single argument must be an existing path under /mnt/onyx/.
 	PrivOp_BTRFS_FILESYSTEM_USAGE_RAW PrivOp = 2
+	// `lsblk -n -P -b -o KNAME,TYPE,FSTYPE,LABEL,UUID,SIZE,MOUNTPOINT` —
+	// enumerate every block device with filesystem+label+uuid info. No
+	// arguments; scanning is unprivileged but probing filesystems over /dev
+	// needs root, so it runs inside privd.
+	PrivOp_LSBLK_RAW PrivOp = 3
+	// `mount <device> <mountpoint>` — attach one validated device at one
+	// validated mountpoint under /mnt/onyx/. Creates the mountpoint directory.
+	// The device argument must be an existing block device under /dev/; the
+	// mountpoint must resolve inside /mnt/onyx/.
+	PrivOp_MOUNT_BLOCK PrivOp = 4
+	// `umount <mountpoint>` — detach one device mounted under /mnt/onyx/.
+	// Safe to call after an unplug (the kernel keeps the mount alive).
+	PrivOp_UNMOUNT_BLOCK PrivOp = 5
+	// `smartctl -H -A <device>` — SMART health + attributes (temperature).
+	// The single argument must be a validated block device under /dev/.
+	PrivOp_SMART_INFO_RAW PrivOp = 6
+	// `write <target> <content>` — atomically write one generated daemon
+	// config (docs/design/04#4, conf.d). target is "smb" (smb.conf) or "nfs"
+	// (exports); the full file content travels as the second argument and is
+	// size-capped. The path is fixed by the target — callers never pass a path.
+	PrivOp_WRITE_DAEMON_CONFIG PrivOp = 7
+	// `reload <targets...>` — validate and reload daemons after a config write
+	// (docs/design/02#6 step 4). "smb": `testparm -s <smb.conf>` first, then
+	// `systemctl reload smbd`. "nfs": `exportfs -ra`. Fails closed: no reload
+	// unless validation passes.
+	PrivOp_RELOAD_DAEMONS PrivOp = 8
 )
 
 // Enum value maps for PrivOp.
@@ -40,11 +66,23 @@ var (
 		0: "PRIV_OP_UNSPECIFIED",
 		1: "BTRFS_FILESYSTEM_SHOW_RAW",
 		2: "BTRFS_FILESYSTEM_USAGE_RAW",
+		3: "LSBLK_RAW",
+		4: "MOUNT_BLOCK",
+		5: "UNMOUNT_BLOCK",
+		6: "SMART_INFO_RAW",
+		7: "WRITE_DAEMON_CONFIG",
+		8: "RELOAD_DAEMONS",
 	}
 	PrivOp_value = map[string]int32{
 		"PRIV_OP_UNSPECIFIED":        0,
 		"BTRFS_FILESYSTEM_SHOW_RAW":  1,
 		"BTRFS_FILESYSTEM_USAGE_RAW": 2,
+		"LSBLK_RAW":                  3,
+		"MOUNT_BLOCK":                4,
+		"UNMOUNT_BLOCK":              5,
+		"SMART_INFO_RAW":             6,
+		"WRITE_DAEMON_CONFIG":        7,
+		"RELOAD_DAEMONS":             8,
 	}
 )
 
@@ -200,11 +238,17 @@ const file_onyx_v1_privd_proto_rawDesc = "" +
 	"\fPrivResponse\x12\x1b\n" +
 	"\texit_code\x18\x01 \x01(\x05R\bexitCode\x12\x16\n" +
 	"\x06stdout\x18\x02 \x01(\fR\x06stdout\x12\x16\n" +
-	"\x06stderr\x18\x03 \x01(\fR\x06stderr*`\n" +
+	"\x06stderr\x18\x03 \x01(\fR\x06stderr*\xd4\x01\n" +
 	"\x06PrivOp\x12\x17\n" +
 	"\x13PRIV_OP_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19BTRFS_FILESYSTEM_SHOW_RAW\x10\x01\x12\x1e\n" +
-	"\x1aBTRFS_FILESYSTEM_USAGE_RAW\x10\x022;\n" +
+	"\x1aBTRFS_FILESYSTEM_USAGE_RAW\x10\x02\x12\r\n" +
+	"\tLSBLK_RAW\x10\x03\x12\x0f\n" +
+	"\vMOUNT_BLOCK\x10\x04\x12\x11\n" +
+	"\rUNMOUNT_BLOCK\x10\x05\x12\x12\n" +
+	"\x0eSMART_INFO_RAW\x10\x06\x12\x17\n" +
+	"\x13WRITE_DAEMON_CONFIG\x10\a\x12\x12\n" +
+	"\x0eRELOAD_DAEMONS\x10\b2;\n" +
 	"\x05Privd\x122\n" +
 	"\x03Run\x12\x14.onyx.v1.PrivRequest\x1a\x15.onyx.v1.PrivResponseB+Z)onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"bufio"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -129,6 +130,106 @@ type Pools struct {
 	Pools []Pool `json:"pools"`
 }
 
+// Device mirrors onyx.v1.Device (protojson camelCase). State is
+// attached | mounted | detached; auto is removable | all | manual;
+// healthStatus is ok | degraded | unknown.
+type Device struct {
+	Name         string `json:"name"`
+	KName        string `json:"kName"`
+	Path         string `json:"path"`
+	Type         string `json:"type"`
+	FSType       string `json:"fsType"`
+	Label        string `json:"label"`
+	UUID         string `json:"uuid"`
+	SizeBytes    uint64 `json:"sizeBytes"`
+	Mountpoint   string `json:"mountpoint"`
+	Removable    bool   `json:"removable"`
+	State        string `json:"state"`
+	Auto         string `json:"auto"`
+	HealthStatus string `json:"healthStatus"`
+	TemperatureC uint32 `json:"temperatureC"`
+}
+
+// UnmarshalJSON accepts both a JSON number and the proto3 JSON string form
+// for 64-bit fields (protojson serializes uint64 as strings).
+func (d *Device) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		Name         string          `json:"name"`
+		KName        string          `json:"kName"`
+		Path         string          `json:"path"`
+		Type         string          `json:"type"`
+		FSType       string          `json:"fsType"`
+		Label        string          `json:"label"`
+		UUID         string          `json:"uuid"`
+		SizeBytes    json.RawMessage `json:"sizeBytes"`
+		Mountpoint   string          `json:"mountpoint"`
+		Removable    bool            `json:"removable"`
+		State        string          `json:"state"`
+		Auto         string          `json:"auto"`
+		HealthStatus string          `json:"healthStatus"`
+		TemperatureC uint32          `json:"temperatureC"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	*d = Device{
+		Name: raw.Name, KName: raw.KName, Path: raw.Path, Type: raw.Type,
+		FSType: raw.FSType, Label: raw.Label, UUID: raw.UUID,
+		Mountpoint: raw.Mountpoint, Removable: raw.Removable,
+		State: raw.State, Auto: raw.Auto,
+		HealthStatus: raw.HealthStatus, TemperatureC: raw.TemperatureC,
+	}
+	size, err := parseUint64(raw.SizeBytes)
+	if err != nil {
+		return fmt.Errorf("sizeBytes: %w", err)
+	}
+	d.SizeBytes = size
+	return nil
+}
+
+// Devices is the response of GET /api/v1/devices.
+type Devices struct {
+	Devices []Device `json:"devices"`
+}
+
+// DeviceEvent mirrors onyx.v1.DeviceEvent. Event is
+// attach | detach | health | error; Detail carries the mountpoint, the
+// reason ("unplugged"/"detached") or the health verdict ("ok temp=38C").
+type DeviceEvent struct {
+	ID     uint64 `json:"id"`
+	TS     string `json:"ts"`
+	KName  string `json:"kName"`
+	Name   string `json:"name"`
+	Event  string `json:"event"`
+	Detail string `json:"detail"`
+}
+
+// UnmarshalJSON handles the proto3 JSON string form of the uint64 id.
+func (e *DeviceEvent) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		ID     json.RawMessage `json:"id"`
+		TS     string          `json:"ts"`
+		KName  string          `json:"kName"`
+		Name   string          `json:"name"`
+		Event  string          `json:"event"`
+		Detail string          `json:"detail"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	id, err := parseUint64(raw.ID)
+	if err != nil {
+		return fmt.Errorf("id: %w", err)
+	}
+	*e = DeviceEvent{ID: id, TS: raw.TS, KName: raw.KName, Name: raw.Name, Event: raw.Event, Detail: raw.Detail}
+	return nil
+}
+
+// Events is the response of GET /api/v1/events.
+type Events struct {
+	Events []DeviceEvent `json:"events"`
+}
+
 // --- API methods ---
 
 // SystemVersion returns core + API versions (GET /api/v1/system/version).
@@ -234,6 +335,131 @@ func (c *Client) DeleteShare(ctx context.Context, name string) error {
 	return c.delete(ctx, "/api/v1/shares/"+url.PathEscape(name))
 }
 
+// ListDevices returns every detected block device
+// (GET /api/v1/devices).
+func (c *Client) ListDevices(ctx context.Context) (*Devices, error) {
+	var d Devices
+	if err := c.getJSON(ctx, "/api/v1/devices", &d); err != nil {
+		return nil, err
+	}
+	if d.Devices == nil {
+		d.Devices = []Device{}
+	}
+	return &d, nil
+}
+
+// GetDevice returns one device by name (GET /api/v1/devices/{name}).
+func (c *Client) GetDevice(ctx context.Context, name string) (*Device, error) {
+	var d Device
+	if err := c.getJSON(ctx, "/api/v1/devices/"+url.PathEscape(name), &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+// MountDevice explicitly attaches (mounts) a device
+// (POST /api/v1/devices/{name}/attach). Idempotent for already-mounted
+// devices.
+func (c *Client) MountDevice(ctx context.Context, name string) (*Device, error) {
+	var d Device
+	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/devices/"+url.PathEscape(name)+"/attach", nil, &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+// UnmountDevice detaches a device onyx mounted
+// (POST /api/v1/devices/{name}/detach).
+func (c *Client) UnmountDevice(ctx context.Context, name string) (*Device, error) {
+	var d Device
+	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/devices/"+url.PathEscape(name)+"/detach", nil, &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+// ListEvents pages the device audit trail (GET /api/v1/events).
+// limit <= 0 means the server default; afterID > 0 pages forward from an
+// event id; kname filters to one device.
+func (c *Client) ListEvents(ctx context.Context, limit int, afterID uint64, kname string) (*Events, error) {
+	q := url.Values{}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	if afterID > 0 {
+		q.Set("after_id", strconv.FormatUint(afterID, 10))
+	}
+	if kname != "" {
+		q.Set("kname", kname)
+	}
+	path := "/api/v1/events"
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	var e Events
+	if err := c.getJSON(ctx, path, &e); err != nil {
+		return nil, err
+	}
+	if e.Events == nil {
+		e.Events = []DeviceEvent{}
+	}
+	return &e, nil
+}
+
+// WatchEvents tails the live device event stream (SSE at
+// /api/v1/events/stream). It returns a channel fed as events arrive; the
+// channel closes when the stream ends (cancel ctx to disconnect). Each SSE
+// record carries the same fields as ListEvents entries.
+func (c *Client) WatchEvents(ctx context.Context) (<-chan DeviceEvent, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint+"/api/v1/events/stream", nil)
+	if err != nil {
+		return nil, &Error{Err: err}
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	// Streaming needs no overall timeout; ctx cancellation controls lifetime.
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return nil, &Error{Err: err}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+		resp.Body.Close()
+		var env struct {
+			Error *APIError `json:"error"`
+		}
+		if json.Unmarshal(body, &env) == nil && env.Error != nil {
+			return nil, env.Error
+		}
+		return nil, &Error{Err: fmt.Errorf("HTTP %d: %s", resp.StatusCode, bytes.TrimSpace(body))}
+	}
+
+	ch := make(chan DeviceEvent, 64)
+	go func() {
+		defer resp.Body.Close()
+		defer close(ch)
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if !strings.HasPrefix(line, "data: ") {
+				continue // :connected comment, keepalives, blank lines
+			}
+			var ev DeviceEvent
+			if err := json.Unmarshal([]byte(line[6:]), &ev); err != nil {
+				continue
+			}
+			select {
+			case ch <- ev:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return ch, nil
+}
+
 // --- plumbing ---
 
 func (c *Client) getJSON(ctx context.Context, path string, out any) error {
@@ -301,6 +527,10 @@ func (c *Client) doJSON(ctx context.Context, method, path string, in, out any) e
 	case *Shares:
 		if o.Shares == nil {
 			o.Shares = []Share{}
+		}
+	case *Devices:
+		if o.Devices == nil {
+			o.Devices = []Device{}
 		}
 	}
 	return nil

@@ -20,6 +20,26 @@ service Core {
 
   // GetPool returns one pool by name, forwarded to onyx-storaged.
   rpc GetPool(GetPoolRequest) returns (Pool);
+
+  // ListDevices returns every block device the data plane has detected
+  // (attached, mounted or recently detached), forwarded to onyx-storaged.
+  rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
+
+  // GetDevice returns one device by name, forwarded to onyx-storaged.
+  rpc GetDevice(GetDeviceRequest) returns (Device);
+
+  // MountDevice explicitly attaches one device, forwarded to onyx-storaged.
+  rpc MountDevice(MountDeviceRequest) returns (Device);
+
+  // UnmountDevice detaches one device, forwarded to onyx-storaged.
+  rpc UnmountDevice(UnmountDeviceRequest) returns (Device);
+
+  // ListEvents pages the device audit trail, forwarded to onyx-storaged.
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
+
+  // WatchDevices tails the live hotplug + health event stream, forwarded
+  // from onyx-storaged (the gateway exposes it as SSE).
+  rpc WatchDevices(WatchDevicesRequest) returns (stream DeviceEvent);
 }
 
 message SystemStatusRequest {}
