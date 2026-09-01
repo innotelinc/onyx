@@ -1,0 +1,26 @@
+{
+  "name": "onyx-debian-trixie",
+  "ref": "onyx/debian-trixie",
+  "suite": "trixie",
+  "mirror": "http://deb.debian.org/debian",
+  "arch": "amd64",
+  "variant": "minbase",
+  "packages": [
+    "systemd",
+    "dbus",
+    "btrfs-progs",
+    "util-linux",
+    "kmod",
+    "ca-certificates",
+    "smartmontools"
+  ],
+  "optional-packages": [
+    "samba",
+    "nfs-kernel-server"
+  ],
+  "firmware-packages": [
+    "firmware-linux",
+    "firmware-misc-nonfree"
+  ],
+  "notes": "base/compose.sh stages this rootfs with debootstrap, drops in deploy/systemd + tmpfiles + files/usr/lib/sysusers.d, enables the onyx units, and commits the result to an OSTree repo for A/B boot (docs/design/10)."
+}

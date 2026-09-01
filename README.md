@@ -138,7 +138,7 @@ Onyx is dual-licensed per the design (docs/design/01 §8): the core OS
 ## Repo layout
 
 ```
-base/          OSTree image definition (stub)
+base/          OSTree image definition (compose scaffold: manifest + compose.sh + seed)
 deploy/        systemd units + tmpfiles for the running system
 services/      onyx-api, onyx-core, onyx-shared (Go) · onyx-storaged, onyx-privd (Rust)
 proto/         gRPC contracts (source of truth) + generated stubs
