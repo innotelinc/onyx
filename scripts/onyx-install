@@ -66,13 +66,14 @@ LIB="$PREFIX/lib/onyx"
 BINCLI="$PREFIX/bin"
 UNITDIR="$PREFIX/lib/systemd/system"
 TMPFILES="$PREFIX/lib/tmpfiles.d"
-SYSTEM_USERS=(onyx-core onyx-api onyx-shared onyx-storaged)
+SYSTEM_USERS=(onyx-core onyx-api onyx-shared onyx-storaged onyx-snapd onyx-backupd onyx-vmm onyx-appd onyx-ai onyx-objectstore)
 # onyx-pool and onyx-firstboot are image/system units: pool auto-mount is
 # useful on hosts too (enable with --enable-pool), firstboot only makes sense
 # with --enable-firstboot (it prompts on the console). bootcheck/updated are
 # A/B-appliance units and stay disabled on script-installed hosts.
-UNITS=(onyx-privd onyx-storaged onyx-shared onyx-core onyx-api)
-BINARIES=(onyx-privd onyx-storaged onyx-shared onyx-core onyx-api onyx)
+DAEMONS=(onyx-privd onyx-storaged onyx-shared onyx-core onyx-api onyx-snapd onyx-backupd onyx-vmm onyx-appd onyx-ai onyx-objectstore)
+UNITS=("${DAEMONS[@]}")
+BINARIES=("${DAEMONS[@]}" onyx)
 ENABLE_FIRSTBOOT=0
 ENABLE_POOL=0
 
@@ -95,8 +96,8 @@ if [ "$UNINSTALL" = 1 ]; then
   fi
   say "uninstalling from $DESTDIR$PREFIX"
   if [ -z "$DESTDIR" ]; then
-    run systemctl stop onyx-api onyx-core onyx-shared onyx-storaged onyx-privd 2>/dev/null || true
-    run systemctl disable onyx-api onyx-core onyx-shared onyx-storaged onyx-privd onyx-pool onyx-firstboot 2>/dev/null || true
+    run systemctl stop "${UNITS[@]}" onyx-pool onyx-firstboot 2>/dev/null || true
+    run systemctl disable "${UNITS[@]}" onyx-pool onyx-firstboot 2>/dev/null || true
   fi
   run rm -f "$DESTDIR$TMPFILES/onyx.conf"
   for u in "${UNITS[@]}"; do run rm -f "$DESTDIR$UNITDIR/$u.service"; done
@@ -104,7 +105,7 @@ if [ "$UNINSTALL" = 1 ]; then
   run rm -rf "$DESTDIR$LIB"
   run rm -f "$DESTDIR$BINCLI/onyx"
   if [ -z "$DESTDIR" ]; then
-    run rmdir /var/lib/onyx/core /var/lib/onyx/onyx-storaged /var/lib/onyx /etc/onyx/conf.d /etc/onyx 2>/dev/null || true
+    run rmdir /var/lib/onyx/core /var/lib/onyx/onyx-storaged /var/lib/onyx/snapd /var/lib/onyx/backupd /var/lib/onyx/vmm /var/lib/onyx/appd /var/lib/onyx/ai /var/lib/onyx/objectstore /var/lib/onyx /etc/onyx/conf.d /etc/onyx 2>/dev/null || true
     for u in "${SYSTEM_USERS[@]}"; do run userdel "$u" 2>/dev/null || true; done
     run groupdel onyx 2>/dev/null || true
     run systemd-tmpfiles --remove onyx.conf 2>/dev/null || true
@@ -149,6 +150,12 @@ if [ -z "$DESTDIR" ]; then
          run install -d -m 0750 -o root -g onyx /var/lib/onyx
          run install -d -m 0750 -o onyx-core -g onyx /var/lib/onyx/core
          run install -d -m 0750 -o onyx-storaged -g onyx /var/lib/onyx/onyx-storaged
+         run install -d -m 0750 -o onyx-snapd -g onyx /var/lib/onyx/snapd
+         run install -d -m 0750 -o onyx-backupd -g onyx /var/lib/onyx/backupd
+         run install -d -m 0750 -o onyx-vmm -g onyx /var/lib/onyx/vmm
+         run install -d -m 0750 -o onyx-appd -g onyx /var/lib/onyx/appd
+         run install -d -m 0750 -o onyx-ai -g onyx /var/lib/onyx/ai
+         run install -d -m 0750 -o onyx-objectstore -g onyx /var/lib/onyx/objectstore
          run install -d -m 0750 -o root -g onyx /etc/onyx
          run install -d -m 0755 -o root -g onyx /etc/onyx/conf.d; }
 fi
@@ -159,7 +166,7 @@ run install -d -m 0755 "$DESTDIR$LIB"
 run install -d -m 0755 "$DESTDIR$BINCLI"
 run install -d -m 0755 "$DESTDIR$UNITDIR"
 run install -d -m 0755 "$DESTDIR$TMPFILES"
-for b in onyx-privd onyx-storaged onyx-shared onyx-core onyx-api; do
+for b in "${DAEMONS[@]}"; do
   run install -m 0755 "$BIN/$b" "$DESTDIR$LIB/$b"
 done
 run install -m 0755 "$BIN/onyx" "$DESTDIR$BINCLI/onyx"
@@ -186,8 +193,8 @@ fi
 if [ -z "$DESTDIR" ] && [ "$DRY_RUN" = 0 ]; then
   say "enabling and starting the onyx stack"
   run systemctl daemon-reload
-  run systemctl enable onyx-privd onyx-storaged onyx-shared onyx-core onyx-api
-  run systemctl start onyx-privd onyx-storaged onyx-shared onyx-core onyx-api
+  run systemctl enable "${UNITS[@]}"
+  run systemctl start "${UNITS[@]}"
   if [ "$ENABLE_POOL" = 1 ]; then
     run systemctl enable onyx-pool.service
     run systemctl start onyx-pool.service || true   # no pool yet is fine

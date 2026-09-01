@@ -1,7 +1,9 @@
-# Onyx — Design Documents
+# ONYX — Design Documents
 
-**Onyx (Online Storage System)** is an open-source NAS operating system for people who want a
-private, powerful file server that feels like a modern app — not an enterprise appliance.
+**ONYX (Online Storage System — Platform)** is an open-source storage and infrastructure
+platform that replaces TrueNAS and ZimaOS: enterprise-grade storage, virtualization, object
+storage, backup management, cloud synchronization, and application hosting — private and
+self-hosted, with a modern app feel rather than an enterprise appliance.
 
 These documents are the living specification for the project. They are written to be read in
 order, but each stands alone and is versioned independently so teams can evolve areas at their
@@ -19,6 +21,7 @@ own pace.
 | 08 | [User Management](08-user-management.md) | Users, groups, roles, ACLs, quotas, API keys, OIDC/LDAP/AD integration |
 | 09 | [App Ecosystem](09-app-ecosystem.md) | App format, store, install UX, sandboxing, SDK, curated catalog |
 | 10 | [Installer and Updates](10-installer-and-updates.md) | Installation targets, first-boot wizard, ostree A/B updates, rollback |
+| 11 | [Platform and Cloud](11-platform-and-cloud.md) | Authentik SSO, Nginx Proxy Manager + TSIG wildcard certs, subdomain routing, Dockerized deployment, virtualization, container management, AI Storage Advisor, object storage + hybrid cloud, release pipeline |
 
 ## Status
 
@@ -40,5 +43,6 @@ The single most important decisions, in one place:
 | Frontend | TypeScript + React SPA, "Prism" design system | Fast iteration, rich UX; served from the gateway |
 | Apps | Docker containers + Compose, AppArmor/seccomp | Largest ecosystem, familiar to maintainers |
 | System DB | SQLite (WAL) per service | Zero-administration, transactional, no separate server |
-| Auth | Local accounts + TOTP/WebAuthn, optional OIDC/LDAP/AD | Simple by default, enterprise-compatible on demand |
+| Auth | Authentik (OIDC/SSO) as the platform IdP; local accounts + TOTP/WebAuthn fallback | Every service signs in through `auth.onyx.innotel.us` |
+| Reverse proxy | Nginx Proxy Manager, provisioned via API | TLS termination, wildcard `*.onyx.innotel.us` via TSIG DNS-01, six subdomains |
 | License | AGPL-3.0 core, Apache-2.0 SDKs/app SDK | Keeps the core free, encourages app ecosystem |

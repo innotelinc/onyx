@@ -1,0 +1,254 @@
+# 11 — Platform and Cloud
+
+**ONYX — Online Storage System — Platform.** This document specifies the
+platform layer that sits on top of the core appliance (docs/design/01–10):
+how the system presents itself as a managed, cloud-connected infrastructure
+platform — SSO identity, edge reverse proxy with wildcard TLS, Dockerized
+deployment, virtualization, container management, object storage with hybrid
+cloud, AI-assisted administration, and the automated release pipeline.
+
+It is the spec behind `setup.sh`, `docker-compose.yml`,
+`scripts/npm-proxy-hosts.py`, `scripts/provision-authentik.sh`,
+`.github/workflows/`, and the platform daemons (`onyx-snapd`, `onyx-backupd`,
+`onyx-vmm`, `onyx-appd`, `onyx-ai`, `onyx-objectstore`).
+
+## 1. Platform identity
+
+- **Product name:** ONYX — Online Storage System — Platform
+- **Repository slug:** `onyx-oss-platform`
+- **Primary domain:** `onyx.innotel.us`
+
+### 1.1 Service subdomains
+
+Every public surface is a subdomain of the primary domain, routed by Nginx
+Proxy Manager (NPM), all behind one wildcard TLS certificate:
+
+| Subdomain | Service | Container | Notes |
+|-----------|---------|-----------|-------|
+| `app.onyx.innotel.us` | Web UI (Prism SPA, v0.2) | `onyx-web` | static frontend; talks to `api` + `auth` |
+| `api.onyx.innotel.us` | HTTP gateway | `onyx-api` | `/api/v1/*`, `/healthz`; also serves `admin` routes |
+| `auth.onyx.innotel.us` | Identity / SSO | `authentik-server` | OIDC provider for every other surface |
+| `storage.onyx.innotel.us` | S3-compatible object storage | `onyx-objectstore` | `GET/PUT/DELETE` buckets+objects; hybrid-cloud tiering |
+| `backup.onyx.innotel.us` | Backup service | `onyx-backupd` | JSON API: jobs, schedules, restore, intelligence |
+| `admin.onyx.innotel.us` | Admin console | `onyx-api` (admin routes) | separate hostname, same gateway; access via Authentik |
+
+The mapping is data, not code: `setup.sh` writes it into the environment
+(`NPM_SUBDOMAINS`) and `scripts/npm-proxy-hosts.py` turns it into NPM proxy
+hosts.
+
+## 2. Identity: Authentik
+
+Authentik is the platform IdP (docs/design/08 moves to it as the primary
+provider; local accounts remain as a fallback for offline operation).
+
+- Deployed as containers: `postgres` (state), `redis` (cache), `authentik-server`,
+  `authentik-worker` (see §5).
+- Bootstrap: `AUTHENTIK_BOOTSTRAP_TOKEN` + `AUTHENTIK_BOOTSTRAP_EMAIL` seed the
+  first superuser; `scripts/provision-authentik.sh` waits for readiness, then
+  creates the **ONYX Platform** OAuth2 provider and application:
+  - authorization/redirect: `https://app.onyx.innotel.us/*`,
+    `https://admin.onyx.innotel.us/*`, loopback for local dev;
+  - client id/secret are written back into `.env` (`AUTHENTIK_CLIENT_ID`/
+    `AUTHENTIK_CLIENT_SECRET`) for downstream services.
+- All six subdomains trust `auth.onyx.innotel.us`; NPM protects the
+  `admin`/`app` hosts with Authentik's forward-auth where enabled.
+
+## 3. Edge: Nginx Proxy Manager
+
+NPM is the only ingress. Everything else binds loopback inside the compose
+network (`127.0.0.1` on the host for the native install, per docs/design/07).
+
+### 3.1 API provisioning (`scripts/npm-proxy-hosts.py`)
+
+`setup.sh` integrates this script (the requirement "npm-proxy-hosts.py into
+setup.sh"): it is the single source of truth for the NPM state.
+
+1. **Login** — `POST /api/tokens` with `NPM_EMAIL`/`NPM_PASSWORD` (env).
+2. **Wildcard certificate** — `POST /api/nginx/certificates` requesting a
+   Let's Encrypt certificate for `["*.onyx.innotel.us", "onyx.innotel.us"]`
+   with `meta.dns_challenge = true`, provider **`rfc2136`** (RFC 2136 dynamic
+   DNS update), carrying the TSIG key:
+   - `DNS_NAMESERVER` (e.g. `ns.innotel.us:53`)
+   - `TSIG_KEY_NAME`, `TSIG_KEY_SECRET`, `TSIG_KEY_ALGORITHM` (e.g. `hmac-sha256`)
+   - Idempotent: if a cert for the wildcard already exists (matched by domain),
+     it is reused/renewed rather than duplicated.
+3. **Proxy hosts** — for each `NPM_SUBDOMAINS` entry, `GET /api/nginx/proxy-hosts`
+   → if absent, `POST /api/nginx/proxy-hosts` with the forward target from the
+   compose network (container DNS name + port); if present, update it
+   (`PUT`). WebSocket-enabled for `app`/`api`/`admin`.
+4. **Report** — prints the final URL table.
+
+Auth to the NPM API is HTTP Basic; all requests over `NPM_BASE_URL`
+(default `http://127.0.0.1:81`).
+
+### 3.2 Wildcard certificates
+
+- Issuer: Let's Encrypt, via NPM.
+- Challenge: **DNS-01** using the `rfc2136` provider — certbot performs
+  `nsupdate` against the authoritative server using the TSIG key, adding a
+  `_acme-challenge` TXT record, then removing it after validation. This is the
+  same TSIG pattern used by the other innotelinc platform projects.
+- Because the challenge is DNS-based, no inbound port 80/443 is needed to
+  issue the certificate — only to serve traffic.
+
+## 4. Dockerized deployment
+
+Every daemon has a `Dockerfile` under `docker/` and ships in
+`docker-compose.yml`. Two runtimes coexist:
+
+- **Native appliance** (bare metal / OSTree image): systemd units in
+  `deploy/systemd/`, installed by `scripts/onyx-install` — unchanged core.
+- **Containerized platform** (this document): `docker compose up -d` from
+  `setup.sh`, all services on an internal network, ingress via NPM only.
+
+The Go daemons use a shared multi-stage pattern (builder `golang:1.27` →
+scratch/alpine runtime, static binaries); the Rust daemons build with
+`rust:1-slim` and copy the static binary out. Images are published to GHCR:
+
+```
+ghcr.io/innotelinc/onyx-oss-platform/onyx-core
+ghcr.io/innotelinc/onyx-oss-platform/onyx-api
+ghcr.io/innotelinc/onyx-oss-platform/onyx-shared
+ghcr.io/innotelinc/onyx-oss-platform/onyx-storaged
+ghcr.io/innotelinc/onyx-oss-platform/onyx-privd
+ghcr.io/innotelinc/onyx-oss-platform/onyx-snapd
+ghcr.io/innotelinc/onyx-oss-platform/onyx-backupd
+ghcr.io/innotelinc/onyx-oss-platform/onyx-vmm
+ghcr.io/innotelinc/onyx-oss-platform/onyx-appd
+ghcr.io/innotelinc/onyx-oss-platform/onyx-ai
+ghcr.io/innotelinc/onyx-oss-platform/onyx-objectstore
+```
+
+Within the compose network, gRPC over unix sockets is replaced by gRPC over
+the shared network (same contracts in `proto/`); state volumes map to
+`/var/lib/onyx/<service>` and the data pool mounts into the storaged/privd
+containers.
+
+## 5. Stack inventory (compose)
+
+| Container | Image | Purpose |
+|-----------|-------|---------|
+| `onyx-privd` | ghcr.io/innotelinc/onyx-oss-platform/onyx-privd | root privilege helper (host-mapped, `--privileged`-free: only needed capabilities) |
+| `onyx-storaged` | ghcr.io/.../onyx-storaged | Btrfs discovery, hotplug, SMART |
+| `onyx-shared` | ghcr.io/.../onyx-shared | share config rendering |
+| `onyx-core` | ghcr.io/.../onyx-core | control plane orchestrator |
+| `onyx-api` | ghcr.io/.../onyx-api | HTTP gateway (exposed only to NPM) |
+| `onyx-snapd` | ghcr.io/.../onyx-snapd | snapshots |
+| `onyx-backupd` | ghcr.io/.../onyx-backupd | backups + intelligence |
+| `onyx-vmm` | ghcr.io/.../onyx-vmm | virtualization |
+| `onyx-appd` | ghcr.io/.../onyx-appd | container/app management |
+| `onyx-ai` | ghcr.io/.../onyx-ai | AI Storage Advisor |
+| `onyx-objectstore` | ghcr.io/.../onyx-objectstore | S3-compatible storage |
+| `onyx-web` | ghcr.io/.../onyx-web | static SPA (v0.2) |
+| `postgres` | postgres:16 | Authentik state |
+| `redis` | redis:7 | Authentik cache/queue |
+| `authentik-server` | ghcr.io/goauthentik/server | SSO |
+| `authentik-worker` | ghcr.io/goauthentik/server | background jobs |
+| `nginx-proxy-manager` | jc21/nginx-proxy-manager | ingress (ports 80/443/81) |
+
+## 6. Platform daemons
+
+All six are gRPC services generated from `proto/onyx/v1/`, following the
+service conventions of docs/design/04. v0.1 ships compilable skeletons
+(contract + server + wiring); roadmap milestones implement the data plane.
+
+### 6.1 `onyx-snapd` — snapshots
+
+Btrfs snapshot lifecycle on top of the fixed subvolume layout
+(`@data/@apps/@backups/@snapshots`, docs/design/05):
+
+- `CreateSnapshot` (subvolume, name, optional readonly), `ListSnapshots`,
+  `DeleteSnapshot`, `RollbackSnapshot` (snapshot → subvolume, requires
+  unmounted target).
+- Scheduling hooks for `onyx-backupd` (snapshot-before-backup).
+
+### 6.2 `onyx-backupd` — backups + Backup Intelligence
+
+- Jobs: source (share/snapshot/pool) → target (local, NFS, remote ONYX,
+  S3-compatible cloud via `onyx-objectstore`); schedules (cron); retention
+  policies; `RestoreBackup`.
+- **Backup Intelligence:** `GetBackupReport` aggregates job history,
+  success/failure trends, data-change velocity per source, and
+  recovery-time/recovery-point estimates. Heuristics run locally;
+  `onyx-ai` can enrich the same report with natural-language findings.
+
+### 6.3 `onyx-vmm` — virtualization
+
+- VM inventory (`ListVMs`), lifecycle (`CreateVM`, `StartVM`, `StopVM`,
+  `DeleteVM`), resources (vCPU/RAM/disk), and media attachment.
+- v0.4 milestone: libvirt/QEMU backend; disk images on the pool's
+  `@apps`/`@data` subvolumes.
+
+### 6.4 `onyx-appd` — container management
+
+- App catalog (`ListApps`, `InstallApp`, `UninstallApp`), container lifecycle
+  (`StartContainer`, `StopContainer`, `RestartContainer`), and compose
+  manifests from the signed app store (docs/design/09).
+
+### 6.5 `onyx-ai` — AI Storage Advisor + Backup Intelligence
+
+- `AnalyzeStorage`: pool/device telemetry (from `onyx-storaged`) →
+  recommendations (free-space runway, snapshot cadence, scrub health,
+  expansion guidance). Deterministic heuristics are computed in-process;
+  a provider hook (`AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL` — local or BYO-key
+  remote) turns the same findings into natural-language advice.
+- `AnalyzeBackups`: consumes `onyx-backupd`'s report (6.2) and produces
+  findings + priorities.
+- Privacy: no telemetry leaves the box unless an explicit BYO-key provider is
+  configured (docs/design/07).
+
+### 6.6 `onyx-objectstore` — object storage + hybrid cloud
+
+- S3-compatible API surface (`storage.onyx.innotel.us`): `ListBuckets`,
+  `PutObject`, `GetObject`, `DeleteObject`, `DeleteBucket` — served over HTTPS
+  by NPM; static credentials from env (`S3_ACCESS_KEY`/`S3_SECRET_KEY`).
+- Bucket storage on the pool (Btrfs subvolume per bucket → snapshots/scrub
+  come free).
+- **Hybrid cloud:** per-bucket lifecycle policies — `LOCAL`, `CLOUD` (primary
+  in an external S3 provider), or `TIERED` (local hot tier, cloud cold tier,
+  with sync/eviction rules). The cloud side is pluggable (AWS S3, Backblaze
+  B2, other S3-compatible endpoints) via `HYBRID_CLOUD_ENDPOINT` +
+  credentials.
+
+## 7. Release pipeline
+
+`.github/workflows/` implements CI/CD:
+
+- **`ci.yml`** — on push/PR: `make bootstrap` (cached), `make check`
+  (vet + tests), `make build`.
+- **`release.yml`** — on every tag `v*`:
+  1. bootstrap toolchain, `make gen`, `make check`, `make build`;
+  2. **release artifacts**: tarballs of `bin/` (per-arch) + `sha256sums.txt`,
+     attached to the GitHub Release;
+  3. **container images**: build + publish all `onyx-*` images to GHCR with
+     `docker/build-push-action` (buildx, `linux/amd64`, `linux/arm64`),
+     tagged `${{ github.ref_name }}` and `latest`.
+  4. `main` pushes additionally publish `latest` images for the platform
+     containers (see workflow).
+
+## 8. Operational flow (setup.sh)
+
+```
+./setup.sh
+  1. validate: docker + compose present, env loaded
+  2. cp .env.example .env if missing (then require editing secrets)
+  3. docker compose up -d --build     (onyx stack + Authentik + NPM)
+  4. wait for NPM API + Authentik readiness
+  5. scripts/provision-authentik.sh    (bootstrap superuser, ONYX OIDC app)
+  6. scripts/npm-proxy-hosts.py        (TSIG wildcard cert + 6 proxy hosts)
+  7. print URL table (app/api/auth/storage/backup/admin)
+```
+
+Idempotent end to end: re-runs converge (cert reuse, proxy-host update,
+provider re-check).
+
+## 9. Security posture
+
+- Single ingress (NPM) on 80/443; everything else loopback-only inside the
+  compose network (extends docs/design/07 to the containerized deployment).
+- Wildcard cert keys live in NPM's data volume; TSIG secret only in `.env`
+  (never committed — `.env` is git-ignored, `.env.example` has placeholders).
+- `onyx-privd` remains the only privilege boundary; containers run as the
+  same unprivileged per-service users where possible.
+- Authentik is the SSO choke point: forward-auth on `app`/`admin`, OIDC for
+  the API, service-to-service traffic stays on the internal network.

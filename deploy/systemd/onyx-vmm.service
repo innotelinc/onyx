@@ -1,0 +1,23 @@
+# onyx-vmm — virtualization service (docs/design/11 §6.3). v0.1 skeleton;
+# the libvirt/QEMU backend lands with v0.4.
+[Unit]
+Description=Onyx virtualization service
+After=local-fs.target onyx-pool.service
+
+[Service]
+Type=simple
+User=onyx-vmm
+Group=onyx
+SupplementaryGroups=onyx
+ExecStart=/usr/local/lib/onyx/onyx-vmm --socket-dir /run/onyx --state-dir /var/lib/onyx/vmm
+Restart=always
+RestartSec=2
+UMask=0002
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/onyx /var/lib/onyx/vmm
+
+[Install]
+WantedBy=multi-user.target

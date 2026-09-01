@@ -14,7 +14,7 @@ Installation targets and flows are specced in
    performs and validates).
 
 **Status at v0.1: script installer shipped; image pipeline complete.** The
-script installer turns an existing Debian-family host into an Onyx box: it
+script installer turns an existing Debian-family host into an ONYX box: it
 builds, creates the unprivileged service users + runtime dirs, installs the
 binaries, systemd units, tmpfiles **and runtime helpers** (`deploy/libexec/`),
 and enables/starts the stack. The OSTree base (`../base/`) now composes a

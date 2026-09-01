@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ONYX — Online Storage System — Platform</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+      background: #0b0e14; color: #e6e8ee;
+    }
+    main { max-width: 720px; padding: 2rem; text-align: center; }
+    h1 { font-size: 2rem; letter-spacing: 0.06em; margin: 0 0 .5rem; }
+    h1 span { color: #4f8cff; }
+    p.sub { color: #9aa3b2; margin: 0 0 2rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .75rem; }
+    a.card {
+      display: block; padding: 1rem; border-radius: .75rem; text-decoration: none;
+      background: #151a24; border: 1px solid #232b3a; color: inherit; transition: border-color .15s;
+    }
+    a.card:hover { border-color: #4f8cff; }
+    a.card b { display: block; margin-bottom: .25rem; color: #4f8cff; }
+    a.card small { color: #9aa3b2; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ONYX<span>.</span></h1>
+    <p class="sub">Online Storage System — Platform</p>
+    <div class="grid">
+      <a class="card" href="https://api.onyx.innotel.us"><b>API</b><small>api.onyx.innotel.us</small></a>
+      <a class="card" href="https://auth.onyx.innotel.us"><b>Identity</b><small>auth.onyx.innotel.us</small></a>
+      <a class="card" href="https://storage.onyx.innotel.us"><b>Storage</b><small>storage.onyx.innotel.us</small></a>
+      <a class="card" href="https://backup.onyx.innotel.us"><b>Backup</b><small>backup.onyx.innotel.us</small></a>
+      <a class="card" href="https://admin.onyx.innotel.us"><b>Admin</b><small>admin.onyx.innotel.us</small></a>
+    </div>
+  </main>
+</body>
+</html>

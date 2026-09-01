@@ -1,0 +1,23 @@
+# onyx-backupd — backup jobs + Backup Intelligence (docs/design/11 §6.2).
+# v0.1 skeleton; the run engine lands with v0.3.
+[Unit]
+Description=Onyx backup service
+After=local-fs.target onyx-pool.service onyx-snapd.service
+
+[Service]
+Type=simple
+User=onyx-backupd
+Group=onyx
+SupplementaryGroups=onyx
+ExecStart=/usr/local/lib/onyx/onyx-backupd --socket-dir /run/onyx --state-dir /var/lib/onyx/backupd
+Restart=always
+RestartSec=2
+UMask=0002
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/onyx /var/lib/onyx/backupd
+
+[Install]
+WantedBy=multi-user.target
