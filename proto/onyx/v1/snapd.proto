@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package onyx.v1;
+
+option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+
+// Snapd manages Btrfs snapshots on the pool's fixed subvolume layout
+// (docs/design/11-platform-and-cloud.md#61-onyx-snapd--snapshots). Snapshots
+// live under @snapshots and are the safety net backing onyx-backupd.
+service Snapd {
+  // CreateSnapshot snapshots one subvolume (e.g. @data/media) into @snapshots.
+  rpc CreateSnapshot(CreateSnapshotRequest) returns (Snapshot);
+
+  // ListSnapshots returns the snapshot catalog for a pool, optionally filtered
+  // by source subvolume.
+  rpc ListSnapshots(ListSnapshotsRequest) returns (ListSnapshotsResponse);
+
+  // DeleteSnapshot removes one snapshot.
+  rpc DeleteSnapshot(DeleteSnapshotRequest) returns (DeleteSnapshotResponse);
+
+  // RollbackSnapshot restores a snapshot over its source subvolume (the target
+  // must not be mounted).
+  rpc RollbackSnapshot(RollbackSnapshotRequest) returns (RollbackSnapshotResponse);
+}
+
+message CreateSnapshotRequest {
+  // Pool name, e.g. "pool1".
+  string pool = 1;
+  // Source subvolume name within the pool, e.g. "@data/media".
+  string subvolume = 2;
+  // Snapshot name; empty = auto (timestamp-based).
+  string name = 3;
+  // Read-only snapshots are the default; writable ones are opt-in.
+  bool writable = 4;
+}
+
+message Snapshot {
+  string id = 1;
+  string pool = 2;
+  string subvolume = 3;
+  string name = 4;
+  // ISO-8601 creation time.
+  string created_at = 5;
+  bool readonly = 6;
+  // Size in bytes as reported by btrfs (0 when unknown).
+  int64 size_bytes = 7;
+}
+
+message ListSnapshotsRequest {
+  string pool = 1;
+  // Filter by source subvolume; empty = all.
+  string subvolume = 2;
+}
+
+message ListSnapshotsResponse {
+  repeated Snapshot snapshots = 1;
+}
+
+message DeleteSnapshotRequest {
+  string id = 1;
+}
+
+message DeleteSnapshotResponse {
+  // True when the snapshot was actually deleted (false = already gone).
+  bool deleted = 1;
+}
+
+message RollbackSnapshotRequest {
+  string id = 1;
+}
+
+message RollbackSnapshotResponse {
+  string subvolume = 1;
+  string snapshot = 2;
+  // ISO-8601 completion time.
+  string completed_at = 3;
+}

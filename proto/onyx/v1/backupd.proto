@@ -1,0 +1,121 @@
+syntax = "proto3";
+
+package onyx.v1;
+
+option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+
+// Backupd runs backup jobs (source → target), schedules, retention, restore,
+// and produces the Backup Intelligence report consumed by onyx-ai
+// (docs/design/11-platform-and-cloud.md#62-onyx-backupd).
+service Backupd {
+  rpc CreateBackupJob(CreateBackupJobRequest) returns (BackupJob);
+  rpc ListBackupJobs(ListBackupJobsRequest) returns (ListBackupJobsResponse);
+  rpc DeleteBackupJob(DeleteBackupJobRequest) returns (DeleteBackupJobResponse);
+  rpc RunBackup(RunBackupRequest) returns (BackupRun);
+  rpc ListBackups(ListBackupsRequest) returns (ListBackupsResponse);
+  rpc RestoreBackup(RestoreBackupRequest) returns (RestoreBackupResponse);
+  // GetBackupReport aggregates job history + trends (Backup Intelligence).
+  rpc GetBackupReport(GetBackupReportRequest) returns (BackupReport);
+}
+
+message BackupJob {
+  string id = 1;
+  string name = 2;
+  // Source: a share name, snapshot id, or pool name.
+  string source = 3;
+  // Target kind: local, nfs, remote, s3.
+  string target_kind = 4;
+  string target = 5;
+  // Cron expression; empty = manual only.
+  string schedule = 6;
+  // Retention: how many runs to keep.
+  int32 retention = 7;
+  // Snapshot the source before backing up (via onyx-snapd).
+  bool snapshot_before = 8;
+  bool enabled = 9;
+}
+
+message CreateBackupJobRequest {
+  string name = 1;
+  string source = 2;
+  string target_kind = 3;
+  string target = 4;
+  string schedule = 5;
+  int32 retention = 6;
+  bool snapshot_before = 7;
+}
+
+message ListBackupJobsRequest {}
+
+message ListBackupJobsResponse {
+  repeated BackupJob jobs = 1;
+}
+
+message DeleteBackupJobRequest {
+  string id = 1;
+}
+
+message DeleteBackupJobResponse {
+  bool deleted = 1;
+}
+
+message RunBackupRequest {
+  string job_id = 1;
+}
+
+message BackupRun {
+  string id = 1;
+  string job_id = 2;
+  string status = 3; // running | succeeded | failed
+  int64 bytes_written = 4;
+  string started_at = 5;
+  string finished_at = 6;
+  string error = 7;
+}
+
+message ListBackupsRequest {
+  string job_id = 1;
+}
+
+message ListBackupsResponse {
+  repeated BackupRun runs = 1;
+}
+
+message RestoreBackupRequest {
+  string run_id = 1;
+  // Restore destination; empty = original source location.
+  string destination = 2;
+}
+
+message RestoreBackupResponse {
+  string run_id = 1;
+  string status = 2;
+  string finished_at = 3;
+}
+
+message GetBackupReportRequest {
+  // Optional job filter; empty = all jobs.
+  string job_id = 1;
+}
+
+message BackupReport {
+  message JobSummary {
+    string job_id = 1;
+    string name = 2;
+    int32 total_runs = 3;
+    int32 failed_runs = 4;
+    int64 bytes_backed_up = 5;
+    // 0..1 success ratio over retained history.
+    double success_ratio = 6;
+    // Estimated recovery time in seconds (last successful run size / rate).
+    int64 estimated_rto_seconds = 7;
+    // Estimated recovery point: max age of the newest successful run, seconds.
+    int64 estimated_rpo_seconds = 8;
+    // Trend: last success ratio minus the prior window (negative = degrading).
+    double trend = 9;
+  }
+  repeated JobSummary jobs = 1;
+  // Overall health 0..1 across all jobs.
+  double overall_health = 2;
+  string generated_at = 3;
+}

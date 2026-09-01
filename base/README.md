@@ -1,6 +1,6 @@
 # base/ — OSTree image definition
 
-The root filesystem of the Onyx appliance: a minimal Debian Trixie userspace
+The root filesystem of the ONYX appliance: a minimal Debian Trixie userspace
 (`base/debian-trixie/`), composed into an OSTree repository, updated atomically
 as A/B snapshots, and served by the bootloader (docs/design/10-installer-and-updates.md).
 
@@ -18,7 +18,7 @@ The script fails fast with a clear message when a tool is missing; see
 samba/nfs + firmware, `--no-firmware` to skip). It runs the full pipeline:
 
 1. **debootstrap** a minimal Trixie rootfs from the mirror in `manifest.json`,
-2. **drop in onyx**: the five daemons + CLI (`bin/`, from `make build`), the
+2. **drop in onyx**: the daemons + CLI (`bin/`, from `make build`), the
    systemd units + tmpfiles (`deploy/`), the runtime helpers
    (`deploy/libexec/`), and the per-service users (`debian-trixie/files/`),
 3. **enable** the onyx units offline via `systemctl --root`,

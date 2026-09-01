@@ -1,4 +1,9 @@
-# deploy/ — systemd units + runtime layout for the v0.1 skeleton
+# deploy/ — systemd units + runtime layout
+
+This is the native (non-Docker) packaging for the running system. The
+containerized platform deployment lives in [`docker-compose.yml`](../docker-compose.yml)
+and [`setup.sh`](../setup.sh) instead; the units here serve the bare-metal
+appliance install (`scripts/onyx-install`) and the OSTree image (`base/`).
 
 This is the packaging for the running system (docs/design/04#9-packaging): one
 systemd unit per service, a tmpfiles.d snippet that recreates the runtime
@@ -15,7 +20,9 @@ deploy/
 │   ├── onyx-bootcheck          # A/B rollback health gate
 │   ├── onyx-update             # A/B update: status|check|apply|rollback
 │   └── onyx-factory-reset      # system-only reset (--erase-all for the pool)
-├── systemd/onyx-{privd,storaged,shared,core,api}.service   # the 5 daemons
+├── systemd/onyx-{privd,storaged,shared,core,api}.service   # the core daemons
+├── systemd/onyx-{snapd,backupd,vmm,appd,ai,objectstore}.service
+│                                 # platform daemons (v0.1 skeletons, docs/design/11)
 ├── systemd/onyx-pool.service         # data pool auto-mount (before the stack)
 ├── systemd/onyx-firstboot.service    # first-boot wizard (once, marker-guarded)
 ├── systemd/onyx-bootcheck.service    # rollback health gate (after API)

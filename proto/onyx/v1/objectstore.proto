@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package onyx.v1;
+
+option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+
+// ObjectStore provides S3-compatible object storage and hybrid cloud tiering
+// (docs/design/11-platform-and-cloud.md#66-onyx-objectstore). The gRPC
+// contract is the management/control surface; the S3-compatible HTTP endpoint
+// (storage.onyx.innotel.us) is served by the same daemon.
+service ObjectStore {
+  rpc ListBuckets(ListBucketsRequest) returns (ListBucketsResponse);
+  rpc CreateBucket(CreateBucketRequest) returns (Bucket);
+  rpc DeleteBucket(DeleteBucketRequest) returns (DeleteBucketResponse);
+  rpc PutObject(PutObjectRequest) returns (ObjectMeta);
+  rpc GetObject(GetObjectRequest) returns (GetObjectResponse);
+  rpc DeleteObject(DeleteObjectRequest) returns (DeleteObjectResponse);
+}
+
+enum BucketTier {
+  BUCKET_TIER_UNSPECIFIED = 0;
+  // Local only (pool storage).
+  LOCAL = 1;
+  // Cloud-primary: objects live in the external S3 endpoint.
+  CLOUD = 2;
+  // Local hot tier with cloud cold tier + sync/eviction.
+  TIERED = 3;
+}
+
+message Bucket {
+  string name = 1;
+  BucketTier tier = 2;
+  // External endpoint/prefix when tier is CLOUD or TIERED.
+  string cloud_target = 3;
+  string created_at = 4;
+}
+
+message ListBucketsRequest {}
+
+message ListBucketsResponse {
+  repeated Bucket buckets = 1;
+}
+
+message CreateBucketRequest {
+  string name = 1;
+  BucketTier tier = 2;
+  string cloud_target = 3;
+}
+
+message DeleteBucketRequest {
+  string name = 1;
+  // Also purge objects; required when the bucket is not empty.
+  bool force = 2;
+}
+
+message DeleteBucketResponse {
+  bool deleted = 1;
+}
+
+message ObjectMeta {
+  string bucket = 1;
+  string key = 2;
+  int64 size_bytes = 3;
+  string etag = 4;
+  string content_type = 5;
+  string last_modified = 6;
+}
+
+message PutObjectRequest {
+  string bucket = 1;
+  string key = 2;
+  bytes data = 3;
+  string content_type = 4;
+}
+
+message GetObjectRequest {
+  string bucket = 1;
+  string key = 2;
+}
+
+message GetObjectResponse {
+  ObjectMeta meta = 1;
+  bytes data = 2;
+}
+
+message DeleteObjectRequest {
+  string bucket = 1;
+  string key = 2;
+}
+
+message DeleteObjectResponse {
+  bool deleted = 1;
+}

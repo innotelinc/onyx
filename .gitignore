@@ -13,6 +13,11 @@ base/image/sysroot/
 # Dev runtime state (sockets, state dirs, logs)
 .run/
 
+# Secrets + local env (setup.sh copies from .env.example)
+.env
+
 # Go caches (kept under .tools/)
 *.swp
 .DS_Store
+# Python bytecode
+__pycache__/

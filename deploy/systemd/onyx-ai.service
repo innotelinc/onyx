@@ -1,0 +1,23 @@
+# onyx-ai — AI Storage Advisor + Backup Intelligence (docs/design/11 §6.5).
+# v0.1 runs local heuristics; the optional provider hook lands with v0.5.
+[Unit]
+Description=Onyx AI advisor service
+After=local-fs.target onyx-storaged.service onyx-backupd.service
+
+[Service]
+Type=simple
+User=onyx-ai
+Group=onyx
+SupplementaryGroups=onyx
+ExecStart=/usr/local/lib/onyx/onyx-ai --socket-dir /run/onyx --state-dir /var/lib/onyx/ai
+Restart=always
+RestartSec=2
+UMask=0002
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/onyx /var/lib/onyx/ai
+
+[Install]
+WantedBy=multi-user.target

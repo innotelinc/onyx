@@ -1,0 +1,23 @@
+# onyx-snapd — Btrfs snapshot service (docs/design/11 §6.1). v0.1 skeleton;
+# the btrfs data plane lands with v0.3.
+[Unit]
+Description=Onyx snapshot service
+After=local-fs.target onyx-pool.service
+
+[Service]
+Type=simple
+User=onyx-snapd
+Group=onyx
+SupplementaryGroups=onyx
+ExecStart=/usr/local/lib/onyx/onyx-snapd --socket-dir /run/onyx --state-dir /var/lib/onyx/snapd
+Restart=always
+RestartSec=2
+UMask=0002
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/onyx /var/lib/onyx/snapd
+
+[Install]
+WantedBy=multi-user.target

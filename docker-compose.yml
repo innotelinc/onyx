@@ -1,0 +1,262 @@
+# ONYX — Online Storage System — Platform (docs/design/11-platform-and-cloud.md)
+#
+# The containerized deployment: every onyx daemon + Authentik (SSO) + Nginx
+# Proxy Manager (ingress). All onyx services talk gRPC over a shared unix
+# socket volume (/run/onyx) exactly like the native systemd install; the only
+# host ports are NPM's (80/443/81). setup.sh brings the whole stack up and
+# provisions NPM (wildcard TSIG cert + the six subdomains) + Authentik.
+#
+# Deploy:
+#   cp .env.example .env      # fill in secrets
+#   ./setup.sh
+
+name: onyx-platform
+
+x-onyx-sockets: &onyx-sockets
+  volumes:
+    - onyx-sockets:/run/onyx
+
+services:
+  # ---- ONYX daemons ---------------------------------------------------------
+
+  onyx-privd:
+    build:
+      context: .
+      dockerfile: docker/onyx-privd.Dockerfile
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-privd:${IMAGE_TAG:-latest}
+    # The single privilege boundary (docs/design/07): root, host devices, the
+    # data pool, and the daemon-config dir. Everything else is unprivileged.
+    privileged: true
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-config:/etc/onyx/conf.d
+      - /dev:/dev
+      # shared propagation so mounts made inside privd reach storaged and the host
+      - /mnt/onyx:/mnt/onyx:shared
+    restart: unless-stopped
+
+  onyx-storaged:
+    build:
+      context: .
+      dockerfile: docker/onyx-storaged.Dockerfile
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-storaged:${IMAGE_TAG:-latest}
+    # privileged: uevent netlink watcher + block-device access
+    privileged: true
+    volumes:
+      - onyx-sockets:/run/onyx
+      - /dev:/dev
+      - /mnt/onyx:/mnt/onyx:shared
+    command: ["--mount-root", "/mnt/onyx"]
+    restart: unless-stopped
+
+  onyx-shared:
+    build:
+      context: .
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-shared }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-shared:${IMAGE_TAG:-latest}
+    <<: *onyx-sockets
+    restart: unless-stopped
+
+  onyx-core:
+    build:
+      context: .
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-core }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-core:${IMAGE_TAG:-latest}
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-core-state:/var/lib/onyx/core
+    command: ["--device-mount-root", "/mnt/onyx"]
+    restart: unless-stopped
+
+  onyx-api:
+    build:
+      context: .
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-api }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-api:${IMAGE_TAG:-latest}
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-api-state:/var/lib/onyx/api
+    command: ["--listen", "0.0.0.0:8080"]
+    restart: unless-stopped
+
+  onyx-snapd:
+    build:
+      context: .
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-snapd }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-snapd:${IMAGE_TAG:-latest}
+    <<: *onyx-sockets
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-snapd-state:/var/lib/onyx/snapd
+    restart: unless-stopped
+
+  onyx-backupd:
+    build:
+      context: .
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-backupd }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-backupd:${IMAGE_TAG:-latest}
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-backupd-state:/var/lib/onyx/backupd
+    command: ["--http-listen", "0.0.0.0:8084"]
+    restart: unless-stopped
+
+  onyx-vmm:
+    build:
+      context: .
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-vmm }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-vmm:${IMAGE_TAG:-latest}
+    <<: *onyx-sockets
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-vmm-state:/var/lib/onyx/vmm
+    restart: unless-stopped
+
+  onyx-appd:
+    build:
+      context: .
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-appd }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-appd:${IMAGE_TAG:-latest}
+    <<: *onyx-sockets
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-appd-state:/var/lib/onyx/appd
+    restart: unless-stopped
+
+  onyx-ai:
+    build:
+      context: .
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-ai }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-ai:${IMAGE_TAG:-latest}
+    <<: *onyx-sockets
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-ai-state:/var/lib/onyx/ai
+    environment:
+      AI_PROVIDER: ${AI_PROVIDER:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
+    restart: unless-stopped
+
+  onyx-objectstore:
+    build:
+      context: .
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-objectstore }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-objectstore:${IMAGE_TAG:-latest}
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-objectstore-state:/var/lib/onyx/objectstore
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      HYBRID_CLOUD_ENDPOINT: ${HYBRID_CLOUD_ENDPOINT:-}
+    command: ["--http-listen", "0.0.0.0:9000"]
+    restart: unless-stopped
+
+  onyx-web:
+    build:
+      context: .
+      dockerfile: docker/onyx-web/Dockerfile
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+
+  # ---- Identity: Authentik --------------------------------------------------
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${AUTHENTIK_PG_DB:-authentik}
+      POSTGRES_USER: ${AUTHENTIK_PG_USER:-authentik}
+      POSTGRES_PASSWORD: ${AUTHENTIK_PG_PASSWORD:?set AUTHENTIK_PG_PASSWORD in .env}
+    volumes:
+      - authentic-db:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: --save 60 1 --loglevel warning
+    volumes:
+      - authentic-redis:/data
+    restart: unless-stopped
+
+  authentic-server:
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-latest}
+    command: server
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?set AUTHENTIK_SECRET_KEY in .env}
+      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_PG_USER:-authentik}
+      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_PG_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_PG_PASSWORD:?}
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:?set AUTHENTIK_BOOTSTRAP_TOKEN in .env}
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:?}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:?}
+    volumes:
+      - authentic-media:/media
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  authentic-worker:
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-latest}
+    command: worker
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?}
+      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_PG_USER:-authentik}
+      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_PG_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_PG_PASSWORD:?}
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  # ---- Ingress: Nginx Proxy Manager ----------------------------------------
+
+  nginx-proxy-manager:
+    image: jc21/nginx-proxy-manager:latest
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"
+    environment:
+      DISABLE_IPV6: "true"
+    volumes:
+      - npm-data:/data
+      - npm-letsencrypt:/etc/letsencrypt
+    depends_on:
+      - onyx-api
+      - onyx-web
+      - authentic-server
+      - onyx-backupd
+      - onyx-objectstore
+    restart: unless-stopped
+
+volumes:
+  onyx-sockets:
+  onyx-config:
+  onyx-core-state:
+  onyx-api-state:
+  onyx-snapd-state:
+  onyx-backupd-state:
+  onyx-vmm-state:
+  onyx-appd-state:
+  onyx-ai-state:
+  onyx-objectstore-state:
+  authentic-db:
+  authentic-redis:
+  authentic-media:
+  npm-data:
+  npm-letsencrypt:

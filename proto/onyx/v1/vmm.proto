@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package onyx.v1;
+
+option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+
+// Vmm manages virtual machines (libvirt/QEMU backend lands in v0.4; the
+// contract is the source of truth now — docs/design/11-platform-and-cloud.md#63-onyx-vmm).
+service Vmm {
+  rpc ListVMs(ListVMsRequest) returns (ListVMsResponse);
+  rpc CreateVM(CreateVMRequest) returns (VM);
+  rpc StartVM(StartVMRequest) returns (VM);
+  rpc StopVM(StopVMRequest) returns (VM);
+  rpc DeleteVM(DeleteVMRequest) returns (DeleteVMResponse);
+}
+
+message VM {
+  string id = 1;
+  string name = 2;
+  string status = 3; // stopped | running | paused | error
+  int32 vcpus = 4;
+  int64 memory_mb = 5;
+  // Disk image location on the pool (e.g. pool1/@apps/vms/<name>.qcow2).
+  string disk = 6;
+  string os = 7;
+  string created_at = 8;
+}
+
+message ListVMsRequest {}
+
+message ListVMsResponse {
+  repeated VM vms = 1;
+}
+
+message CreateVMRequest {
+  string name = 1;
+  int32 vcpus = 2;
+  int64 memory_mb = 3;
+  // Disk size in MiB.
+  int64 disk_mb = 4;
+  string os = 5;
+  // Install media (ISO path on the pool); empty = disk-only.
+  string iso = 6;
+}
+
+message StartVMRequest {
+  string id = 1;
+}
+
+message StopVMRequest {
+  string id = 1;
+  // Graceful ACPI shutdown; hard power-off when false.
+  bool graceful = 2;
+}
+
+message DeleteVMRequest {
+  string id = 1;
+  // Also delete the disk image (irreversible).
+  bool delete_disk = 2;
+}
+
+message DeleteVMResponse {
+  bool deleted = 1;
+}

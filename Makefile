@@ -42,12 +42,18 @@ build: gen
 	$(GO) build -o $(BIN)/onyx-core ./services/core
 	$(GO) build -o $(BIN)/onyx-api ./services/api
 	$(GO) build -o $(BIN)/onyx-shared ./services/shared
+	$(GO) build -o $(BIN)/onyx-snapd ./services/snapd
+	$(GO) build -o $(BIN)/onyx-backupd ./services/backupd
+	$(GO) build -o $(BIN)/onyx-vmm ./services/vmm
+	$(GO) build -o $(BIN)/onyx-appd ./services/appd
+	$(GO) build -o $(BIN)/onyx-ai ./services/ai
+	$(GO) build -o $(BIN)/onyx-objectstore ./services/objectstore
 	$(GO) build -o $(BIN)/onyx ./sdk/go/cmd/onyx
 	@cd services/storaged && cargo build --quiet
 	@cp services/storaged/target/debug/onyx-storaged $(BIN)/onyx-storaged
 	@cd services/privd && cargo build --quiet
 	@cp services/privd/target/debug/onyx-privd $(BIN)/onyx-privd
-	@echo "built: onyx-core onyx-api onyx-shared onyx-storaged onyx-privd onyx (in bin/)"
+	@echo "built: onyx-core onyx-api onyx-shared onyx-snapd onyx-backupd onyx-vmm onyx-appd onyx-ai onyx-objectstore onyx-storaged onyx-privd onyx (in bin/)"
 
 ## check — vet + test all Go and Rust code
 check: vet test

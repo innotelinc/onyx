@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache repo-local toolchain (.tools)
+        uses: actions/cache@v4
+        with:
+          path: .tools
+          key: onyx-tools-${{ runner.os }}-${{ hashFiles('scripts/bootstrap-tools.sh', 'go.mod', 'go.sum') }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/storaged/target
+            services/privd/target
+          key: onyx-cargo-${{ runner.os }}-${{ hashFiles('services/storaged/Cargo.lock', 'services/privd/Cargo.lock') }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Bootstrap toolchain
+        run: make bootstrap
+
+      - name: Regenerate protobuf stubs
+        run: make gen
+
+      - name: Vet + test (Go + Rust)
+        run: make check
+
+      - name: Build all binaries
+        run: make build
+
+      - name: Verify compose + setup scripts
+        run: |
+          bash -n setup.sh scripts/provision-authentik.sh
+          python3 -m py_compile scripts/npm-proxy-hosts.py
+          docker compose config --quiet

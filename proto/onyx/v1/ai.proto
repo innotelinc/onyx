@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package onyx.v1;
+
+import "onyx/v1/backupd.proto";
+
+option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+
+// Ai is the AI Storage Advisor + Backup Intelligence service
+// (docs/design/11-platform-and-cloud.md#65-onyx-ai). Deterministic heuristics
+// run in-process; an optional provider hook (AI_PROVIDER/AI_API_KEY/AI_MODEL,
+// local or BYO-key) turns findings into natural-language advice. No telemetry
+// leaves the box unless a provider is configured.
+service Ai {
+  // AnalyzeStorage reviews pool/device telemetry and returns storage advice.
+  rpc AnalyzeStorage(AnalyzeStorageRequest) returns (AnalyzeStorageResponse);
+
+  // AnalyzeBackups reviews the onyx-backupd report and returns backup advice.
+  rpc AnalyzeBackups(AnalyzeBackupsRequest) returns (AnalyzeBackupsResponse);
+}
+
+message StorageFinding {
+  string severity = 1; // info | warning | critical
+  string code = 2;     // e.g. "low_free_space", "snapshot_cadence"
+  string summary = 3;
+  string detail = 4;
+  string action = 5;
+}
+
+message AnalyzeStorageRequest {
+  // Pool telemetry as reported by onyx-storaged (free/total bytes per pool,
+  // snapshot counts, scrub status). Empty pools = best-effort from local state.
+  repeated PoolTelemetry pools = 1;
+}
+
+message PoolTelemetry {
+  string pool = 1;
+  int64 total_bytes = 2;
+  int64 free_bytes = 3;
+  int32 snapshot_count = 4;
+  string last_scrub_at = 5;
+  string scrub_status = 6;
+}
+
+message AnalyzeStorageResponse {
+  repeated StorageFinding findings = 1;
+  // Overall storage health 0..1.
+  double health = 2;
+  // Provider-generated natural-language summary (empty when no provider set).
+  string narrative = 3;
+}
+
+message AnalyzeBackupsRequest {
+  // The Backup Intelligence report from onyx-backupd.
+  onyx.v1.BackupReport report = 1;
+}
+
+message AnalyzeBackupsResponse {
+  repeated StorageFinding findings = 1;
+  double health = 2;
+  string narrative = 3;
+}
