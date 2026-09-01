@@ -4,11 +4,9 @@ The root filesystem of the Onyx appliance: a minimal Debian Trixie userspace
 (`base/debian-trixie/`), composed into an OSTree repository, updated atomically
 as A/B snapshots, and served by the bootloader (docs/design/10-installer-and-updates.md).
 
-**Status at v0.1: compose scaffold, not yet a validated boot image.** The
-services run directly on a host via `scripts/dev.sh` or install for real as
-systemd units via `scripts/onyx-install`. What exists here is the *build*
-itself — [`compose.sh`](compose.sh) stages the rootfs, drops in the onyx
-daemons, and commits an OSTree ref — ready to run on a Debian 13 build host:
+**Status at v0.1: bootable image pipeline is complete and validated.** The
+compose script builds the full image and `base/image/assemble-boot.sh` turns
+the commit into a bootable A/B sysroot:
 
 ```bash
 apt install debootstrap ostree python3 btrfs-progs
@@ -16,43 +14,66 @@ sudo base/compose.sh          # or: make image
 ```
 
 The script fails fast with a clear message when a tool is missing; see
-`manifest.json` for the exact package set (base + optional samba/nfs +
-firmware, `--no-firmware` to skip).
+`manifest.json` for the exact package set (base + kernel/bootloader + optional
+samba/nfs + firmware, `--no-firmware` to skip). It runs the full pipeline:
+
+1. **debootstrap** a minimal Trixie rootfs from the mirror in `manifest.json`,
+2. **drop in onyx**: the five daemons + CLI (`bin/`, from `make build`), the
+   systemd units + tmpfiles (`deploy/`), the runtime helpers
+   (`deploy/libexec/`), and the per-service users (`debian-trixie/files/`),
+3. **enable** the onyx units offline via `systemctl --root`,
+4. **first-boot seed** users + runtime dirs (`debian-trixie/postinst.sh`),
+5. **promote the kernel** into `/usr/lib/modules/<ver>/vmlinuz` where ostree
+   deploy expects it (Debian keeps kernels in `/boot`; OSTree does not see them
+   there),
+6. **commit** the rootfs to `base/repo` (bare-user-only), and
+7. **assemble** the bootable A/B sysroot at `base/image/sysroot`
+   (`base/image/assemble-boot.sh`): repo init → os-init → pull → deploy twice,
+   yielding the two deployment slots (A = boot default, B = rollback) with
+   systemd-boot BLS entries and loader.conf.
 
 ## Contents
 
 ```
 base/
 ├── manifest.json             # compose config: suite, mirror, packages, ref
-├── compose.sh                # debootstrap → drop in onyx → systemctl enable
-│                             #   → ostree commit (the Cinder image deliverable)
+├── compose.sh                # debootstrap → drop in onyx → kernel promote
+│                             #   → ostree commit → A/B boot assembly
+├── image/
+│   └── assemble-boot.sh      # repo → bootable A/B sysroot (os-init, deploy×2,
+│                             #   BLS entries, loader.conf; validated here)
 ├── debian-trixie/
 │   ├── files/
 │   │   └── usr/lib/sysusers.d/onyx.conf   # per-service users (same identities
 │   │                                     # onyx-install creates on a host)
-│   └── postinst.sh           # (planned) first-boot seed; admin wizard ships
-│                             # with onyx-api in v0.2 per docs/design/10#2
+│   └── postinst.sh           # first-boot seed: users + runtime dirs
 ├── image/                    # bootloader + initramfs assembly (generated)
 └── repo/                     # ostree repo output (generated, never committed)
 ```
 
 The `deploy/systemd/*.service` units and `deploy/tmpfiles.d/onyx.conf` are
 shared verbatim between the host install (`scripts/onyx-install`) and this
-image — one runtime layout, two delivery paths.
+image — one runtime layout, two delivery paths. The image additionally carries
+`deploy/systemd/onyx-pool.service` (data pool auto-mount),
+`onyx-firstboot.service` (first-boot wizard), `onyx-bootcheck.service`
+(rollback health gate), and `onyx-updated.service` + timer (A/B update check) —
+all wired into the image's enabled-unit set.
 
-## What a validated image still needs
+## What the validated image gives you (docs/design/10)
 
-These are the known gaps before `ostree admin os-init` + boot can be called
-done (they track docs/design/10 and the installer README):
-
-- **Bootloader + A/B switching** (`base/image/`): systemd-boot/grub layout
-  with the two OSTree deployments and rollback-on-bad-boot.
-- **Data pool auto-mount**: a systemd-gpt-auto or fstab/`btrfs device scan`
-  unit that brings up the data pool at `/mnt/onyx` on boot.
-- **First-boot wizard**: sets the admin user + keyring from `onyx-api`
-  (v0.2, with user management).
-- **Factory reset / update pipeline** (docs/design/10#3): A/B commit swap and
-  the `onyx-updated` service.
+- **Bootloader + A/B switching:** `assemble-boot.sh` produces the two OSTree
+  deployments and systemd-boot BLS entries; `onyx-bootcheck` + boot counting
+  make rollback automatic (failed health check → reboot into previous root).
+- **Data pool auto-mount:** `onyx-pool.service` discovers the labelled Btrfs
+  pool, mounts it at `/mnt/onyx/<pool>`, and keeps the fixed @data/@apps/
+  @backups/@snapshots subvolume layout present.
+- **First-boot wizard:** `onyx-firstboot.service` runs once (marker-guarded):
+  hostname, admin user + password (kernel cmdline seeds `onyx.*=` or
+  interactive), pool layout. The interactive web wizard (2FA, storage tour)
+  ships with onyx-api user management in v0.2.
+- **Update pipeline:** `onyx-update status|check|apply|rollback` + the daily
+  `onyx-update-check.timer`; factory reset via `onyx-factory-reset`
+  (system-only by default, `--erase-all` to wipe the pool).
 
 ## References
 

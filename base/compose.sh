@@ -139,16 +139,64 @@ systemctl --root="$ROOTFS" enable onyx-privd.service onyx-storaged.service \
 
 echo "== first-boot seeding (users + runtime dirs) =="
 install -m 0755 "$SELF/debian-trixie/postinst.sh" "$ROOTFS/usr/local/sbin/onyx-postinst.sh"
-chroot "$ROOTFS" /usr/local/sbin/onyx-postinst.sh
+# chroot needs the kernel pseudo-filesystems (systemd-sysusers/tmpfiles read
+# /proc; apt postinst hooks touch /dev). Mount them, run, and always unmount.
+mount --bind /proc "$ROOTFS/proc" 2>/dev/null || true
+mount --bind /sys "$ROOTFS/sys" 2>/dev/null || true
+mount --bind /dev "$ROOTFS/dev" 2>/dev/null || true
+mount --bind /run "$ROOTFS/run" 2>/dev/null || true
+chroot "$ROOTFS" /usr/local/sbin/onyx-postinst.sh || {
+  umount "$ROOTFS/run" "$ROOTFS/dev" "$ROOTFS/sys" "$ROOTFS/proc" 2>/dev/null || true
+  exit 1
+}
+umount "$ROOTFS/run" "$ROOTFS/dev" "$ROOTFS/sys" "$ROOTFS/proc" 2>/dev/null || true
 
+echo "== ostree-ifying /etc (shipped config moves to /usr/etc) =="
+# OSTree trees must not carry a mutable /etc in the commit: shipped config
+# lives in /usr/etc and is merged into the deployment's /etc at deploy time
+# (the empty /etc dir in the tree marks the merge point). This is what the
+# assembler's "Preparing /etc" error means without it. The sysusers/tmpfiles
+# seed from postinst already wrote into the chroot /etc — moving it now ships
+# those identities as the image defaults.
+mkdir -p "$ROOTFS/usr/etc"
+if [ -d "$ROOTFS/etc" ]; then
+  find "$ROOTFS/etc" -mindepth 1 -maxdepth 1 -exec mv -t "$ROOTFS/usr/etc" {} + 2>/dev/null || true
+fi
+rm -rf "$ROOTFS/etc"
+mkdir -p "$ROOTFS/etc"
+
+# The image ships its own os-release: Debian's /etc/os-release is a *relative*
+# symlink (../usr/lib/os-release) that dangles once the tree is ostree-ified
+# (from /usr/etc, ".." resolves to /usr, not /). It must also be a real file,
+# not a link, because the bootloader reads it for the BLS entry title — so drop
+# whatever was moved and write a fresh one.
+rm -f "$ROOTFS/usr/etc/os-release"
+printf 'ID=onyx\nNAME="Onyx"\nVERSION_ID=0.1\nPRETTY_NAME="Onyx 0.1 (Cinder)"\nHOME_URL="https://github.com/innotelinc/onyx"\n' >"$ROOTFS/usr/etc/os-release"
+
+echo "== cleaning runtime pseudo-filesystems before commit =="
+# debootstrap's second stage leaves device nodes in /dev (and may create /proc,
+# /sys, /run). OSTree cannot commit those — and they must not ship anyway:
+# devtmpfs/udev, procfs, sysfs and tmpfs recreate them at boot. An empty dir is
+# enough for the commit (systemd mounts over it).
+for d in dev proc sys run tmp; do
+  find "$ROOTFS/$d" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+done
+
+# OSTree images expect an empty /dev and /tmp at commit time.
+mkdir -p "$ROOTFS/dev" "$ROOTFS/tmp"
+
+# Re-flush the boot dir (assemble-boot deploys from this commit; the kernel
+# promote step earlier wrote /usr/lib/modules/<ver>/vmlinuz, which is inside
+# the tree and unaffected).
 echo "== committing to the OSTree repo =="
-ostree init --repo="$OUT/repo" --mode=bare-user-only
+ostree init --repo="$OUT/repo" --mode=bare-user-only 2>/dev/null || true
 ostree commit --repo="$OUT/repo" --branch="$REF" \
   --subject="onyx base image ($NAME, $SUITE $ARCH)" \
   --skip-if-unchanged "$ROOTFS"
 
-echo "== assembling the bootable A/B sysroot (base/image/sysroot) =="
-bash "$SELF/image/assemble-boot.sh" --repo "$OUT/repo" --ref "$REF"
+echo "== assembling the bootable A/B sysroot ($OUT/image/sysroot) =="
+bash "$SELF/image/assemble-boot.sh" --repo "$OUT/repo" --ref "$REF" \
+  --output "$OUT/image/sysroot" --clean
 
 echo
 echo "composed: $OUT/repo (ref $REF) + bootable sysroot at $OUT/image/sysroot"

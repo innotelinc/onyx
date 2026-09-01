@@ -18,20 +18,31 @@ Small, single-purpose daemons (docs/design/04#1-service-inventory). Each service
 | `onyx-storaged` | Rust | [`storaged/`](storaged/) | gRPC `Health` + `Storaged`; Btrfs pool discovery via `onyx-privd`, cached in a SQLite registry (TTL refresh); **hotplug watcher** — kernel uevent (netlink) driven, scans `lsblk`, auto-mounts removable drives under `/mnt/onyx/` via privd, unmounts on detach; slow periodic scan as fallback; SMART health sweep + persistent audit trail (ListEvents/WatchDevices) |
 | `onyx-privd` | Rust | [`privd/`](privd/) | Root privilege helper: allowlisted ops with per-op validation, no-shell exec, timeout — `btrfs` (`show --raw`, `usage -b`), block device ops (`lsblk` scan, `mount`/`umount` with allowlisted uid/gid/umask options), `smartctl -H -A` health probe, **atomic daemon-config write** (`WRITE_DAEMON_CONFIG`: smb.conf/exports under `--config-dir`) + **validated reloads** (`RELOAD_DAEMONS`: `testparm` → `systemctl reload smbd`, `exportfs -ra`) |
 
+## Runtime helpers (v0.1, shell — `deploy/libexec/`, docs/design/10)
+
+Not gRPC services but shipped with the stack and installed to
+`<prefix>/lib/onyx/` by the installer and the base image:
+
+| Helper | Purpose |
+|--------|---------|
+| `onyx-pool` | data pool auto-mount + fixed subvolume layout (service: `onyx-pool.service`) |
+| `onyx-firstboot` | first-boot wizard: hostname, admin user, pool (service: `onyx-firstboot.service`) |
+| `onyx-bootcheck` | A/B rollback health gate (service: `onyx-bootcheck.service`) |
+| `onyx-update` | A/B update status/check/apply/rollback (service: `onyx-updated.service` + daily timer) |
+| `onyx-factory-reset` | system-only factory reset (`--erase-all` also wipes the pool) |
+
 ## Planned (roadmap)
 
 | Service | Lang | Lands in |
 |---------|------|----------|
 | `onyx-snapd` | Rust | v0.3 |
 | `onyx-backupd` | Go | v0.3 |
-| `onyx-shared` | Go | v0.2 |
 | `onyx-appd` | Go | v0.4 |
 | `onyx-netd` | Go | v0.4 |
 | `onyx-agent` | Rust | v0.3 |
-| `onyx-updated` | Rust | v0.2 |
+| `onyx-updated` | Rust (from the shell helper) | v0.2 |
 | `onyx-ai` | Go | v0.5 |
 | `onyx-bus` | Go | v0.2 |
-| `onyx-privd` | Rust | v0.2 (first privileged op) |
 
 ## Running as a system
 
