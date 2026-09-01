@@ -70,6 +70,11 @@ dev: build
 install: build
 	@bash scripts/onyx-install --prefix $(PREFIX) $(if $(DESTDIR),--destdir $(DESTDIR))
 
+## image — compose the bootable OSTree base image (needs root + debootstrap +
+## ostree on a Debian 13 host; see base/compose.sh --help and base/manifest.json)
+image: build
+	@bash base/compose.sh
+
 ## clean — remove build artifacts, dev state and staged installs (keeps .tools/)
 clean:
 	rm -rf $(BIN) services/storaged/target services/privd/target .run
