@@ -10,9 +10,10 @@
 #   status                show deployments and update state (ostree admin status)
 #   check                 update status; exit 0 if the running deployment is the
 #                         most recent known good (used by onyx-updated)
-#   apply REF             stage REF from the update repo — pulls the ref,
-#                         deploys it to the inactive slot, leaves previous as
-#                         rollback; does NOT reboot
+#   apply REF             stage REF from the update repo — pulls the ref and
+#                         deploys it as the next boot default, keeping the
+#                         current deployment as automatic rollback; does NOT
+#                         reboot
 #   rollback              pin the previous deployment as the default + reboot
 #                         (manual rollback, docs/design/10#5)
 #   verify                confirm the running deployment passed its boot health
@@ -92,11 +93,12 @@ cmd_apply() {
     exit 0
   fi
 
-  # 2. deploy: `--not-as-default` writes to the *inactive* slot and keeps the
-  # current deployment as the fallback default (docs/design/10#5 apply: "zero
-  # impact on the running system"). No reboot here.
-  echo "onyx-update: deploying $checksum to the inactive slot ..."
-  $ADMIN --sysroot="$SYSRoot" deploy --os="$OS" --not-as-default "$ref"
+  # 2. deploy: creates the new deployment as index 0 (the default to boot next)
+  # while the currently running deployment moves to index 1 and stays as the
+  # automatic rollback (docs/design/10#5 apply: zero impact on the running
+  # system — nothing changes until the reboot).
+  echo "onyx-update: deploying $checksum (will boot next; previous kept as rollback)"
+  $ADMIN --sysroot="$SYSRoot" deploy --os="$OS" "$ref"
   echo "onyx-update: staged $checksum — reboot to apply (onyx-update rollback to undo)"
 }
 

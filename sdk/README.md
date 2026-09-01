@@ -19,6 +19,10 @@ exit codes with structured errors (docs/design/04#10-cli).
 bin/onyx version            # onyx 0.1.0-dev (api v1)
 bin/onyx status [--json]    # aggregate service health
 bin/onyx pool list [--json] # storage pools
+bin/onyx device list        # hotplug/USB/SATA drives (show/attach/detach)
+bin/onyx events [--stream]  # device audit trail, live SSE tail
+bin/onyx share create media /mnt/onyx/pool1/@data/media --smb --nfs --readonly
+bin/onyx share list|show|delete
 ```
 
 Endpoint defaults to `http://127.0.0.1:8080`; override with `--api` or
