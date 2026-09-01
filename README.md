@@ -32,16 +32,25 @@ API, security, user management, the app ecosystem, and installer/update design.
 
 ## Status
 
-**Phase: v0.1 "Cinder" — first working copy.** The skeleton is complete and
-installable: `onyx-core` (Go control plane), `onyx-api` (HTTP gateway),
+**Phase: v0.1 "Cinder" — first working copy: done.** The skeleton is complete
+and installable: `onyx-core` (Go control plane), `onyx-api` (HTTP gateway),
 `onyx-shared` (Go share manager), `onyx-storaged` + `onyx-privd` (Rust data
 plane), and the `onyx` CLI, wired together via gRPC over unix sockets
 (`proto/` as the source of truth), shipped as systemd services by
-[`scripts/onyx-install`](scripts/onyx-install). What remains for Cinder per
-[the roadmap](docs/design/01-product-vision.md#7-roadmap): the bootable
-OSTree base image (`base/`) and the installer's first-boot wizard.
+[`scripts/onyx-install`](scripts/onyx-install). The bootable OSTree base image
+(`base/`) composes a Debian Trixie rootfs with the onyx stack, a kernel, and a
+bootloader; `base/image/assemble-boot.sh` produces the A/B sysroot (two
+OSTree deployments + systemd-boot BLS entries, rollback via `onyx-bootcheck`
++ boot counting). The appliance first-boot wizard (`onyx-firstboot.service`)
+seeds hostname, admin user and data pool on the first boot; the data pool
+auto-mounts (`onyx-pool.service`) and updates stage into the inactive slot
+(`onyx-update`, daily `onyx-update-check.timer`). Per
+[the roadmap](docs/design/01-product-vision.md#7-roadmap), Cinder is complete;
+see it for the milestones after.
 
-See the [roadmap](docs/design/01-product-vision.md#7-roadmap) for milestones after Cinder.
+Next milestone: [v0.2 "Flint"](docs/design/01-product-vision.md#7-roadmap) — the web
+UI (Prism), file explorer, SMB/NFS shares UX, users & permissions, and the
+interactive web first-boot wizard on top of this base.
 
 ## Building and running (dev)
 
