@@ -215,16 +215,21 @@ Btrfs snapshot lifecycle on top of the fixed subvolume layout
 `.github/workflows/` implements CI/CD:
 
 - **`ci.yml`** — on push/PR: `make bootstrap` (cached), `make check`
-  (vet + tests), `make build`.
-- **`release.yml`** — on every tag `v*`:
-  1. bootstrap toolchain, `make gen`, `make check`, `make build`;
-  2. **release artifacts**: tarballs of `bin/` (per-arch) + `sha256sums.txt`,
-     attached to the GitHub Release;
-  3. **container images**: build + publish all `onyx-*` images to GHCR with
-     `docker/build-push-action` (buildx, `linux/amd64`, `linux/arm64`),
-     tagged `${{ github.ref_name }}` and `latest`.
-  4. `main` pushes additionally publish `latest` images for the platform
-     containers (see workflow).
+  (vet + tests), `make build`. Validation only; nothing is published.
+- **`release.yml`** — one publish pipeline for both event kinds:
+  - `main` push → build + publish `:latest` images;
+  - tag `v*` push → build + publish `:latest` + `:<tag>` images, then create
+    the GitHub Release with tarball artifacts;
+  - `workflow_dispatch` → manual re-publish (latest).
+
+  The workflow is concurrency-guarded (group keyed by commit SHA,
+  cancel-in-progress), so a tag pushed on a commit that just triggered the
+  `main` `latest` build cancels the duplicate instead of racing it on the
+  first-run compile and the GHCR push. Buildx uses the `gha` cache, so
+  subsequent builds reuse compiled layers instead of compiling cold.
+
+  The release job (artifacts) depends on the image job, so the GitHub Release
+  only appears after every image is published.
 
 ## 8. Operational flow (setup.sh)
 
