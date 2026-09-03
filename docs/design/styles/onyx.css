@@ -1,8 +1,8 @@
 /* ONYX Prism theme for the MkDocs Material design-doc site.
  *
  * Maps the Prism tokens (docs/design/03 §2) onto Material's CSS variables:
- * dark-first, "Onyx Blue" accent (#3b9dff), zinc-family neutrals, calm
- * motion. Light mode is provided via the palette toggle.
+ * light-first for reading, "Onyx Blue" accent, zinc-family neutrals, calm
+ * motion. The Prism dark scheme remains available via the palette toggle.
  */
 
 /* ---- Dark (default) ---------------------------------------------------- */
