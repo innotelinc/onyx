@@ -243,13 +243,16 @@ Btrfs snapshot lifecycle on top of the fixed subvolume layout
   3. docker compose up -d --build     (onyx stack + Authentik + NPM)
   4. wait for NPM API + Authentik readiness
   5. scripts/provision-authentik.sh    (bootstrap superuser, ONYX OIDC app, passkey stage)
-  6. scripts/provision-device-trust.sh (ensure the device CA under /etc/onyx/pki)
-  7. scripts/npm-proxy-hosts.py        (TSIG wildcard cert + 6 proxy hosts, mTLS gate)
+  6. device trust — per DEVICE_TRUST:
+       off      → nothing to do (passkeys still on)
+       local    → scripts/provision-device-trust.sh (ensure the CA)
+       cerulean → POST the mTLS gate request to the Cerulean API
+  7. NPM provisioning — per DEVICE_TRUST/NPM_MODE:
+       local edge  → scripts/npm-proxy-hosts.py (TSIG wildcard + hosts + mTLS gate)
+       cerulean edge → skipped; the edge is Cerulean-managed, cert gates are
+                       requested in step 6
   8. print URL table (app/api/auth/storage/backup/admin)
 ```
-
-Set `DEVICE_TRUST_SUBDOMAINS=` (empty) in `.env` to disable the mTLS gate
-entirely; edit it to a different subdomain list to move the gate.
 
 Idempotent end to end: re-runs converge (cert reuse, proxy-host update,
 provider re-check).
@@ -264,11 +267,17 @@ provider re-check).
   same unprivileged per-service users where possible.
 - Authentik is the SSO choke point: forward-auth on `app`/`admin`, OIDC for
   the API, service-to-service traffic stays on the internal network.
+- **Device trust is opt-in** (`DEVICE_TRUST=off` by default): when enabled,
+  passkeys confirm identity in Authentik while mTLS client certificates gate
+  the edge — `local` CA + local NPM for standalone deploys, or the Cerulean
+  control plane (dashboard issuance, remote NPM) for managed fleets
+  (docs/design/11 §10).
 
 ## 10. Device trust (passkeys + mTLS client certificates)
 
-Management surfaces (`app`, `admin`) are gated by two factors that bind a
-login to a *device*, not just a password:
+Management surfaces (`app`, `admin`) can be gated by two factors that bind a
+login to a *device*, not just a password. Device trust is **optional** and
+selected by one switch, `DEVICE_TRUST=off|local|cerulean` (default `off`):
 
 1. **Passkeys (WebAuthn)** — Authentik is the IdP, so platform
    authenticators (Touch ID, Windows Hello, Android/iOS, hardware keys) are
@@ -277,16 +286,23 @@ login to a *device*, not just a password:
    confirmed by the device's passkey once one is registered. Users register
    passkeys from Authentik's settings; `provision-authentik.sh` flips the
    flow stage on automatically.
-2. **TLS client certificates (mTLS)** — NPM requires a client certificate
-   issued by the ONYX device CA before the request even reaches Authentik's
-   proxy. A device without a trusted certificate cannot start an OIDC flow,
-   which removes credential-stuffing and stolen-password classes of attack
-   for the admin surface entirely.
+2. **TLS client certificates (mTLS)** — the edge requires a client
+   certificate from a trusted device CA before the request even reaches
+   Authentik's proxy. A device without a trusted certificate cannot start an
+   OIDC flow, which removes credential-stuffing and stolen-password classes
+   of attack for the admin surface entirely. Who runs the CA and where the
+   gate is applied depends on `DEVICE_TRUST`:
+
+| Mode | Device CA | Certificate issuance | mTLS enforcement | For |
+|------|-----------|----------------------|------------------|-----|
+| `off` (default) | — | — | — | devices stay optional |
+| `local` | ONYX host (`/etc/onyx/pki`, `provision-device-trust.sh`) | CLI helper → `.p12` for MDM import | local NPM (`ssl_verify_client`) | standalone deploys |
+| `cerulean` | **Cerulean** (remote MDM/control plane) | **Cerulean dashboard** (approve, issue, revoke) | requested from Cerulean via its API | fleets behind Cerulean |
 
 The result: on an enrolled device, sign-in is one passkey tap. On any other
 device, the TLS handshake fails before a password is ever asked for.
 
-### 10.1 Device CA (`scripts/provision-device-trust.sh`)
+### 10.1 `local` mode — device CA (`scripts/provision-device-trust.sh`)
 
 A minimal internal PKI maintained under `/etc/onyx/pki` (host bind mount,
 `ONYX_PKI_DIR` to override; private keys are mode 0600, never leave the
@@ -299,14 +315,14 @@ issued/<name>.crt/.key   per-device client certs (default 365 days)
 ```
 
 - `scripts/provision-device-trust.sh` (no args) creates the CA if missing —
-  idempotent, called from `setup.sh` before NPM provisioning.
+  idempotent, called from `setup.sh` only in `local` mode.
 - `scripts/provision-device-trust.sh issue laptop [days]` issues (or renews)
   a client certificate with CN `<name>` plus the
   `ONYX Device Trust` / `device=<name>` O/OU identifiers, for distribution
-  via MDM (Apple Configurator / `.mobileconfig`, Intune, or a manual import
-  into the OS/browser trust store).
+  via your MDM (Apple Configurator / `.mobileconfig`, Intune, Fleet, or a
+  manual import into the OS/browser trust store).
 
-### 10.2 Edge enforcement (`npm-proxy-hosts.py`)
+### 10.2 `local` mode — edge enforcement (`npm-proxy-hosts.py`)
 
 For every subdomain listed in `DEVICE_TRUST_SUBDOMAINS` (default
 `app admin`), the proxy host's **advanced config** is extended with the Nginx
@@ -325,17 +341,55 @@ certificate — before any auth flow starts. Nginx passes the verified
 subject to upstreams in `X-SSL-Client-Subject-DN`, which Authentik forward
 auth can use for audit trail enrichment.
 
-### 10.3 Trade-offs and operations
+### 10.3 `cerulean` mode — remote control plane
+
+When the platform is managed by **Cerulean** (the innotelinc fleet
+control plane; also owns the remote NPM and the open-source MDM underneath),
+ONYX owns *policy*, Cerulean owns *enforcement*:
+
+- **Issuance lives in the Cerulean dashboard:** an operator approves a
+  device, Cerulean's MDM pushes the client certificate, and the device CA
+  pool is managed entirely remotely — ONYX never stores CA keys in this
+  mode (`provision-device-trust.sh` is not run).
+- **ONYX requests the gate** by calling Cerulean's device-trust API
+  (`CERULEAN_API_URL` + `CERULEAN_API_TOKEN` in `.env`):
+
+  ```
+  POST {CERULEAN_API_URL}/api/v1/fleet/{FLEET_ID}/device-trust
+  Authorization: Bearer ${CERULEAN_API_TOKEN}
+  {
+    "domain": "onyx.innotel.us",
+    "subdomains": ["app", "admin"],      # = DEVICE_TRUST_SUBDOMAINS
+    "enforcement": "mtls",
+    "client_ca": "cerulean-managed"
+  }
+  ```
+
+  Cerulean applies the equivalent `ssl_verify_client` configuration on its
+  remote NPM (or drops the mTLS requirement on revoke) and reports the
+  enrolled device list back to the dashboard.
+- **`setup.sh` skips local NPM provisioning** — with a remote edge there is
+  no local NPM to configure (§8).
+- **Complement, not replacement:** passkeys remain Authentik-side in every
+  mode; Cerulean enforces the edge gate, Authentik enforces the identity
+  gate, and a device needs both factors to reach `app`/`admin`.
+
+The Cerulean contract above is an interface, not a client: this repo ships
+the request schema and the `setup.sh` hook, while the server side (and the
+open-source MDM it drives — e.g. Fleet, MicroMDM, or Headwind) belongs to
+Cerulean.
+
+### 10.4 Trade-offs and operations
 
 - **Strictness:** `ssl_verify_client on` was chosen over `optional` so the
-  gate is real; enrollment is a deliberate act (issue cert → install on
-  device → done). To enroll a new device: `issue <name>`, install the cert
-  via MDM, hit the site once.
-- **Revocation:** remove/reissue via the helper; for immediate edge-level
-  kill, delete the device cert from NPM's CA view or rotate the CA (re-issue
-  all device certs — the fleet is small by design).
-- **Failure mode:** a lost fleet of certificates is recoverable by re-running
-  the helper against a fresh CA and re-provisioning NPM hosts.
+  gate is real; enrollment is a deliberate act (`local`: issue cert →
+  install on device; `cerulean`: approve in dashboard → MDM pushes). 
+- **Revocation:** `local` — delete the issued cert or rotate the CA and
+  re-provision; `cerulean` — revoke from the dashboard, the edge drops the
+  device on the next sync.
+- **Failure mode:** `local` CA loss is recoverable by regenerating and
+  re-enrolling the (small) fleet; `cerulean` mode has no local key material
+  to lose.
 - **S3/backup surfaces are exempt:** machine clients (S3 keys, backup
   agents) authenticate with credentials, not device certificates; only
   interactive surfaces are device-gated.

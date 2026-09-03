@@ -38,6 +38,11 @@ pattern used across the innotelinc platform projects.
   Advisor + Backup Intelligence (`onyx-ai`).
 - **CI/CD:** GitHub Actions builds, checks, and publishes container images to
   GHCR and attaches release artifacts to every tagged build.
+- **Device trust (optional):** passkeys via Authentik plus an mTLS client-cert
+  gate on `app`/`admin` — `DEVICE_TRUST=off|local|cerulean` chooses between
+  off, an ONYX-run device CA (standalone), or the **Cerulean** control plane
+  (certificate issuance from its dashboard/MDM, remote NPM edge) —
+  docs/design/11 §10.
 - **Landing page:** [`web/landing/`](web/landing/) — static, Prism-styled
   project page published to <https://innotelinc.github.io/onyx/> by
   [`.github/workflows/pages.yml`](.github/workflows/pages.yml).
