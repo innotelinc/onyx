@@ -10,10 +10,10 @@ already own — a mini-PC, a server, an old laptop. Enterprise-grade storage saf
 keyboard-first interface (the *Prism* design system) — in a stack that boots in under a
 minute and idles under 512 MB RAM.
 
-[![CI](https://innotelinc.github.io/onyx/actions/workflows/ci.yml/badge.svg)](https://innotelinc.github.io/onyx/actions/workflows/ci.yml)
-[![Release](https://innotelinc.github.io/onyx/actions/workflows/release.yml/badge.svg)](https://innotelinc.github.io/onyx/actions/workflows/release.yml)
-[![Pages](https://innotelinc.github.io/onyx/actions/workflows/pages.yml/badge.svg)](https://innotelinc.github.io/onyx/actions/workflows/pages.yml)
-[![Latest release](https://img.shields.io/github/v/release/innotelinc/onyx-oss-platform?color=18181b)](https://innotelinc.github.io/onyx/releases)
+[![CI](https://github.com/innotelinc/onyx/actions/workflows/ci.yml/badge.svg)](https://github.com/innotelinc/onyx/actions/workflows/ci.yml)
+[![Release](https://github.com/innotelinc/onyx/actions/workflows/release.yml/badge.svg)](https://github.com/innotelinc/onyx/actions/workflows/release.yml)
+[![Pages](https://github.com/innotelinc/onyx/actions/workflows/pages.yml/badge.svg)](https://github.com/innotelinc/onyx/actions/workflows/pages.yml)
+[![Latest release](https://img.shields.io/github/v/release/innotelinc/onyx?color=18181b)](https://innotelinc.github.io/onyx/releases)
 
 </div>
 
