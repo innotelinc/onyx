@@ -11,13 +11,53 @@
  */
 
 /* ---- Dark (default) ---------------------------------------------------- */
-[data-md-color-scheme="onyx"] {
+/* Declared on :root unconditionally, NOT gated behind the scheme attribute:
+ * Material applies the palette at runtime by setting data-md-color-scheme on
+ * <body> (and persists palette choices in localStorage), which can leave the
+ * custom scheme variables applied to one element but not another — rendering
+ * dark-on-dark. Unconditional :root declarations make white-on-dark the
+ * contract no matter what Material's JS or a stored preference does.
+ */
+:root {
+  color-scheme: dark;
   --md-default-bg-color: #0b0d10;
+  --md-default-bg-color--light: rgba(244, 247, 251, 0.54);
+  --md-default-bg-color--lighter: rgba(244, 247, 251, 0.26);
+  --md-default-bg-color--lightest: rgba(244, 247, 251, 0.07);
   --md-default-fg-color: #f4f7fb;          /* body copy — same as landing */
   --md-default-fg-color--light: #cdd6e0;   /* secondary text — bright, body-copy safe */
   --md-default-fg-color--lighter: #a8b2bf; /* muted text — labels, footnotes */
+  --md-default-fg-color--lightest: #a8b2bf;
+  --md-typeset-color: #f4f7fb;             /* explicit: body text is white */
   --md-primary-fg-color: #12151a;          /* header/tab background */
   --md-primary-bg-color: #f4f7fb;          /* header/tab TEXT (Material paints it with -bg) */
+  --md-accent-fg-color: #6cb6ff;
+  --md-typeset-a-color: #3b9dff;
+  --md-typeset-kbd-color: rgba(244, 247, 251, 0.12);
+  --md-typeset-kbd-accent-color: rgba(244, 247, 251, 0.2);
+  --md-typeset-kbd-border-color: #0b0d10;
+  --md-typeset-table-color: rgba(244, 247, 251, 0.12);
+  --md-typeset-table-color--light: rgba(244, 247, 251, 0.035);
+  --md-admonition-fg-color: #f4f7fb;
+  --md-admonition-bg-color: #0b0d10;
+  --md-code-bg-color: #12151a;
+  --md-code-fg-color: #f4f7fb;
+  --md-code-hl-color: #3b9dff;
+  --md-code-hl-color--light: rgba(59, 157, 255, 0.1);
+  --md-footer-bg-color: #0b0d10;
+  --md-footer-fg-color: #cdd6e0;
+  --md-footer-bg-color--dark: #0b0d10;
+}
+
+/* Keep the scheme-scoped alias for anything that matches on the attribute. */
+[data-md-color-scheme="onyx"] {
+  --md-default-bg-color: #0b0d10;
+  --md-default-fg-color: #f4f7fb;
+  --md-default-fg-color--light: #cdd6e0;
+  --md-default-fg-color--lighter: #a8b2bf;
+  --md-typeset-color: #f4f7fb;
+  --md-primary-fg-color: #12151a;
+  --md-primary-bg-color: #f4f7fb;
   --md-accent-fg-color: #6cb6ff;
   --md-typeset-a-color: #3b9dff;
   --md-code-bg-color: #12151a;
