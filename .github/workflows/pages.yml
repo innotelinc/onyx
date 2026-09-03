@@ -46,10 +46,18 @@ jobs:
           python-version: "3.x"
 
       - name: Install MkDocs Material
-        run: pip install mkdocs-material
+        # Pinned to the 9.x line: the dark scheme is declared in
+        # docs/design/styles/onyx.css against Material 9's variable contract.
+        run: pip install "mkdocs-material>=9.5,<10"
 
       - name: Build design-doc site (into web/landing/docs)
         run: mkdocs build --strict --clean
+
+      - name: Assert docs are white-on-dark
+        # Guard against regressions that render black text on the dark docs
+        # background (the :root contract in docs/design/styles/onyx.css).
+        run: |
+          grep -q -- '--md-typeset-color: #f4f7fb' web/landing/docs/styles/onyx.css
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
