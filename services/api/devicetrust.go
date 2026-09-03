@@ -11,10 +11,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"onyx.dev/onyx/services/infisical"
 )
 
 const deviceTrustUpstreamTimeout = 10 * time.Second
@@ -33,13 +36,27 @@ func loadDeviceTrustConfig() *deviceTrustConfig {
 	if mode == "" {
 		mode = "off"
 	}
-	return &deviceTrustConfig{
+	cfg := &deviceTrustConfig{
 		mode:    mode,
 		apiURL:  strings.TrimRight(os.Getenv("CERULEAN_API_URL"), "/"),
 		token:   os.Getenv("CERULEAN_API_TOKEN"),
 		fleetID: os.Getenv("FLEET_ID"),
 		http:    &http.Client{Timeout: deviceTrustUpstreamTimeout},
 	}
+	// CERULEAN_API_TOKEN may be an infisical://<name> reference (SecretOps,
+	// the Innotel Platform Stack contract). Resolve it eagerly so a broken
+	// reference surfaces at startup, not on the first fleet request.
+	if name, ok := infisical.Ref(cfg.token); ok {
+		resolved, err := infisical.New(infisical.ConfigFromEnv()).ResolveEnv(
+			context.Background(), cfg.token)
+		if err != nil {
+			slog.Warn("cerulean token: " + err.Error())
+		} else {
+			cfg.token = resolved
+			slog.Info("resolved CERULEAN_API_TOKEN from Infisical", "secret", name)
+		}
+	}
+	return cfg
 }
 
 // ceruleanDevice is the projected form of a Cerulean-enrolled device. Unknown

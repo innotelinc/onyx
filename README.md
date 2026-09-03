@@ -65,6 +65,10 @@ pattern used across the innotelinc platform projects.
   off, an ONYX-run device CA (standalone), or the **Cerulean** control plane
   (certificate issuance from its dashboard/MDM, remote NPM edge) —
   docs/design/11 §10.
+- **Infisical secrets (runtime):** `S3_*` and `CERULEAN_API_TOKEN` accept
+  `infisical://<name>` references resolved at startup (shared Go client in
+  `services/infisical/`); `onyx-objectstore` mirrors plain S3 credentials into
+  Infisical on boot, and `GET /api/v1/status` reports SecretOps health.
 - **Landing page:** [`web/landing/`](web/landing/) — static, Prism-styled
   project page published to <https://innotelinc.github.io/onyx/> by
   [`.github/workflows/pages.yml`](.github/workflows/pages.yml).
