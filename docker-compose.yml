@@ -85,6 +85,13 @@ services:
       CERULEAN_API_URL: ${CERULEAN_API_URL:-}
       CERULEAN_API_TOKEN: ${CERULEAN_API_TOKEN:-}
       FLEET_ID: ${FLEET_ID:-}
+      # SecretOps (docs/design/11 §6.9): lets CERULEAN_API_TOKEN be an
+      # infisical://<name> reference resolved at startup, and reports
+      # Infisical health on GET /api/v1/status.
+      INFISICAL_ADDR: ${INFISICAL_ADDR:-}
+      INFISICAL_TOKEN: ${INFISICAL_TOKEN:-}
+      INFISICAL_WORKSPACE_ID: ${INFISICAL_WORKSPACE_ID:-}
+      INFISICAL_ENVIRONMENT: ${INFISICAL_ENVIRONMENT:-prod}
     command: ["--listen", "0.0.0.0:8080"]
     restart: unless-stopped
 
@@ -165,6 +172,13 @@ services:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-}
       HYBRID_CLOUD_ENDPOINT: ${HYBRID_CLOUD_ENDPOINT:-}
+      # SecretOps (docs/design/11 §6.9): S3_* may be infisical://<name>
+      # references resolved at startup; plain values are mirrored into
+      # Infisical on boot so .env can switch to references.
+      INFISICAL_ADDR: ${INFISICAL_ADDR:-}
+      INFISICAL_TOKEN: ${INFISICAL_TOKEN:-}
+      INFISICAL_WORKSPACE_ID: ${INFISICAL_WORKSPACE_ID:-}
+      INFISICAL_ENVIRONMENT: ${INFISICAL_ENVIRONMENT:-prod}
     command: ["--http-listen", "0.0.0.0:9000"]
     restart: unless-stopped
 

@@ -57,6 +57,19 @@ bash scripts/infisical-setup.sh
 See [compose.infisical.yml](../compose.infisical.yml) and
 [scripts/infisical-setup.py](../scripts/infisical-setup.py) for details.
 
+### Runtime resolution (`infisical://`)
+
+With `INFISICAL_ADDR` / `INFISICAL_TOKEN` / `INFISICAL_WORKSPACE_ID` in `.env` (written
+back by `scripts/infisical-setup.py`), the Go services resolve secrets at runtime:
+
+- `onyx-objectstore` — `S3_ACCESS_KEY` / `S3_SECRET_KEY` may be `infisical://<name>`
+  references; plain values are **mirrored into Infisical on boot** (best-effort), so
+  after one boot you can switch `.env` to references.
+- `onyx-api` — `CERULEAN_API_TOKEN` may be an `infisical://<name>` reference; Infisical
+  health is reported on `GET /api/v1/status` (`infisical: ok | not-configured | error`).
+
+Shared client: `services/infisical/` (same contract as Cerulean's resolver).
+
 ## Golden rules
 
 - **Authentik = Identity** · **Infisical = Secrets** · **Cerulean = Trust** ·
