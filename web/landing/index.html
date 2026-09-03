@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ONYX — Online Storage System — Platform</title>
+  <meta name="description" content="ONYX is an open-source storage and infrastructure platform: Btrfs storage with snapshots, virtualization, S3-compatible object storage, backups, and app hosting — private and self-hosted.">
+  <meta property="og:title" content="ONYX — Online Storage System — Platform">
+  <meta property="og:description" content="Enterprise-grade storage, virtualization, object storage, backups and app hosting in one self-hosted stack.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b0d10'/%3E%3Cpath d='M16 6l8 5v10l-8 5-8-5V11z' fill='none' stroke='%233b9dff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%233b9dff'/%3E%3C/svg%3E">
+  <style>
+    /* ---- Prism tokens (docs/design/03) ---------------------------------- */
+    :root {
+      color-scheme: dark;
+      --onyx-bg: #0b0d10;
+      --onyx-bg-elevated: #12151a;
+      --onyx-surface: #181c22;
+      --onyx-surface-hover: #1f242c;
+      --onyx-border: #262c35;
+      --onyx-text: #e6e9ee;
+      --onyx-text-secondary: #9aa3b0;
+      --onyx-text-muted: #6b7480;
+      --onyx-accent: #3b9dff;
+      --onyx-accent-hover: #6cb6ff;
+      --onyx-accent-tint: rgba(59, 157, 255, 0.12);
+      --onyx-success: #3ddc84;
+      --onyx-warning: #f5b544;
+      --onyx-danger: #f25f5f;
+      --onyx-info: #5ac8fa;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --ease: cubic-bezier(.2, .8, .2, 1);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background: var(--onyx-bg);
+      color: var(--onyx-text);
+      font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    ::selection { background: var(--onyx-accent-tint); }
+
+    a { color: var(--onyx-accent); text-decoration: none; }
+    a:hover { color: var(--onyx-accent-hover); }
+
+    code, pre {
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+    /* ---- Top bar --------------------------------------------------------- */
+    .topbar {
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(11, 13, 16, 0.72);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border-bottom: 1px solid var(--onyx-border);
+    }
+    .topbar-inner {
+      display: flex; align-items: center; gap: 20px;
+      height: 60px;
+    }
+    .brand {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 650; letter-spacing: 0.04em;
+      color: var(--onyx-text);
+    }
+    .brand:hover { color: var(--onyx-text); }
+    .brand svg { display: block; }
+    .brand .dot { color: var(--onyx-accent); }
+    .topbar nav { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+    .topbar nav a {
+      color: var(--onyx-text-secondary);
+      padding: 6px 12px; border-radius: var(--radius-sm);
+      font-size: 14px;
+      transition: color .15s var(--ease), background .15s var(--ease);
+    }
+    .topbar nav a:hover { color: var(--onyx-text); background: var(--onyx-surface-hover); }
+    .topbar .gh {
+      display: inline-flex; align-items: center; gap: 8px;
+      margin-left: 8px;
+      border: 1px solid var(--onyx-border);
+      border-radius: var(--radius-md);
+      padding: 7px 14px;
+      color: var(--onyx-text);
+      font-size: 14px;
+      transition: border-color .15s var(--ease), background .15s var(--ease);
+    }
+    .topbar .gh:hover { border-color: var(--onyx-accent); background: var(--onyx-accent-tint); color: var(--onyx-text); }
+
+    /* ---- Hero ------------------------------------------------------------ */
+    .hero { position: relative; overflow: hidden; padding: 96px 0 72px; }
+    .hero::before {
+      content: "";
+      position: absolute; inset: 0;
+      background:
+        radial-gradient(600px 320px at 70% -10%, rgba(59, 157, 255, 0.14), transparent 70%),
+        radial-gradient(500px 300px at 15% 110%, rgba(90, 200, 250, 0.08), transparent 70%);
+      pointer-events: none;
+    }
+    .hero-inner { position: relative; max-width: 760px; }
+    .kicker {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--onyx-accent);
+      background: var(--onyx-accent-tint);
+      border: 1px solid rgba(59, 157, 255, 0.25);
+      border-radius: 999px;
+      padding: 5px 14px;
+      margin: 0 0 24px;
+    }
+    .kicker .pulse {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--onyx-success);
+      box-shadow: 0 0 0 0 rgba(61, 220, 132, 0.5);
+      animation: pulse 2.4s var(--ease) infinite;
+    }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(61, 220, 132, 0.45); }
+      70% { box-shadow: 0 0 0 9px rgba(61, 220, 132, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(61, 220, 132, 0); }
+    }
+    h1 {
+      font-size: clamp(2.2rem, 5.5vw, 3.4rem);
+      line-height: 1.08;
+      letter-spacing: -0.02em;
+      margin: 0 0 20px;
+      font-weight: 700;
+    }
+    h1 .accent { color: var(--onyx-accent); }
+    .lede {
+      font-size: 1.125rem;
+      color: var(--onyx-text-secondary);
+      max-width: 640px;
+      margin: 0 0 32px;
+    }
+    .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      border-radius: var(--radius-md);
+      padding: 11px 20px;
+      font-size: 15px; font-weight: 550;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: background .15s var(--ease), border-color .15s var(--ease), transform .15s var(--ease);
+    }
+    .btn-primary { background: var(--onyx-accent); color: #071018; }
+    .btn-primary:hover { background: var(--onyx-accent-hover); color: #071018; }
+    .btn-secondary { border-color: var(--onyx-border); color: var(--onyx-text); background: transparent; }
+    .btn-secondary:hover { border-color: var(--onyx-accent); background: var(--onyx-accent-tint); color: var(--onyx-text); }
+    .quickstart {
+      display: flex; align-items: center; gap: 14px;
+      background: var(--onyx-bg-elevated);
+      border: 1px solid var(--onyx-border);
+      border-radius: var(--radius-md);
+      padding: 12px 16px;
+      max-width: 560px;
+      font-size: 13.5px;
+    }
+    .quickstart code { color: var(--onyx-text); white-space: nowrap; overflow-x: auto; }
+    .quickstart code .c { color: var(--onyx-text-muted); }
+    .quickstart .copy {
+      margin-left: auto;
+      background: transparent; border: 1px solid var(--onyx-border);
+      color: var(--onyx-text-secondary);
+      border-radius: var(--radius-sm);
+      font: inherit; font-size: 12px;
+      padding: 4px 10px; cursor: pointer;
+      transition: border-color .15s var(--ease), color .15s var(--ease);
+    }
+    .quickstart .copy:hover { border-color: var(--onyx-accent); color: var(--onyx-text); }
+    .quickstart .copy.copied { color: var(--onyx-success); border-color: var(--onyx-success); }
+
+    /* ---- Stat strip ------------------------------------------------------ */
+    .stats {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px; margin: 56px 0 0;
+    }
+    .stat {
+      background: var(--onyx-bg-elevated);
+      border: 1px solid var(--onyx-border);
+      border-radius: var(--radius-md);
+      padding: 16px 18px;
+    }
+    .stat b { display: block; font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+    .stat span { color: var(--onyx-text-secondary); font-size: 13px; }
+
+    /* ---- Sections -------------------------------------------------------- */
+    section { padding: 64px 0; }
+    section h2 {
+      font-size: 1.7rem; letter-spacing: -0.01em;
+      margin: 0 0 8px;
+    }
+    section .section-sub { color: var(--onyx-text-secondary); margin: 0 0 32px; max-width: 620px; }
+
+    .grid { display: grid; gap: 14px; }
+    .grid-3 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .grid-2 { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+
+    .card {
+      background: var(--onyx-bg-elevated);
+      border: 1px solid var(--onyx-border);
+      border-radius: var(--radius-lg);
+      padding: 22px;
+      transition: border-color .15s var(--ease), transform .15s var(--ease);
+    }
+    .card:hover { border-color: #34404f; }
+    .card h3 { margin: 0 0 6px; font-size: 1.02rem; }
+    .card p { margin: 0; color: var(--onyx-text-secondary); font-size: 14px; }
+    .card .icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 34px; height: 34px;
+      border-radius: var(--radius-md);
+      background: var(--onyx-accent-tint);
+      margin-bottom: 14px;
+      font-size: 16px;
+    }
+    .card ul { margin: 10px 0 0; padding-left: 18px; color: var(--onyx-text-secondary); font-size: 14px; }
+    .card ul li { margin: 3px 0; }
+    .card ul li b { color: var(--onyx-text); font-weight: 600; }
+
+    /* ---- Surfaces table -------------------------------------------------- */
+    .surfaces { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    .surface {
+      display: flex; flex-direction: column; gap: 2px;
+      background: var(--onyx-bg-elevated);
+      border: 1px solid var(--onyx-border);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      transition: border-color .15s var(--ease);
+    }
+    .surface:hover { border-color: var(--onyx-accent); }
+    .surface b { font-size: 14.5px; }
+    .surface small { color: var(--onyx-text-secondary); font-size: 12.5px; }
+    .surface .live {
+      margin-left: auto;
+      font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+      color: var(--onyx-success);
+      border: 1px solid rgba(61, 220, 132, 0.3);
+      border-radius: 999px;
+      padding: 1px 8px;
+    }
+
+    /* ---- Stack / code ---------------------------------------------------- */
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: center; }
+    @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+    pre.terminal {
+      margin: 0;
+      background: var(--onyx-bg-elevated);
+      border: 1px solid var(--onyx-border);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      font-size: 13px;
+      line-height: 1.75;
+      overflow-x: auto;
+      color: var(--onyx-text-secondary);
+    }
+    pre.terminal .p { color: var(--onyx-accent); }
+    pre.terminal .o { color: var(--onyx-text); }
+    pre.terminal .ok { color: var(--onyx-success); }
+    pre.terminal .cmt { color: var(--onyx-text-muted); }
+
+    /* ---- Roadmap --------------------------------------------------------- */
+    .roadmap { display: grid; gap: 12px; }
+    .mile {
+      display: flex; align-items: baseline; gap: 16px;
+      border: 1px solid var(--onyx-border);
+      background: var(--onyx-bg-elevated);
+      border-radius: var(--radius-md);
+      padding: 14px 18px;
+    }
+    .mile .tag {
+      flex: 0 0 130px;
+      font-weight: 650; font-size: 14px;
+      color: var(--onyx-text);
+    }
+    .mile .tag em {
+      font-style: normal; color: var(--onyx-accent);
+      display: block; font-size: 12px; font-weight: 500;
+    }
+    .mile p { margin: 0; color: var(--onyx-text-secondary); font-size: 14px; }
+    .mile .state {
+      margin-left: auto; flex: 0 0 auto;
+      font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+      border-radius: 999px; padding: 2px 10px;
+    }
+    .mile .state.done { color: var(--onyx-success); border: 1px solid rgba(61, 220, 132, 0.3); }
+    .mile .state.next { color: var(--onyx-warning); border: 1px solid rgba(245, 181, 68, 0.3); }
+    .mile .state.later { color: var(--onyx-text-muted); border: 1px solid var(--onyx-border); }
+
+    /* ---- Footer ----------------------------------------------------------- */
+    footer {
+      border-top: 1px solid var(--onyx-border);
+      padding: 32px 0 40px;
+      color: var(--onyx-text-muted);
+      font-size: 13.5px;
+    }
+    .foot-inner {
+      display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
+      justify-content: space-between;
+    }
+    footer a { color: var(--onyx-text-secondary); }
+    footer a:hover { color: var(--onyx-text); }
+    .foot-links { display: flex; gap: 18px; flex-wrap: wrap; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="#">
+        <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true">
+          <rect width="32" height="32" rx="8" fill="#0b0d10"/>
+          <path d="M16 6l8 5v10l-8 5-8-5V11z" fill="none" stroke="#3b9dff" stroke-width="2"/>
+          <circle cx="16" cy="16" r="3" fill="#3b9dff"/>
+        </svg>
+        ONYX<span class="dot">.</span>
+      </a>
+      <nav aria-label="Main">
+        <a href="#features">Features</a>
+        <a href="#stack">Stack</a>
+        <a href="#platform">Platform</a>
+        <a href="#roadmap">Roadmap</a>
+        <a class="gh" href="https://github.com/innotelinc/onyx">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+          GitHub
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero -->
+    <div class="hero">
+      <div class="wrap hero-inner">
+        <p class="kicker"><span class="pulse" aria-hidden="true"></span> v0.1 "Cinder" · skeleton shipped</p>
+        <h1>The self-hosted platform<br>your storage deserves<span class="accent">.</span></h1>
+        <p class="lede">
+          ONYX — the <em>Online Storage System</em> — is an open-source NAS and infrastructure
+          platform: Btrfs storage with first-class snapshots, virtualization, S3-compatible object
+          storage, backups and app hosting. Enterprise-grade fundamentals, home-tier hardware,
+          zero cloud accounts.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/innotelinc/onyx#quick-start-docker-platform">Get started</a>
+          <a class="btn btn-secondary" href="https://github.com/innotelinc/onyx/tree/main/docs/design">Design docs</a>
+        </div>
+        <div class="quickstart">
+          <code><span class="c">$</span> git clone https://github.com/innotelinc/onyx && cd onyx && cp .env.example .env && ./setup.sh</code>
+          <button class="copy" id="copy-btn" type="button" aria-label="Copy quick start command">copy</button>
+        </div>
+        <div class="stats">
+          <div class="stat"><b>&lt; 512 MB</b><span>idle RAM target</span></div>
+          <div class="stat"><b>&lt; 60 s</b><span>boot to login</span></div>
+          <div class="stat"><b>6 protocols</b><span>SMB · NFS · FTP · SFTP · WebDAV · Rsync</span></div>
+          <div class="stat"><b>11 services</b><span>Go control plane · Rust data plane</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Features -->
+    <section id="features">
+      <div class="wrap">
+        <h2>Storage-first, app-friendly, lightweight<span class="accent">.</span></h2>
+        <p class="section-sub">
+          The storage safety of TrueNAS, the app experience of a modern home server — at a
+          fraction of the hardware appetite.
+        </p>
+        <div class="grid grid-3">
+          <div class="card">
+            <span class="icon" aria-hidden="true">🛡️</span>
+            <h3>Safe by default</h3>
+            <p>Btrfs checksums, quotas and scrub; snapshots on; atomic A/B updates with auto-rollback. Every destructive action has a restore path.</p>
+          </div>
+          <div class="card">
+            <span class="icon" aria-hidden="true">⚡</span>
+            <h3>Low hardware appetite</h3>
+            <p>Boots in under a minute and idles under 512 MB — a mini-PC, a server, or the laptop in the drawer is enough.</p>
+          </div>
+          <div class="card">
+            <span class="icon" aria-hidden="true">📁</span>
+            <h3>One share model</h3>
+            <p>Create a share once, expose it over SMB, NFS, FTP, SFTP, WebDAV and Rsync. Config is rendered, validated and reloaded atomically.</p>
+          </div>
+          <div class="card">
+            <span class="icon" aria-hidden="true">🔌</span>
+            <h3>Hotplug that just works</h3>
+            <p>Kernel uevent-driven device detection: plug a drive in and it's mounted and shared almost instantly — no daemon zoo, no polling.</p>
+          </div>
+          <div class="card">
+            <span class="icon" aria-hidden="true">🧩</span>
+            <h3>Modular services</h3>
+            <p>Small, single-purpose daemons behind one typed gRPC API — Rust where the filesystem demands safety, Go for fast orchestration.</p>
+          </div>
+          <div class="card">
+            <span class="icon" aria-hidden="true">🏠</span>
+            <h3>Private by design</h3>
+            <p>Local-first, no mandatory cloud account, no telemetry. SSO via Authentik (OIDC) for every service, wildcard TLS out of the box.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Stack -->
+    <section id="stack">
+      <div class="wrap">
+        <h2>A real system, not a slide deck<span class="accent">.</span></h2>
+        <p class="section-sub">
+          The v0.1 "Cinder" skeleton is installable today: bootable OSTree base image, systemd
+          services, gRPC contracts as the source of truth, and a CLI that talks to the whole stack.
+        </p>
+        <div class="split">
+          <div>
+            <div class="grid" style="gap:14px">
+              <div class="card">
+                <h3>onyx-core <span style="color:var(--onyx-text-muted);font-weight:400">· Go</span></h3>
+                <p>Control plane: system status, share CRUD, config applier, hotplug reconciler.</p>
+              </div>
+              <div class="card">
+                <h3>onyx-storaged + onyx-privd <span style="color:var(--onyx-text-muted);font-weight:400">· Rust</span></h3>
+                <p>Data plane: pool discovery, uevent hotplug, SMART health — with a single root privilege boundary.</p>
+              </div>
+              <div class="card">
+                <h3>onyx-api + onyx CLI</h3>
+                <p>HTTP gateway with a versioned REST surface, and the <code>onyx</code> CLI that drives it all.</p>
+              </div>
+              <div class="card">
+                <h3>Platform daemons</h3>
+                <p>Snapshots, backups, VMs, apps, AI advisor, S3 object store — proto contracts defined, landing per milestone.</p>
+              </div>
+            </div>
+          </div>
+          <pre class="terminal"><span class="cmt"># build + run the whole control & data plane</span>
+$ <span class="p">make</span> <span class="o">bootstrap build</span>
+$ <span class="p">scripts/dev.sh</span> <span class="o">start</span>
+
+$ <span class="p">bin/onyx</span> <span class="o">status</span>
+<span class="ok">core 0.1.0-dev</span>
+  <span class="o">onyx-core</span>      <span class="ok">SERVING</span>
+  <span class="o">onyx-storaged</span>  <span class="ok">SERVING</span>
+  <span class="o">onyx-shared</span>    <span class="ok">SERVING</span>
+  <span class="o">onyx-privd</span>     <span class="ok">SERVING</span>
+
+$ <span class="p">bin/onyx</span> <span class="o">share create media /mnt/onyx/pool1/@data/media --smb --nfs</span>
+<span class="ok">share 'media' created — rendered smb.conf + exports, reloaded</span></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Platform surfaces -->
+    <section id="platform">
+      <div class="wrap">
+        <h2>One platform, six doors<span class="accent">.</span></h2>
+        <p class="section-sub">
+          Every surface hangs off its own subdomain with a wildcard Let's Encrypt certificate —
+          provisioned automatically, TLS terminated at Nginx Proxy Manager, SSO via Authentik.
+        </p>
+        <div class="surfaces">
+          <a class="surface" href="https://app.onyx.innotel.us"><b>App</b><small>app.onyx.innotel.us</small><span class="live">live</span></a>
+          <a class="surface" href="https://api.onyx.innotel.us"><b>API</b><small>api.onyx.innotel.us</small><span class="live">live</span></a>
+          <a class="surface" href="https://auth.onyx.innotel.us"><b>Identity</b><small>auth.onyx.innotel.us · Authentik</small><span class="live">live</span></a>
+          <a class="surface" href="https://storage.onyx.innotel.us"><b>Storage</b><small>storage.onyx.innotel.us · S3</small><span class="live">live</span></a>
+          <a class="surface" href="https://backup.onyx.innotel.us"><b>Backup</b><small>backup.onyx.innotel.us</small><span class="live">live</span></a>
+          <a class="surface" href="https://admin.onyx.innotel.us"><b>Admin</b><small>admin.onyx.innotel.us</small><span class="live">live</span></a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Roadmap -->
+    <section id="roadmap">
+      <div class="wrap">
+        <h2>Roadmap<span class="accent">.</span></h2>
+        <p class="section-sub">Monthly cadence during beta — public, honest, and driven by the <a href="https://github.com/innotelinc/onyx/blob/main/docs/design/01-product-vision.md#7-roadmap">design docs</a>.</p>
+        <div class="roadmap">
+          <div class="mile">
+            <span class="tag">v0.1 <em>"Cinder"</em></span>
+            <p>Skeleton: bootable OSTree base, onyx-core, storage daemons, API, CLI, platform layer.</p>
+            <span class="state done">shipped</span>
+          </div>
+          <div class="mile">
+            <span class="tag">v0.2 <em>"Flint"</em></span>
+            <p>Files: Prism web UI, file explorer, SMB/NFS shares UX, users &amp; permissions.</p>
+            <span class="state next">next</span>
+          </div>
+          <div class="mile">
+            <span class="tag">v0.3 <em>"Obsidian"</em></span>
+            <p>Safety: snapshots + rollback UI, scrub scheduling, backup jobs, SMART monitoring.</p>
+            <span class="state later">later</span>
+          </div>
+          <div class="mile">
+            <span class="tag">v0.4 <em>"Jade"</em></span>
+            <p>Apps: app store + sandboxing, Docker integration, VMs, full protocol surface.</p>
+            <span class="state later">later</span>
+          </div>
+          <div class="mile">
+            <span class="tag">v0.5 <em>"Quartz"</em></span>
+            <p>Intelligence: AI admin assistant, audit reporting, advanced search, mobile app.</p>
+            <span class="state later">later</span>
+          </div>
+          <div class="mile">
+            <span class="tag">v1.0</span>
+            <p>Release: security audit, docs, hardening, LTS update channel.</p>
+            <span class="state later">later</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap foot-inner">
+      <span>ONYX — Online Storage System. AGPL-3.0 core · Apache-2.0 SDK.</span>
+      <span class="foot-links">
+        <a href="https://github.com/innotelinc/onyx">GitHub</a>
+        <a href="https://github.com/innotelinc/onyx/tree/main/docs/design">Design docs</a>
+        <a href="https://github.com/innotelinc/onyx/releases">Releases</a>
+      </span>
+    </div>
+  </footer>
+
+  <script>
+    // Copy-to-clipboard for the quick-start one-liner (progressive enhancement).
+    document.getElementById('copy-btn').addEventListener('click', function () {
+      var cmd = 'git clone https://github.com/innotelinc/onyx && cd onyx && cp .env.example .env && ./setup.sh';
+      var self = this;
+      function done() {
+        self.textContent = 'copied';
+        self.classList.add('copied');
+        setTimeout(function () {
+          self.textContent = 'copy';
+          self.classList.remove('copied');
+        }, 2000);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(cmd).then(done, done);
+      } else {
+        done();
+      }
+    });
+  </script>
+</body>
+</html>
