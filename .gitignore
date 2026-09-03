@@ -16,6 +16,11 @@ base/image/sysroot/
 # Secrets + local env (setup.sh copies from .env.example)
 .env
 
+# Device-trust PKI (scripts/provision-device-trust.sh) — private keys, never commit
+issued/
+*.p12
+*.csr
+
 # Built docs site (mkdocs.yml -> site_dir; built in CI for Pages)
 web/landing/docs/
 

@@ -52,6 +52,9 @@ provider; local accounts remain as a fallback for offline operation).
     `AUTHENTIK_CLIENT_SECRET`) for downstream services.
 - All six subdomains trust `auth.onyx.innotel.us`; NPM protects the
   `admin`/`app` hosts with Authentik's forward-auth where enabled.
+- **Passkeys:** the authentication flow carries a WebAuthn stage in
+  authentication mode, so enrolled devices confirm sign-in with a platform
+  authenticator (docs/design/11 §10).
 
 ## 3. Edge: Nginx Proxy Manager
 
@@ -239,10 +242,14 @@ Btrfs snapshot lifecycle on top of the fixed subvolume layout
   2. cp .env.example .env if missing (then require editing secrets)
   3. docker compose up -d --build     (onyx stack + Authentik + NPM)
   4. wait for NPM API + Authentik readiness
-  5. scripts/provision-authentik.sh    (bootstrap superuser, ONYX OIDC app)
-  6. scripts/npm-proxy-hosts.py        (TSIG wildcard cert + 6 proxy hosts)
-  7. print URL table (app/api/auth/storage/backup/admin)
+  5. scripts/provision-authentik.sh    (bootstrap superuser, ONYX OIDC app, passkey stage)
+  6. scripts/provision-device-trust.sh (ensure the device CA under /etc/onyx/pki)
+  7. scripts/npm-proxy-hosts.py        (TSIG wildcard cert + 6 proxy hosts, mTLS gate)
+  8. print URL table (app/api/auth/storage/backup/admin)
 ```
+
+Set `DEVICE_TRUST_SUBDOMAINS=` (empty) in `.env` to disable the mTLS gate
+entirely; edit it to a different subdomain list to move the gate.
 
 Idempotent end to end: re-runs converge (cert reuse, proxy-host update,
 provider re-check).
@@ -257,3 +264,78 @@ provider re-check).
   same unprivileged per-service users where possible.
 - Authentik is the SSO choke point: forward-auth on `app`/`admin`, OIDC for
   the API, service-to-service traffic stays on the internal network.
+
+## 10. Device trust (passkeys + mTLS client certificates)
+
+Management surfaces (`app`, `admin`) are gated by two factors that bind a
+login to a *device*, not just a password:
+
+1. **Passkeys (WebAuthn)** — Authentik is the IdP, so platform
+   authenticators (Touch ID, Windows Hello, Android/iOS, hardware keys) are
+   enabled at the source: the default `default-authentication-identification`
+   flow gets a **WebAuthn stage in authentication mode**, so every login is
+   confirmed by the device's passkey once one is registered. Users register
+   passkeys from Authentik's settings; `provision-authentik.sh` flips the
+   flow stage on automatically.
+2. **TLS client certificates (mTLS)** — NPM requires a client certificate
+   issued by the ONYX device CA before the request even reaches Authentik's
+   proxy. A device without a trusted certificate cannot start an OIDC flow,
+   which removes credential-stuffing and stolen-password classes of attack
+   for the admin surface entirely.
+
+The result: on an enrolled device, sign-in is one passkey tap. On any other
+device, the TLS handshake fails before a password is ever asked for.
+
+### 10.1 Device CA (`scripts/provision-device-trust.sh`)
+
+A minimal internal PKI maintained under `/etc/onyx/pki` (host bind mount,
+`ONYX_PKI_DIR` to override; private keys are mode 0600, never leave the
+host):
+
+```
+ca.crt / ca.key          ECDSA P-256 self-signed device CA (10 years)
+serial                   openssl tracking file
+issued/<name>.crt/.key   per-device client certs (default 365 days)
+```
+
+- `scripts/provision-device-trust.sh` (no args) creates the CA if missing —
+  idempotent, called from `setup.sh` before NPM provisioning.
+- `scripts/provision-device-trust.sh issue laptop [days]` issues (or renews)
+  a client certificate with CN `<name>` plus the
+  `ONYX Device Trust` / `device=<name>` O/OU identifiers, for distribution
+  via MDM (Apple Configurator / `.mobileconfig`, Intune, or a manual import
+  into the OS/browser trust store).
+
+### 10.2 Edge enforcement (`npm-proxy-hosts.py`)
+
+For every subdomain listed in `DEVICE_TRUST_SUBDOMAINS` (default
+`app admin`), the proxy host's **advanced config** is extended with the Nginx
+mTLS directives — merged idempotently with any existing advanced config:
+
+```nginx
+ssl_client_certificate /etc/letsencrypt/onyx-device-ca/ca.crt;
+ssl_verify_client on;
+ssl_verify_depth 2;
+```
+
+The CA is mounted into the NPM container from the host PKI dir
+(`docker-compose.yml`); `ssl_verify_client on` makes NPM return **400 with
+`No required SSL certificate was sent`** for devices without an enrolled
+certificate — before any auth flow starts. Nginx passes the verified
+subject to upstreams in `X-SSL-Client-Subject-DN`, which Authentik forward
+auth can use for audit trail enrichment.
+
+### 10.3 Trade-offs and operations
+
+- **Strictness:** `ssl_verify_client on` was chosen over `optional` so the
+  gate is real; enrollment is a deliberate act (issue cert → install on
+  device → done). To enroll a new device: `issue <name>`, install the cert
+  via MDM, hit the site once.
+- **Revocation:** remove/reissue via the helper; for immediate edge-level
+  kill, delete the device cert from NPM's CA view or rotate the CA (re-issue
+  all device certs — the fleet is small by design).
+- **Failure mode:** a lost fleet of certificates is recoverable by re-running
+  the helper against a fresh CA and re-provisioning NPM hosts.
+- **S3/backup surfaces are exempt:** machine clients (S3 keys, backup
+  agents) authenticate with credentials, not device certificates; only
+  interactive surfaces are device-gated.
