@@ -29,6 +29,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	"onyx.dev/onyx/services/infisical"
+
 	onyxv1 "onyx.dev/onyx/proto/gen/go/onyx/v1"
 )
 
@@ -167,7 +169,10 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		s.writeGRPCError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, protoMessage(resp))
+	out := protoMessage(resp)
+	// SecretOps health: "ok" | "not-configured" | "error: <detail>".
+	out["infisical"] = infisical.New(infisical.ConfigFromEnv()).Status(ctx)
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *server) handlePools(w http.ResponseWriter, r *http.Request) {
