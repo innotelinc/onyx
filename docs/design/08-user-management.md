@@ -108,4 +108,4 @@ Group { id, name, members[], default_share_permissions? }
 - Users can view the audit entries that concern them (own logins, own file actions) in a
   "My activity" view — transparency without exposing other users' data.
 - Admins see the full audit log; user-level exports available for compliance (small
-  business) — see [07-security-model.md](07-security-model.md#9).
+  business) — see [07-security-model.md](07-security-model.md#9-audit-logging).

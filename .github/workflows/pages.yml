@@ -1,17 +1,22 @@
-# Publish the ONYX landing page (web/landing/) to GitHub Pages.
+# Publish the ONYX landing page (web/landing/) + design-doc site (docs/design,
+# rendered with MkDocs Material into web/landing/docs/) to GitHub Pages.
 #
 # Requires Pages to be enabled once: repo Settings → Pages → Source:
-# "GitHub Actions". After that, every push to main that touches the landing
-# page republishes https://innotelinc.github.io/onyx/ (workflow_dispatch works
-# too). Static-only, no build step — just stage + upload + deploy.
+# "GitHub Actions". After that, every push to main that touches either surface
+# republishes:
+#   https://innotelinc.github.io/onyx/        (landing, static)
+#   https://innotelinc.github.io/onyx/docs/   (design docs, mkdocs build)
+# workflow_dispatch works too.
 
-name: Pages (landing)
+name: Pages (landing + docs)
 
 on:
   push:
     branches: [main]
     paths:
       - "web/landing/**"
+      - "docs/design/**"
+      - "mkdocs.yml"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -34,6 +39,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+          cache: pip
+
+      - name: Install MkDocs Material
+        run: pip install mkdocs-material
+
+      - name: Build design-doc site (into web/landing/docs)
+        run: mkdocs build --strict --clean
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

@@ -178,4 +178,4 @@ only invoke the same endpoints above, with two extra guardrails:
 
 Local mode: a bundled small LLM via llama.cpp (CPU-friendly 1–4B quantized, optional download)
 with RAG over the user's own docs/FAQ. Remote mode: BYO-key for stronger models (OpenAI-
-compatible endpoint). See [07-security-model.md](07-security-model.md#ai) for the threat model.
+compatible endpoint). See [07-security-model.md](07-security-model.md#1-threat-model) for the threat model.
