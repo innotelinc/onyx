@@ -14,7 +14,8 @@ export GOMODCACHE := $(TOOLS)/gomod
 export GOCACHE    := $(TOOLS)/gocache
 export GOPATH     := $(TOOLS)/gopath
 export CARGO_HOME := $(TOOLS)/cargo
-export PATH       := $(TOOLS)/bin:$(TOOLS)/protoc/bin:$(PATH)
+export RUSTUP_HOME := $(TOOLS)/rustup
+export PATH       := $(TOOLS)/bin:$(TOOLS)/protoc/bin:$(TOOLS)/cargo/bin:$(PATH)
 # tonic-build (services/storaged/build.rs) uses PROTOC to find protoc.
 export PROTOC     := $(TOOLS)/protoc/bin/protoc
 
