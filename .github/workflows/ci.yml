@@ -49,8 +49,13 @@ jobs:
 
       - name: Verify compose + setup scripts
         run: |
-          bash -n setup.sh scripts/provision-authentik.sh
+          bash -n setup.sh scripts/provision-authentik.sh scripts/provision-device-trust.sh
           python3 -m py_compile scripts/npm-proxy-hosts.py
+          # compose interpolation requires the Authentik secrets (:> vars);
+          # validation only needs syntactically valid dummies.
+          AUTHENTIK_SECRET_KEY=ci AUTHENTIK_BOOTSTRAP_TOKEN=ci \
+          AUTHENTIK_BOOTSTRAP_EMAIL=ci@example.com AUTHENTIK_BOOTSTRAP_PASSWORD=ci \
+          AUTHENTIK_PG_PASSWORD=ci \
           docker compose config --quiet
 
   docker-build:
