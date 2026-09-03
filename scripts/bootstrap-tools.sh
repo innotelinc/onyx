@@ -8,6 +8,7 @@ TOOLS="$ROOT/.tools"
 
 GO_VERSION="${GO_VERSION:-1.27.0}"
 PROTOC_VERSION="${PROTOC_VERSION:-36.1}"
+RUST_TOOLCHAIN="${RUST_TOOLCHAIN:-stable}"
 
 ARCH="$(uname -m)"
 case "$ARCH" in
@@ -35,6 +36,19 @@ if [ ! -x "$TOOLS/protoc/bin/protoc" ]; then
   rm -f "$TOOLS/protoc.zip"
 fi
 
+# --- Rust (cargo + rustc for services/storaged + services/privd) ---
+# Repo-local rustup: RUSTUP_HOME/CARGO_HOME live under .tools/, nothing
+# system-wide. Idempotent: skipped when cargo is already present.
+export RUSTUP_HOME="$TOOLS/rustup"
+export CARGO_HOME="$TOOLS/cargo"
+if [ ! -x "$TOOLS/cargo/bin/cargo" ]; then
+  echo ">> installing rustup (${RUST_TOOLCHAIN}) into .tools/ ..."
+  curl -fsSL https://sh.rustup.rs | \
+    RUSTUP_HOME="$TOOLS/rustup" CARGO_HOME="$TOOLS/cargo" \
+    sh -s -- -y --profile minimal --default-toolchain "$RUST_TOOLCHAIN" --no-modify-path
+  rm -f "$TOOLS/rustup/settings.toml.bak" 2>/dev/null || true
+fi
+
 if [ ! -x "$TOOLS/bin/protoc-gen-go" ]; then
   echo ">> installing protoc-gen-go ..."
   GOBIN="$TOOLS/bin" GOMODCACHE="$TOOLS/gomod" GOCACHE="$TOOLS/gocache" GOPATH="$TOOLS/gopath" \
@@ -49,3 +63,4 @@ fi
 echo "toolchain ready:"
 "$TOOLS/go/bin/go" version
 "$TOOLS/protoc/bin/protoc" --version
+"$TOOLS/cargo/bin/cargo" --version
