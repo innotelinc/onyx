@@ -1,9 +1,31 @@
-# ONYX — Online Storage System — Platform
+<div align="center">
 
-**A next-generation storage and infrastructure platform that replaces TrueNAS and
-ZimaOS — enterprise-grade storage, virtualization, object storage, backup
-management, cloud synchronization, and application hosting in one self-hosted
-stack.**
+# 🗄️ ONYX — Online Storage System
+
+**The NAS and infrastructure platform that replaces TrueNAS and ZimaOS — storage, virtualization, object storage, backup, and app hosting in one self-hosted stack.**
+
+ONYX is a lightweight, privacy-first NAS *and* infrastructure platform for hardware you
+already own — a mini-PC, a server, an old laptop. Enterprise-grade storage safety
+(Btrfs snapshots, checksums, scrubs), CasaOS/ZimaOS-level app and VM hosting, and a calm,
+keyboard-first interface (the *Prism* design system) — in a stack that boots in under a
+minute and idles under 512 MB RAM.
+
+[![CI](https://github.com/innotelinc/onyx-oss-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/innotelinc/onyx-oss-platform/actions/workflows/ci.yml)
+[![Release](https://github.com/innotelinc/onyx-oss-platform/actions/workflows/release.yml/badge.svg)](https://github.com/innotelinc/onyx-oss-platform/actions/workflows/release.yml)
+[![Pages](https://github.com/innotelinc/onyx-oss-platform/actions/workflows/pages.yml/badge.svg)](https://github.com/innotelinc/onyx-oss-platform/actions/workflows/pages.yml)
+[![Latest release](https://img.shields.io/github/v/release/innotelinc/onyx-oss-platform?color=18181b)](https://github.com/innotelinc/onyx-oss-platform/releases)
+
+</div>
+
+> **About ONYX** — a next-generation storage and infrastructure platform that replaces
+> TrueNAS and ZimaOS: enterprise-grade storage, virtualization, object storage, backup
+> management, cloud synchronization, and application hosting in one self-hosted stack —
+> SSO everywhere via Authentik, safe by default with snapshots and A/B rollback, and no
+> cloud account required. **Landing page:** [github.com/innotelinc/onyx-oss-platform](https://github.com/innotelinc/onyx-oss-platform)
+
+---
+
+## Services
 
 Primary domain: `onyx.innotel.us`
 
@@ -52,19 +74,7 @@ pattern used across the innotelinc platform projects.
   [`mkdocs.yml`](mkdocs.yml) is presentation-only — the docs directory stays
   the source of truth).
 
-## What it is
-
-ONYX is a lightweight, privacy-first NAS *and* infrastructure platform for
-hardware you already own — a mini-PC, a server, an old laptop. It combines:
-
-- **Storage safety** (Btrfs snapshots, checksums, quotas, scrub) that
-  TrueNAS-class systems are known for, at a fraction of the hardware cost,
-- **App + VM hosting** (Docker containers + `onyx-appd`, virtualization via
-  `onyx-vmm`) at CasaOS/ZimaOS levels of ease,
-- **A modern interface** (the *Prism* design system) inspired by Linear, GitHub,
-  Arc, VisionOS, and Windows 11 — keyboard-first, calm, and dense.
-
-**Key properties**
+## Key properties
 
 - ⚡ Boots in under a minute, idles under 512 MB RAM
 - 🔒 Safe by default: snapshots on, atomic A/B updates with auto-rollback, no
