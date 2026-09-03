@@ -41,6 +41,11 @@ pattern used across the innotelinc platform projects.
 - **Landing page:** [`web/landing/`](web/landing/) — static, Prism-styled
   project page published to <https://innotelinc.github.io/onyx/> by
   [`.github/workflows/pages.yml`](.github/workflows/pages.yml).
+- **Design-doc site:** the eleven documents in [`docs/design/`](docs/design/)
+  render as a MkDocs Material site at
+  <https://innotelinc.github.io/onyx/docs/> (same Pages deploy;
+  [`mkdocs.yml`](mkdocs.yml) is presentation-only — the docs directory stays
+  the source of truth).
 
 ## What it is
 
@@ -205,5 +210,5 @@ scripts/       bootstrap, local dev runner, onyx-install, npm-proxy-hosts.py,
                provision-authentik.sh
 .github/       CI + release workflows (GHCR images, release artifacts)
 .tools/        repo-local toolchain (git-ignored)
-docs/          design docs, RFCs
+docs/          design docs (+ MkDocs Material site, published to Pages) · RFCs
 ```
