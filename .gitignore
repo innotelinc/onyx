@@ -16,6 +16,9 @@ base/image/sysroot/
 # Secrets + local env (setup.sh copies from .env.example)
 .env
 
+# Built docs site (mkdocs.yml -> site_dir; built in CI for Pages)
+web/landing/docs/
+
 # Go caches (kept under .tools/)
 *.swp
 .DS_Store

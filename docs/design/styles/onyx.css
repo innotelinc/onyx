@@ -1,0 +1,71 @@
+/* ONYX Prism theme for the MkDocs Material design-doc site.
+ *
+ * Maps the Prism tokens (docs/design/03 §2) onto Material's CSS variables:
+ * dark-first, "Onyx Blue" accent (#3b9dff), zinc-family neutrals, calm
+ * motion. Light mode is provided via the palette toggle.
+ */
+
+/* ---- Dark (default) ---------------------------------------------------- */
+[data-md-color-scheme="onyx"] {
+  --md-default-bg-color: #0b0d10;
+  --md-default-fg-color: #e6e9ee;
+  --md-default-fg-color--light: #9aa3b0;
+  --md-default-fg-color--lighter: #6b7480;
+  --md-primary-fg-color: #12151a;
+  --md-primary-bg-color: #0b0d10;
+  --md-accent-fg-color: #6cb6ff;
+  --md-typeset-a-color: #3b9dff;
+  --md-code-bg-color: #12151a;
+  --md-code-fg-color: #e6e9ee;
+  --md-footer-bg-color: #0b0d10;
+  --md-footer-fg-color: #9aa3b0;
+}
+
+[data-md-color-scheme="onyx"] .md-header,
+[data-md-color-scheme="onyx"] .md-tabs {
+  background: rgba(18, 21, 26, 0.92);
+}
+
+/* ---- Light --------------------------------------------------------------- */
+[data-md-color-scheme="onyx-light"] {
+  --md-default-bg-color: #f7f8fa;
+  --md-default-fg-color: #181c22;
+  --md-default-fg-color--light: #4c5560;
+  --md-default-fg-color--lighter: #6b7480;
+  --md-primary-fg-color: #ffffff;
+  --md-primary-bg-color: #f7f8fa;
+  --md-accent-fg-color: #1f7ae0;
+  --md-typeset-a-color: #1f7ae0;
+  --md-code-bg-color: #eceff3;
+  --md-code-fg-color: #181c22;
+}
+
+/* ---- Shape & motion (Prism §2.3) ---------------------------------------- */
+.md-header__title,
+.md-nav__item,
+.md-typeset .md-typeset__table {
+  border-radius: 0; /* keep Material's own rhythm */
+}
+
+.md-typeset .admonition,
+.md-typeset details,
+.md-typeset .tabbed-set {
+  border-radius: 10px;
+}
+
+.md-typeset a {
+  transition: color 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Headlines: tight leading, no decorative display face (Prism §2.2). */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  letter-spacing: -0.01em;
+}
+
+/* Code copy buttons already come from Material; keep tabular numbers in
+ * tables so sizes/stats scan cleanly (Prism §2.2). */
+.md-typeset table {
+  font-variant-numeric: tabular-nums;
+}
