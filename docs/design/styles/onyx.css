@@ -5,17 +5,17 @@
  * neutrals, calm motion. Light mode is provided via the palette toggle.
  *
  * Readability: the Prism secondary/muted neutrals (#9aa3b0/#6b7480) are tuned
- * for large surfaces and read too dim as body text on Material's background,
- * so both schemes lift their secondary tiers one step (WCAG-friendly) while
- * keeping the same hue family. The landing page applies the same lift.
+ * for large surfaces and read too dim as body text on dark backgrounds, so the
+ * dark scheme lifts them to #cdd6e0/#a8b2bf (≥ 9:1 on #0b0d10 — the same
+ * values as the landing page); the light scheme lifts to #3d4550/#5b6470.
  */
 
 /* ---- Dark (default) ---------------------------------------------------- */
 [data-md-color-scheme="onyx"] {
   --md-default-bg-color: #0b0d10;
   --md-default-fg-color: #e6e9ee;
-  --md-default-fg-color--light: #b3bcc8;   /* secondary text (lifted from #9aa3b0) */
-  --md-default-fg-color--lighter: #8f98a6; /* muted text (lifted from #6b7480) */
+  --md-default-fg-color--light: #cdd6e0;   /* secondary text — bright, body-copy safe */
+  --md-default-fg-color--lighter: #a8b2bf; /* muted text — labels, footnotes */
   --md-primary-fg-color: #12151a;
   --md-primary-bg-color: #0b0d10;
   --md-accent-fg-color: #6cb6ff;
@@ -23,7 +23,7 @@
   --md-code-bg-color: #12151a;
   --md-code-fg-color: #e6e9ee;
   --md-footer-bg-color: #0b0d10;
-  --md-footer-fg-color: #b3bcc8;
+  --md-footer-fg-color: #cdd6e0;
 }
 
 [data-md-color-scheme="onyx"] .md-header,

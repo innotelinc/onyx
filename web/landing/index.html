@@ -18,9 +18,9 @@
       --onyx-surface: #181c22;
       --onyx-surface-hover: #1f242c;
       --onyx-border: #262c35;
-      --onyx-text: #e6e9ee;
-      --onyx-text-secondary: #b3bcc8; /* lifted from Prism #9aa3b0 for body-text contrast */
-      --onyx-text-muted: #8f98a6;    /* lifted from Prism #6b7480 */
+      --onyx-text: #f4f7fb;
+      --onyx-text-secondary: #cdd6e0; /* bright: body-copy safe on dark bg */
+      --onyx-text-muted: #a8b2bf;    /* bright: labels, footnotes */
       --onyx-accent: #3b9dff;
       --onyx-accent-hover: #6cb6ff;
       --onyx-accent-tint: rgba(59, 157, 255, 0.12);
@@ -113,7 +113,7 @@
     .kicker {
       display: inline-flex; align-items: center; gap: 8px;
       font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase;
-      color: var(--onyx-accent);
+      color: var(--onyx-accent-hover);
       background: var(--onyx-accent-tint);
       border: 1px solid rgba(59, 157, 255, 0.25);
       border-radius: 999px;
@@ -155,7 +155,7 @@
       cursor: pointer;
       transition: background .15s var(--ease), border-color .15s var(--ease), transform .15s var(--ease);
     }
-    .btn-primary { background: var(--onyx-accent); color: #071018; }
+    .btn-primary { background: var(--onyx-accent); color: #071018; font-weight: 600; }
     .btn-primary:hover { background: var(--onyx-accent-hover); color: #071018; }
     .btn-secondary { border-color: var(--onyx-border); color: var(--onyx-text); background: transparent; }
     .btn-secondary:hover { border-color: var(--onyx-accent); background: var(--onyx-accent-tint); color: var(--onyx-text); }
