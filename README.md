@@ -38,6 +38,9 @@ pattern used across the innotelinc platform projects.
   Advisor + Backup Intelligence (`onyx-ai`).
 - **CI/CD:** GitHub Actions builds, checks, and publishes container images to
   GHCR and attaches release artifacts to every tagged build.
+- **Landing page:** [`web/landing/`](web/landing/) — static, Prism-styled
+  project page published to <https://innotelinc.github.io/onyx/> by
+  [`.github/workflows/pages.yml`](.github/workflows/pages.yml).
 
 ## What it is
 
@@ -195,7 +198,7 @@ docker/        per-service Dockerfiles for the containerized platform
 services/      onyx-api, onyx-core, onyx-shared, onyx-snapd, onyx-backupd, onyx-vmm,
                onyx-appd, onyx-ai, onyx-objectstore (Go) · onyx-storaged, onyx-privd (Rust)
 proto/         gRPC contracts (source of truth) + generated stubs
-web/           Prism design system + React SPA (planned, v0.2)
+web/           landing page (GitHub Pages) · Prism design system + React SPA (planned, v0.2)
 sdk/           onyx-sdk Go client + onyx CLI, Apache-2.0 (TS client planned)
 installer/     ISO + SBC image design; the script installer lives in scripts/
 scripts/       bootstrap, local dev runner, onyx-install, npm-proxy-hosts.py,
