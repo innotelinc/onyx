@@ -61,7 +61,7 @@ func main() {
 	core := onyxv1.NewCoreClient(coreConn)
 	coreShares := onyxv1.NewCoreSharesClient(coreConn)
 
-	srv := &server{core: core, coreShares: coreShares, version: version}
+	srv := &server{core: core, coreShares: coreShares, deviceTrust: loadDeviceTrustConfig(), version: version}
 	srv.registerRoutes()
 
 	httpSrv := &http.Server{
@@ -108,10 +108,11 @@ func fatal(what string, err error) {
 
 // server is the HTTP handler; it forwards to onyx-core.
 type server struct {
-	core       onyxv1.CoreClient
-	coreShares onyxv1.CoreSharesClient
-	version    string
-	mux        *http.ServeMux
+	core        onyxv1.CoreClient
+	coreShares  onyxv1.CoreSharesClient
+	deviceTrust *deviceTrustConfig
+	version     string
+	mux         *http.ServeMux
 }
 
 func (s *server) registerRoutes() {
@@ -127,6 +128,9 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("GET /api/v1/shares/{name}", s.handleShare)
 	mux.HandleFunc("DELETE /api/v1/shares/{name}", s.handleDeleteShare)
 	mux.HandleFunc("GET /api/v1/devices", s.handleDevices)
+	// Device trust fleet view (docs/design/11 §10.3). Registered before the
+	// {name} route so Go 1.22 pattern precedence picks the literal segment.
+	mux.HandleFunc("GET /api/v1/devices/trust", s.handleDevicesTrust)
 	mux.HandleFunc("GET /api/v1/devices/{name}", s.handleDevice)
 	mux.HandleFunc("POST /api/v1/devices/{name}/attach", s.handleDeviceAttach)
 	mux.HandleFunc("POST /api/v1/devices/{name}/detach", s.handleDeviceDetach)
