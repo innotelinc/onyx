@@ -23,20 +23,13 @@ site_dir: web/landing/docs
 
 theme:
   name: material
-  # Prism is dark-first (docs/design/03 §1.2) — matches the landing page.
+  # Dark only (docs/design/03 §1.2) — matches the landing page. No toggle:
+  # Material persists a visitor's palette choice in localStorage, so a stored
+  # light preference would override the default and render black-on-white.
   palette:
     - scheme: onyx
       primary: custom
       accent: custom
-      toggle:
-        icon: material/weather-sunny
-        name: Switch to light
-    - scheme: onyx-light
-      primary: custom
-      accent: custom
-      toggle:
-        icon: material/weather-night
-        name: Switch to dark
   font:
     text: Inter
     code: JetBrains Mono
