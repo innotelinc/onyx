@@ -28,6 +28,13 @@ done
 
 log() { printf '\033[1;34m>>\033[0m %s\n' "$*"; }
 
+# Enable the version-controlled commit-guard hooks (.githooks) if this is a
+# git checkout (blocks attribution to anyone but Darnel Hunter).
+if [ -d "$ROOT/.githooks" ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git config core.hooksPath "$ROOT/.githooks"
+  log "commit guard hook enabled (core.hooksPath -> .githooks)"
+fi
+
 # --- 0. Environment -----------------------------------------------------------
 if [ ! -f .env ]; then
   cp .env.example .env
