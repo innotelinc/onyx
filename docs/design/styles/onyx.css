@@ -1,16 +1,21 @@
 /* ONYX Prism theme for the MkDocs Material design-doc site.
  *
  * Maps the Prism tokens (docs/design/03 §2) onto Material's CSS variables:
- * light-first for reading, "Onyx Blue" accent, zinc-family neutrals, calm
- * motion. The Prism dark scheme remains available via the palette toggle.
+ * dark-first (matching the landing page), "Onyx Blue" accent, zinc-family
+ * neutrals, calm motion. Light mode is provided via the palette toggle.
+ *
+ * Readability: the Prism secondary/muted neutrals (#9aa3b0/#6b7480) are tuned
+ * for large surfaces and read too dim as body text on Material's background,
+ * so both schemes lift their secondary tiers one step (WCAG-friendly) while
+ * keeping the same hue family. The landing page applies the same lift.
  */
 
 /* ---- Dark (default) ---------------------------------------------------- */
 [data-md-color-scheme="onyx"] {
   --md-default-bg-color: #0b0d10;
   --md-default-fg-color: #e6e9ee;
-  --md-default-fg-color--light: #9aa3b0;
-  --md-default-fg-color--lighter: #6b7480;
+  --md-default-fg-color--light: #b3bcc8;   /* secondary text (lifted from #9aa3b0) */
+  --md-default-fg-color--lighter: #8f98a6; /* muted text (lifted from #6b7480) */
   --md-primary-fg-color: #12151a;
   --md-primary-bg-color: #0b0d10;
   --md-accent-fg-color: #6cb6ff;
@@ -18,7 +23,7 @@
   --md-code-bg-color: #12151a;
   --md-code-fg-color: #e6e9ee;
   --md-footer-bg-color: #0b0d10;
-  --md-footer-fg-color: #9aa3b0;
+  --md-footer-fg-color: #b3bcc8;
 }
 
 [data-md-color-scheme="onyx"] .md-header,
@@ -30,8 +35,8 @@
 [data-md-color-scheme="onyx-light"] {
   --md-default-bg-color: #f7f8fa;
   --md-default-fg-color: #181c22;
-  --md-default-fg-color--light: #4c5560;
-  --md-default-fg-color--lighter: #6b7480;
+  --md-default-fg-color--light: #3d4550;   /* secondary text (lifted from #4c5560) */
+  --md-default-fg-color--lighter: #5b6470; /* muted text (lifted from #6b7480) */
   --md-primary-fg-color: #ffffff;
   --md-primary-bg-color: #f7f8fa;
   --md-accent-fg-color: #1f7ae0;

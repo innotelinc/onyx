@@ -23,21 +23,20 @@ site_dir: web/landing/docs
 
 theme:
   name: material
-  # Light-first for comfortable reading; the Prism dark scheme stays one
-  # toggle away (docs/design/03 tokens).
+  # Prism is dark-first (docs/design/03 §1.2) — matches the landing page.
   palette:
-    - scheme: onyx-light
-      primary: custom
-      accent: custom
-      toggle:
-        icon: material/weather-night
-        name: Switch to dark
     - scheme: onyx
       primary: custom
       accent: custom
       toggle:
         icon: material/weather-sunny
         name: Switch to light
+    - scheme: onyx-light
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark
   font:
     text: Inter
     code: JetBrains Mono
