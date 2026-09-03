@@ -782,12 +782,19 @@ mod tests {
 
     fn fake_bin(dir: &Path, name: &str, script: &str) -> String {
         let p = dir.join(name);
-        fs::write(&p, script).unwrap();
+        // Write to a temp name, chmod, then atomically rename into place:
+        // exec'ing a file while its overlayfs copy-up / write handle is still
+        // settling races as ETXTBSY ("Text file busy") and flakes CI. A rename
+        // gives the exec a fully settled dentry (the same pattern cargo and
+        // rustup use when installing binaries).
+        let tmp = dir.join(format!("{}.tmp", name));
+        fs::write(&tmp, script).unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755)).unwrap();
         }
+        fs::rename(&tmp, &p).unwrap();
         p.display().to_string()
     }
 
