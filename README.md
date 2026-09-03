@@ -227,3 +227,13 @@ scripts/       bootstrap, local dev runner, onyx-install, npm-proxy-hosts.py,
 .tools/        repo-local toolchain (git-ignored)
 docs/          design docs (+ MkDocs Material site, published to Pages) · RFCs
 ```
+
+## 🏛️ Platform stack
+
+ONYX is the ecosystem's **StorageOps** platform — file/object storage, backups, snapshots, and NAS features in the
+[**Innotel Platform Stack**](https://github.com/innotelinc/innotel-platform-stack) — the
+canonical single-responsibility architecture where Authentik owns identity, Infisical owns
+secrets, Cerulean owns trust, ONYX owns storage, Magnate owns revenue, and every other
+platform is a business function that consumes them. See
+[docs/stack.md](docs/stack.md) for this platform's owns/consumes boundaries and its
+Infisical secret setup.
