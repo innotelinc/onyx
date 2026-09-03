@@ -10,10 +10,10 @@ already own — a mini-PC, a server, an old laptop. Enterprise-grade storage saf
 keyboard-first interface (the *Prism* design system) — in a stack that boots in under a
 minute and idles under 512 MB RAM.
 
-[![CI](https://github.com/innotelinc/onyx-oss-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/innotelinc/onyx-oss-platform/actions/workflows/ci.yml)
-[![Release](https://github.com/innotelinc/onyx-oss-platform/actions/workflows/release.yml/badge.svg)](https://github.com/innotelinc/onyx-oss-platform/actions/workflows/release.yml)
-[![Pages](https://github.com/innotelinc/onyx-oss-platform/actions/workflows/pages.yml/badge.svg)](https://github.com/innotelinc/onyx-oss-platform/actions/workflows/pages.yml)
-[![Latest release](https://img.shields.io/github/v/release/innotelinc/onyx-oss-platform?color=18181b)](https://github.com/innotelinc/onyx-oss-platform/releases)
+[![CI](https://innotelinc.github.io/onyx/actions/workflows/ci.yml/badge.svg)](https://innotelinc.github.io/onyx/actions/workflows/ci.yml)
+[![Release](https://innotelinc.github.io/onyx/actions/workflows/release.yml/badge.svg)](https://innotelinc.github.io/onyx/actions/workflows/release.yml)
+[![Pages](https://innotelinc.github.io/onyx/actions/workflows/pages.yml/badge.svg)](https://innotelinc.github.io/onyx/actions/workflows/pages.yml)
+[![Latest release](https://img.shields.io/github/v/release/innotelinc/onyx-oss-platform?color=18181b)](https://innotelinc.github.io/onyx/releases)
 
 </div>
 
@@ -21,7 +21,7 @@ minute and idles under 512 MB RAM.
 > TrueNAS and ZimaOS: enterprise-grade storage, virtualization, object storage, backup
 > management, cloud synchronization, and application hosting in one self-hosted stack —
 > SSO everywhere via Authentik, safe by default with snapshots and A/B rollback, and no
-> cloud account required. **Landing page:** [github.com/innotelinc/onyx-oss-platform](https://github.com/innotelinc/onyx-oss-platform)
+> cloud account required. **Landing page:** [innotelinc.github.io/onyx](https://innotelinc.github.io/onyx)
 
 ---
 
