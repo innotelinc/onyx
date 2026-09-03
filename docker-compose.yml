@@ -236,6 +236,10 @@ services:
     volumes:
       - npm-data:/data
       - npm-letsencrypt:/etc/letsencrypt
+      # Device trust (docs/design/11 §10): the ONYX device CA, generated on the
+      # host by scripts/provision-device-trust.sh, read by ssl_verify_client in
+      # the gated proxy hosts' advanced config.
+      - ${ONYX_PKI_DIR:-/etc/onyx/pki}:/etc/letsencrypt/onyx-device-ca:ro
     depends_on:
       - onyx-api
       - onyx-web

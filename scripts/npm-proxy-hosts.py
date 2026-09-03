@@ -43,6 +43,43 @@ TSIG_NAME = os.environ.get("TSIG_KEY_NAME", "")
 TSIG_SECRET = os.environ.get("TSIG_KEY_SECRET", "")
 TSIG_ALGO = os.environ.get("TSIG_KEY_ALGORITHM", "hmac-sha256")
 
+# Device trust (docs/design/11 §10): subdomains gated by TLS client certs.
+# Space-separated subdomain names; empty disables the gate entirely.
+DEVICE_TRUST_SUBDOMAINS = [
+    s.strip()
+    for s in os.environ.get("DEVICE_TRUST_SUBDOMAINS", "app admin").replace(",", " ").split()
+    if s.strip()
+]
+# The device CA is generated on the host by scripts/provision-device-trust.sh
+# and bind-mounted into the NPM container at /etc/letsencrypt/onyx-device-ca
+# (docker-compose.yml), so that path is hardcoded in the generated block.
+
+
+def with_device_trust(existing: str, subdomain: str) -> str:
+    """Merge the mTLS directives into a proxy host's advanced config.
+
+    Idempotent: a previously managed block is replaced in place; anything the
+    operator added is preserved. When subdomain is not gated, a stale managed
+    block is stripped so re-runs converge in both directions.
+    """
+    begin, end = "# managed by npm-proxy-hosts.py (device trust", "# end device trust"
+    text = existing or ""
+    # strip any previous managed block first
+    if begin in text:
+        pre, rest = text.split(begin, 1)
+        _, post = rest.split(end, 1)
+        text = (pre + post).lstrip("\n")
+    if subdomain not in DEVICE_TRUST_SUBDOMAINS:
+        return text
+    block = (
+        f"{begin}, docs/design/11 §10)\n"
+        "ssl_client_certificate /etc/letsencrypt/onyx-device-ca/ca.crt;\n"
+        "ssl_verify_client on;\n"
+        "ssl_verify_depth 2;\n"
+        f"{end}\n"
+    )
+    return (block + text).strip() + "\n" if text.strip() else block
+
 
 def die(msg: str) -> None:
     print(f"[npm-proxy-hosts] error: {msg}", file=sys.stderr)
@@ -152,6 +189,8 @@ def ensure_proxy_hosts(token: str, cert_id: int) -> list[dict]:
     for sub, target in sorted(subdomains.items()):
         fqdn = f"{sub}.{DOMAIN}"
         host, _, port = target.partition(":")
+        existing = by_domain.get(fqdn)
+        gated = "mTLS" if sub in DEVICE_TRUST_SUBDOMAINS else "open"
         desired = {
             "domain_names": [fqdn],
             "forward_scheme": "http",
@@ -163,22 +202,21 @@ def ensure_proxy_hosts(token: str, cert_id: int) -> list[dict]:
             "caching_enabled": False,
             "allow_websocket_upgrade": sub in ("app", "api", "admin"),
             "access_list_id": "0",
-            "advanced_config": "",
+            "advanced_config": with_device_trust(existing.get("advanced_config") if existing else "", sub),
             "locations": [],
             "hsts_enabled": False,
             "hsts_subdomains": False,
             "http2_support": True,
             "meta": {"letsencrypt_agree": True, "dns_challenge": True},
         }
-        existing = by_domain.get(fqdn)
         if existing:
             api("PUT", f"/api/nginx/proxy-hosts/{existing['id']}", token, desired)
-            print(f"  proxy host: updated {fqdn} -> {host}:{port} (id={existing['id']})")
-            results.append({"fqdn": fqdn, "target": f"{host}:{port}", "action": "updated"})
+            print(f"  proxy host: updated {fqdn} -> {host}:{port} (id={existing['id']}, {gated})")
+            results.append({"fqdn": fqdn, "target": f"{host}:{port}", "action": "updated", "gate": gated})
         else:
             created = api("POST", "/api/nginx/proxy-hosts", token, desired)
-            print(f"  proxy host: created {fqdn} -> {host}:{port} (id={created.get('id')})")
-            results.append({"fqdn": fqdn, "target": f"{host}:{port}", "action": "created"})
+            print(f"  proxy host: created {fqdn} -> {host}:{port} (id={created.get('id')}, {gated})")
+            results.append({"fqdn": fqdn, "target": f"{host}:{port}", "action": "created", "gate": gated})
     return results
 
 
@@ -191,7 +229,14 @@ def main() -> None:
     print("\nONYX platform endpoints (provisioned):")
     width = max(len(r["fqdn"]) for r in results)
     for r in results:
-        print(f"  https://{r['fqdn']:<{width}}  ->  {r['target']}  ({r['action']})")
+        print(f"  https://{r['fqdn']:<{width}}  ->  {r['target']}  ({r['action']}, {r['gate']})")
+    if DEVICE_TRUST_SUBDOMAINS:
+        print(
+            "\nDevice trust: {subs} require a client certificate from the ONYX device CA.\n"
+            "Issue device certs with: scripts/provision-device-trust.sh issue <name>".format(
+                subs=", ".join(f"https://{s}.{DOMAIN}" for s in DEVICE_TRUST_SUBDOMAINS)
+            )
+        )
 
 
 if __name__ == "__main__":
