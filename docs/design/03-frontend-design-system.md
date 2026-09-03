@@ -39,8 +39,13 @@ components — no raw values in component code.
 | `--onyx-surface-hover` | `#1f242c` | Row hover |
 | `--onyx-border` | `#262c35` | Hairlines (1px) |
 | `--onyx-text` | `#e6e9ee` | Primary text |
-| `--onyx-text-secondary` | `#9aa3b0` | Secondary text |
-| `--onyx-text-muted` | `#6b7480` | Disabled, placeholders |
+| `--onyx-text-secondary` | `#b3bcc8` | Secondary text (lifted from `#9aa3b0`; ≥ 10:1 on `--onyx-bg`) |
+| `--onyx-text-muted` | `#8f98a6` | Disabled, placeholders (lifted from `#6b7480`; ≥ 6.5:1 on `--onyx-bg`) |
+
+Text tiers are contrast-first: every token used for body copy must clear WCAG AA on its
+background, so the secondary/muted neutrals sit one step up the ramp from the original
+zinc values. The original `#9aa3b0`/`#6b7480` remain valid for large or decorative
+surfaces (file-type chips, watermarks) where AA body-text contrast does not apply.
 
 **Accent — "Onyx Blue"** (`#3b9dff` hue family), one accent only, used sparingly for focus,
 active states, and primary actions. Hover `#6cb6ff`, subtle tint `rgba(59,157,255,0.12)`.
