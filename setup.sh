@@ -78,29 +78,47 @@ done
 
 # --- 4. Authentik provider (SSO) ------------------------------------------------
 if [ "$SKIP_AUTH" = 0 ]; then
-  log "provisioning Authentik (bootstrap + ONYX OIDC application)..."
+  log "provisioning Authentik (bootstrap + ONYX OIDC application + passkeys)..."
   bash scripts/provision-authentik.sh || log "authentik provisioning reported a problem — see above"
 else
   log "skipping Authentik provisioning (--skip-auth)"
 fi
 
-# --- 5. Nginx Proxy Manager: wildcard cert + subdomains -------------------------
-log "provisioning NPM: wildcard *.${DOMAIN} via TSIG (RFC 2136) + proxy hosts..."
+# --- 5. Device trust: CA + edge mTLS gate (docs/design/11 §10) --------------------
+# The device CA gates app/admin with TLS client certs; issue per-device certs
+# with: scripts/provision-device-trust.sh issue <name>
+if [ -n "${DEVICE_TRUST_SUBDOMAINS:-app admin}" ]; then
+  PKI_DIR="${ONYX_PKI_DIR:-/etc/onyx/pki}"
+  if mkdir -p "$PKI_DIR" 2>/dev/null && [ -w "$PKI_DIR" ]; then
+    bash scripts/provision-device-trust.sh || log "device-trust CA setup reported a problem — see above"
+  else
+    log "cannot write $PKI_DIR — run 'sudo scripts/provision-device-trust.sh' once, then re-run"
+  fi
+else
+  log "device trust disabled (DEVICE_TRUST_SUBDOMAINS is empty)"
+fi
+
+# --- 6. Nginx Proxy Manager: wildcard cert + subdomains -------------------------
+log "provisioning NPM: wildcard *.${DOMAIN} via TSIG (RFC 2136) + proxy hosts (mTLS gate)..."
 # shellcheck disable=SC2153
 python3 scripts/npm-proxy-hosts.py
 
-# --- 6. Summary -----------------------------------------------------------------
+# --- 7. Summary -----------------------------------------------------------------
 cat <<EOF
 
 ONYX platform is up. Public endpoints (once DNS for *.${DOMAIN} points here):
 
-  App       https://app.${DOMAIN}
+  App       https://app.${DOMAIN}      (device cert + passkey)
   API       https://api.${DOMAIN}
   Identity  https://auth.${DOMAIN}     (Authentik — first login creates the admin)
   Storage   https://storage.${DOMAIN}  (S3-compatible, static S3_ACCESS_KEY)
   Backup    https://backup.${DOMAIN}
-  Admin     https://admin.${DOMAIN}
+  Admin     https://admin.${DOMAIN}    (device cert + passkey)
+
+Device trust: app/admin require a client certificate (docs/design/11 §10).
+  Enroll a device:  scripts/provision-device-trust.sh issue <name>
+  Install the .p12 via MDM, then sign in with a passkey.
 
 NPM admin UI: http://127.0.0.1:81  (login with NPM_EMAIL / NPM_PASSWORD)
-Docs: docs/design/11-platform-and-cloud.md
+Docs: docs/design/11-platform-and-cloud.md · https://innotelinc.github.io/onyx/docs/
 EOF

@@ -46,9 +46,48 @@ fi
 # Reuse an existing ONYX provider/application when present (idempotent).
 EXISTING="$(curl -sf "${AUTH_URL}/api/v3/core/applications/?slug=onyx-platform" -H "$AUTH_HEADER")"
 if [ "$(echo "$EXISTING" | json "d['pagination']['count']")" -gt 0 ]; then
-  echo ">> [authentik] ONYX Platform application already exists — nothing to do."
+  echo ">> [authentik] ONYX Platform application already exists."
+  echo ">> [authentik] ensuring passkey (WebAuthn) authentication stage ..."
+  ensure_passkey_stage
   exit 0
 fi
+
+# --- Passkeys (WebAuthn) — docs/design/11 §10 ------------------------------
+# Put the WebAuthn stage into the default authentication flow in
+# 'authentication' mode: once a user has registered a passkey, every login is
+# confirmed by the device's platform authenticator (Touch ID, Windows Hello,
+# hardware key). Settings/user binding are idempotent (PATCH-ish flow).
+ensure_passkey_stage() {
+  local flow_pk stage_pk binding_pk user_pk
+
+  flow_pk="$(curl -sf "${AUTH_URL}/api/v3/flows/instances/?slug=default-authentication-identification" -H "$AUTH_HEADER" | json "d['results'][0]['pk']")"
+  user_pk="$(curl -sf "${AUTH_URL}/api/v3/core/users/?username=akadmin" -H "$AUTH_HEADER" | json "d['results'][0]['pk']")"
+
+  # Create (or reuse) a dedicated WebAuthn device stage.
+  stage_pk="$(curl -sf "${AUTH_URL}/api/v3/stages/webauthn/?name=onyx-passkeys" -H "$AUTH_HEADER" | json "d['pagination']['count'] > 0 and d['results'][0]['pk'] or 0")"
+  if [ "$stage_pk" = "0" ]; then
+    stage_pk="$(curl -sf -X POST "${AUTH_URL}/api/v3/stages/webauthn/" \
+      -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+      -d '{"name":"onyx-passkeys","authenticator_attachment":null,"resident_key_requirement":"preferred","user_verification":"preferred","device_name":"ONYX device"}' \
+      | json "d['pk']")"
+    echo "   webauthn stage created (pk=$stage_pk)"
+  else
+    echo "   webauthn stage already present (pk=$stage_pk)"
+  fi
+
+  # Bind it to the auth flow (authentication mode) for every user.
+  binding_pk="$(curl -sf "${AUTH_URL}/api/v3/flows/bindings/?flow=${flow_pk}&stage=${stage_pk}" -H "$AUTH_HEADER" | json "d['pagination']['count'] > 0 and d['results'][0]['pk'] or 0")"
+  if [ "$binding_pk" = "0" ]; then
+    curl -sf -X POST "${AUTH_URL}/api/v3/flows/bindings/" \
+      -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+      -d "{\"flow\":\"$flow_pk\",\"stage\":\"$stage_pk\",\"order\":20,\"user_fk\":\"$user_pk\",\"evaluate_on_plan\":false,\"re_evaluate_policies\":true,\"invalid_response_action\":\"retry_with_prompt\"}" >/dev/null \
+      && echo "   bound to default-authentication-identification (order=20)" \
+      || echo "   !! could not bind the webauthn stage — enable it in the Authentik UI" >&2
+  else
+    echo "   already bound to default-authentication-identification (pk=$binding_pk)"
+  fi
+  echo ">> [authentik] passkeys enabled — users register from Authentik settings."
+}
 
 FLOW_PK="$(curl -sf "${AUTH_URL}/api/v3/flows/authorization/?slug=default-provider-authorization-implicit-consent" -H "$AUTH_HEADER" | json "d['results'][0]['pk']")"
 SIGNING_PK="$(curl -sf "${AUTH_URL}/api/v3/crypto/certificatekeypairs/?name=authentik%20Self-signed%20Certificate" -H "$AUTH_HEADER" | json "d['results'][0]['pk']")"
@@ -107,4 +146,6 @@ if [ -f "$ENV_FILE" ]; then
   sed -i "s|^AUTHENTIK_CLIENT_SECRET=.*|AUTHENTIK_CLIENT_SECRET=${CLIENT_SECRET}|" "$ENV_FILE"
   echo ">> [authentik] wrote AUTHENTIK_CLIENT_ID / AUTHENTIK_CLIENT_SECRET to .env"
 fi
+
+ensure_passkey_stage
 echo ">> [authentik] done — SSO available at https://auth.${DOMAIN}/"
