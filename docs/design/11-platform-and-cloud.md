@@ -379,6 +379,20 @@ the request schema and the `setup.sh` hook, while the server side (and the
 open-source MDM it drives — e.g. Fleet, MicroMDM, or Headwind) belongs to
 Cerulean.
 
+**Dashboard read path:** `onyx-api` exposes `GET /api/v1/devices/trust` so
+the ONYX dashboard can show enrolled devices without talking to Cerulean
+itself. Mode-aware:
+
+| `DEVICE_TRUST` | Response |
+|----------------|----------|
+| `off` | `200 {"mode":"off","enabled":false,"devices":[]}` |
+| `local` | `200` with `enabled:true` and a note that issuance is local (`scripts/provision-device-trust.sh`) |
+| `cerulean` | proxy of `GET {CERULEAN_API_URL}/api/v1/fleet/{FLEET_ID}/devices` (query params pass through, bearer auth added server-side); upstream failures map to `502 device_trust_upstream` (retryable), missing config to `503 device_trust_not_configured` |
+
+Projection per device: `name`, `common_name`, `status`, `issued_at`,
+`expires_at` — plus `fleet_id` and `count` at the top level. Issuance and
+revocation stay dashboard-side; the endpoint is read-only.
+
 ### 10.4 Trade-offs and operations
 
 - **Strictness:** `ssl_verify_client on` was chosen over `optional` so the

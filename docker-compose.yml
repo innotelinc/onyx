@@ -79,6 +79,12 @@ services:
     volumes:
       - onyx-sockets:/run/onyx
       - onyx-api-state:/var/lib/onyx/api
+    environment:
+      # Device trust (docs/design/11 §10.3): drives GET /api/v1/devices/trust.
+      DEVICE_TRUST: ${DEVICE_TRUST:-off}
+      CERULEAN_API_URL: ${CERULEAN_API_URL:-}
+      CERULEAN_API_TOKEN: ${CERULEAN_API_TOKEN:-}
+      FLEET_ID: ${FLEET_ID:-}
     command: ["--listen", "0.0.0.0:8080"]
     restart: unless-stopped
 
