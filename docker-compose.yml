@@ -192,6 +192,7 @@ services:
   # ---- Identity: Authentik --------------------------------------------------
 
   postgres:
+    profiles: ["authentik"]
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: ${AUTHENTIK_PG_DB:-authentik}
@@ -202,6 +203,7 @@ services:
     restart: unless-stopped
 
   redis:
+    profiles: ["authentik"]
     image: redis:7-alpine
     command: --save 60 1 --loglevel warning
     volumes:
@@ -209,6 +211,7 @@ services:
     restart: unless-stopped
 
   authentic-server:
+    profiles: ["authentik"]
     image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-latest}
     command: server
     environment:
@@ -229,6 +232,7 @@ services:
     restart: unless-stopped
 
   authentic-worker:
+    profiles: ["authentik"]
     image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-latest}
     command: worker
     environment:
@@ -246,6 +250,7 @@ services:
   # ---- Ingress: Nginx Proxy Manager ----------------------------------------
 
   nginx-proxy-manager:
+    profiles: ["npm"]
     image: jc21/nginx-proxy-manager:latest
     ports:
       - "80:80"
@@ -263,7 +268,6 @@ services:
     depends_on:
       - onyx-api
       - onyx-web
-      - authentic-server
       - onyx-backupd
       - onyx-objectstore
     restart: unless-stopped

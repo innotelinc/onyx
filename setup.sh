@@ -65,6 +65,10 @@ DOMAIN="${DOMAIN:-onyx.innotel.us}"
 #   off (default) | local (ONYX-run CA + local NPM gate) | cerulean (remote)
 DEVICE_TRUST="${DEVICE_TRUST:-off}"
 NPM_MODE="${NPM_MODE:-local}"
+# Identity mode: remote (default, shared Authentik) or local (bundled replacement).
+# AUTHENTIK_MODE=local implies AUTHENTIK_URL=http://127.0.0.1:9000 and starts
+# the authentik compose profile; remote uses the external AUTHENTIK_URL directly.
+AUTHENTIK_MODE="${AUTHENTIK_MODE:-remote}"
 # A remote edge implies remote device trust unless explicitly local.
 if [ "$NPM_MODE" = "cerulean" ] && [ "$DEVICE_TRUST" = "local" ]; then
   echo "warning: DEVICE_TRUST=local with NPM_MODE=cerulean issues certs no local edge enforces — using DEVICE_TRUST=cerulean" >&2
@@ -76,21 +80,30 @@ case "$DEVICE_TRUST" in
 esac
 
 # --- 2. Bring the stack up -----------------------------------------------------
+# Compose profiles for local replacements of shared platform services.
+PROFILES=""
+[ "$AUTHENTIK_MODE" = "local" ] && PROFILES="$PROFILES authentik"
+[ "$NPM_MODE" = "local" ] && PROFILES="$PROFILES npm"
+
+if [ -n "$PROFILES" ]; then
+  log "starting profiles:$PROFILES"
+fi
+
 if [ "$NPM_MODE" = "cerulean" ]; then
   # The edge is remote (Cerulean-managed): exclude the local NPM and its
   # published 80/443/81 from this host entirely.
   log "NPM_MODE=cerulean — starting the stack without the local NPM ..."
   if [ "$BUILD" = 1 ]; then
-    docker compose up -d --build --scale nginx-proxy-manager=0
+    docker compose --profile${PROFILES:+ $PROFILES} up -d --build
   else
-    docker compose up -d --scale nginx-proxy-manager=0
+    docker compose --profile${PROFILES:+ $PROFILES} up -d
   fi
 elif [ "$BUILD" = 1 ]; then
   log "building + starting the ONYX platform stack (this first build compiles the daemons)..."
-  docker compose up -d --build
+  docker compose --profile${PROFILES:+ $PROFILES} up -d --build
 else
   log "starting the ONYX platform stack (existing images)"
-  docker compose up -d
+  docker compose --profile${PROFILES:+ $PROFILES} up -d
 fi
 
 # --- 3. Wait for ingress + IdP -------------------------------------------------
@@ -102,9 +115,11 @@ if [ "$NPM_MODE" = "local" ]; then
   done
 fi
 
-log "waiting for Authentik (http://127.0.0.1:9000) ..."
+# Use the configured Authentik endpoint (local or external).
+AUTHENTIK_URL="${AUTHENTIK_URL:-http://127.0.0.1:9000}"
+log "waiting for Authentik (${AUTHENTIK_URL}) ..."
 for _ in $(seq 1 60); do
-  curl -sf -o /dev/null http://127.0.0.1:9000/-/health/live/ && break
+  curl -sf -o /dev/null "${AUTHENTIK_URL}/-/health/live/" && break
   sleep 5
 done
 

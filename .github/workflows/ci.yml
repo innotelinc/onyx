@@ -57,6 +57,9 @@ jobs:
           AUTHENTIK_BOOTSTRAP_EMAIL=ci@example.com AUTHENTIK_BOOTSTRAP_PASSWORD=ci \
           AUTHENTIK_PG_PASSWORD=ci \
           docker compose config --quiet
+          # Validate profile-gated services (local Authentik + local NPM).
+          docker compose --profile authentik config --quiet
+          docker compose --profile npm config --quiet
 
   docker-build:
     # Fast image sanity build (no push) so Dockerfile regressions — like a

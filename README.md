@@ -113,8 +113,9 @@ kernel, and a bootloader with A/B rollback.
 
 On top of that, the **platform layer** is in place:
 
-- `docker/` + `docker-compose.yml` — every daemon containerized, with
-  Authentik (postgres + redis + server + worker) and Nginx Proxy Manager.
+- `docker/` + `docker-compose.yml` — every daemon containerized. Authentik and NPM
+  are **external by default** (shared platform services); set `AUTHENTIK_MODE=local`
+  or `NPM_MODE=local` in `.env` to start bundled replacements as Compose profiles.
 - [`setup.sh`](setup.sh) — one-command deploy: env generation, `docker compose
   up`, Authentik bootstrap + ONYX OIDC provider, then NPM provisioning
   (wildcard `*.onyx.innotel.us` cert via TSIG, six proxy hosts).
@@ -140,6 +141,21 @@ cp .env.example .env        # edit: DOMAIN, NPM creds, TSIG key, Authentik secre
 
 `setup.sh` is idempotent: safe to re-run; it prints the final URL table
 (`app`/`api`/`auth`/`storage`/`backup`/`admin` on `onyx.innotel.us`).
+
+### Authentik and NPM modes
+
+ONYX uses shared platform services by default. Authentik and NPM are **not started**
+by the base Compose file — point at the external instances via `AUTHENTIK_URL` and
+`NPM_BASE_URL`. To run local replacements instead:
+
+```bash
+AUTHENTIK_MODE=local NPM_MODE=local ./setup.sh
+# or edit .env: AUTHENTIK_MODE=local, NPM_MODE=local
+```
+
+Local mode starts Authentik (server + worker + postgres + redis) and NPM (with
+MariaDB + backup-ui) as Compose profiles. Do not enable the local profile when
+another Innotel stack already owns these services.
 
 ## Building and running (dev, native)
 
