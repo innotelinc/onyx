@@ -30,6 +30,7 @@ provides, and explicitly does not own.
 
 - Authentik — identity, SSO
 - Infisical — secrets, credentials
+- NPM Edge — public routing, TLS termination at the edge
 
 ## Explicitly does NOT own
 
