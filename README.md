@@ -114,8 +114,11 @@ kernel, and a bootloader with A/B rollback.
 On top of that, the **platform layer** is in place:
 
 - `docker/` + `docker-compose.yml` — every daemon containerized. Authentik and NPM
-  are **external by default** (shared platform services); set `AUTHENTIK_MODE=local`
-  or `NPM_MODE=local` in `.env` to start bundled replacements as Compose profiles.
+  are **external by default** (shared platform services): `AUTHENTIK_MODE=remote`
+  points at the shared Cerulean Authentik behind `auth.onyx.innotel.us` (the
+  `ONYX Platform` OIDC provider is registered there — see `.env` for the client
+  id/secret). Set `AUTHENTIK_MODE=local` or `NPM_MODE=local` in `.env` to start
+  bundled replacements as Compose profiles instead.
 - [`setup.sh`](setup.sh) — one-command deploy: env generation, `docker compose
   up`, Authentik bootstrap + ONYX OIDC provider, then NPM provisioning
   (wildcard `*.onyx.innotel.us` cert via TSIG, six proxy hosts).
