@@ -189,63 +189,7 @@ services:
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-web:${IMAGE_TAG:-latest}
     restart: unless-stopped
 
-  # ---- Identity: Authentik --------------------------------------------------
 
-  postgres:
-    profiles: ["authentik"]
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: ${AUTHENTIK_PG_DB:-authentik}
-      POSTGRES_USER: ${AUTHENTIK_PG_USER:-authentik}
-      POSTGRES_PASSWORD: ${AUTHENTIK_PG_PASSWORD:?set AUTHENTIK_PG_PASSWORD in .env}
-    volumes:
-      - authentic-db:/var/lib/postgresql/data
-    restart: unless-stopped
-
-  redis:
-    profiles: ["authentik"]
-    image: redis:7-alpine
-    command: --save 60 1 --loglevel warning
-    volumes:
-      - authentic-redis:/data
-    restart: unless-stopped
-
-  authentic-server:
-    profiles: ["authentik"]
-    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-latest}
-    command: server
-    environment:
-      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?set AUTHENTIK_SECRET_KEY in .env}
-      AUTHENTIK_REDIS__HOST: redis
-      AUTHENTIK_POSTGRESQL__HOST: postgres
-      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_PG_USER:-authentik}
-      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_PG_DB:-authentik}
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_PG_PASSWORD:?}
-      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:?set AUTHENTIK_BOOTSTRAP_TOKEN in .env}
-      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:?}
-      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:?}
-    volumes:
-      - authentic-media:/media
-    depends_on:
-      - postgres
-      - redis
-    restart: unless-stopped
-
-  authentic-worker:
-    profiles: ["authentik"]
-    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-latest}
-    command: worker
-    environment:
-      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?}
-      AUTHENTIK_REDIS__HOST: redis
-      AUTHENTIK_POSTGRESQL__HOST: postgres
-      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_PG_USER:-authentik}
-      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_PG_DB:-authentik}
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_PG_PASSWORD:?}
-    depends_on:
-      - postgres
-      - redis
-    restart: unless-stopped
 
   # ---- Ingress: Nginx Proxy Manager ----------------------------------------
 
@@ -283,8 +227,5 @@ volumes:
   onyx-appd-state:
   onyx-ai-state:
   onyx-objectstore-state:
-  authentic-db:
-  authentic-redis:
-  authentic-media:
   npm-data:
   npm-letsencrypt:
