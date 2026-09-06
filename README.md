@@ -20,7 +20,7 @@ minute and idles under 512 MB RAM.
 > **About ONYX** — a next-generation storage and infrastructure platform that replaces
 > TrueNAS and ZimaOS: enterprise-grade storage, virtualization, object storage, backup
 > management, cloud synchronization, and application hosting in one self-hosted stack —
-> SSO everywhere via Authentik, safe by default with snapshots and A/B rollback, and no
+> SSO everywhere via Cerulean Authentik, safe by default with snapshots and A/B rollback, and no
 > cloud account required. **Landing page:** [innotelinc.github.io/onyx](https://innotelinc.github.io/onyx)
 
 ---
@@ -33,7 +33,7 @@ Primary domain: `onyx.innotel.us`
 |---------|-----|-----------|
 | App (web UI) | `https://app.onyx.innotel.us` | `onyx-web` (SPA, v0.2) |
 | API gateway | `https://api.onyx.innotel.us` | `onyx-api` |
-| Identity / SSO | `https://auth.onyx.innotel.us` | Authentik |
+| Identity / SSO | `https://auth.cerulean.innotel.us` | Cerulean Authentik (shared) |
 | Storage (S3-compatible) | `https://storage.onyx.innotel.us` | `onyx-objectstore` |
 | Backup | `https://backup.onyx.innotel.us` | `onyx-backupd` |
 | Admin | `https://admin.onyx.innotel.us` | `onyx-api` (admin surface) |
@@ -46,7 +46,7 @@ pattern used across the innotelinc platform projects.
 
 ## Platform stack
 
-- **Identity:** [Authentik](https://goauthentik.io) — OIDC/SSO for every
+- **Identity:** Cerulean Authentik — OIDC/SSO for every
   service (`auth.onyx.innotel.us`); `scripts/provision-authentik.sh` creates
   the ONYX application + OAuth2 provider automatically.
 - **Reverse proxy:** Nginx Proxy Manager, provisioned via its API —
@@ -85,7 +85,7 @@ pattern used across the innotelinc platform projects.
   protocols exposed until you enable them
 - 📁 SMB, NFS, FTP, SFTP, WebDAV, and Rsync from one logical share model
 - 🧩 Modular: small, single-purpose services (Go + Rust) behind one typed API
-- 🏠 SSO everywhere via Authentik (OIDC), no cloud account required
+- 🏠 SSO everywhere via Cerulean Authentik (OIDC), no cloud account required
 - 🤖 AI Storage Advisor + Backup Intelligence, local-first (or BYO-key remote)
 - 🗄️ S3-compatible object storage + hybrid cloud sync (`onyx-objectstore`)
 - 🔄 Automated releases: GHCR images + tarball artifacts on every tag
