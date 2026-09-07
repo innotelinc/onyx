@@ -1,5 +1,8 @@
 <div align="center">
 
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0-or-later-brightgreen.svg)](LICENSE)
+
+
 # 🗄️ ONYX — Online Storage System
 
 **The NAS and infrastructure platform that replaces TrueNAS and ZimaOS — storage, virtualization, object storage, backup, and app hosting in one self-hosted stack.**
@@ -16,6 +19,18 @@ minute and idles under 512 MB RAM.
 [![Latest release](https://img.shields.io/github/v/release/innotelinc/onyx?color=18181b)](https://innotelinc.github.io/onyx/releases)
 
 </div>
+
+---
+
+## Why ONYX
+
+| Problem | ONYX answer |
+| --- | --- |
+| Storage split across NAS + object store + backup tools | One platform: storage, virtualization, object storage, backup, and app hosting |
+| TrueNAS / ZimaOS lock-in | Fully self-hosted, open, replaceable; no vendor appliance required |
+| Identity per-service password stores | Cerulean Authentik-first where applicable; disable a user and their storage access dies |
+| Secrets committed to .env or repos | Infisical is the only secrets store; .env is derived and gitignored |
+| App hosting is a separate concern | ONYX is storage + virtualization + app hosting in one stack |
 
 > **About ONYX** — a next-generation storage and infrastructure platform that replaces
 > TrueNAS and ZimaOS: enterprise-grade storage, virtualization, object storage, backup
