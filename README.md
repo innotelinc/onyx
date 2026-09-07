@@ -14,6 +14,7 @@ keyboard-first interface (the *Prism* design system) — in a stack that boots i
 minute and idles under 512 MB RAM.
 
 [![CI](https://github.com/innotelinc/onyx/actions/workflows/ci.yml/badge.svg)](https://github.com/innotelinc/onyx/actions/workflows/ci.yml)
+[![Conformity](https://github.com/innotelinc/onyx/actions/workflows/conform.yml/badge.svg)](https://github.com/innotelinc/onyx/actions/workflows/conform.yml)
 [![Release](https://github.com/innotelinc/onyx/actions/workflows/release.yml/badge.svg)](https://github.com/innotelinc/onyx/actions/workflows/release.yml)
 [![Pages](https://github.com/innotelinc/onyx/actions/workflows/pages.yml/badge.svg)](https://github.com/innotelinc/onyx/actions/workflows/pages.yml)
 [![Latest release](https://img.shields.io/github/v/release/innotelinc/onyx?color=18181b)](https://innotelinc.github.io/onyx/releases)
