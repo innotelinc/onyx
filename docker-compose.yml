@@ -76,6 +76,11 @@ services:
       dockerfile: docker/go-service.Dockerfile
       args: { SERVICE: onyx-api }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-api:${IMAGE_TAG:-latest}
+    # LAN ingress for the shared Nginx Proxy Manager (192.168.1.71): api/admin
+    # surfaces publish on the host so NPM can forward to them. 2081 is free on
+    # the shared host (8080 belongs to signara there).
+    ports:
+      - "${ONYX_API_PORT:-2081}:8080"
     volumes:
       - onyx-sockets:/run/onyx
       - onyx-api-state:/var/lib/onyx/api
@@ -117,6 +122,9 @@ services:
       - onyx-sockets:/run/onyx
       - onyx-backupd-state:/var/lib/onyx/backupd
     command: ["--http-listen", "0.0.0.0:8084"]
+    # LAN ingress for the shared NPM: backup surface (2084 is free on the host).
+    ports:
+      - "${ONYX_BACKUPD_PORT:-2084}:8084"
     restart: unless-stopped
 
   onyx-vmm:
@@ -180,6 +188,10 @@ services:
       INFISICAL_WORKSPACE_ID: ${INFISICAL_WORKSPACE_ID:-}
       INFISICAL_ENVIRONMENT: ${INFISICAL_ENVIRONMENT:-prod}
     command: ["--http-listen", "0.0.0.0:9000"]
+    # LAN ingress for the shared NPM: storage surface (2090 is free on the
+    # host — 9000 belongs to prefect there).
+    ports:
+      - "${ONYX_OBJECTSTORE_PORT:-2090}:9000"
     restart: unless-stopped
 
   onyx-web:
@@ -187,6 +199,10 @@ services:
       context: .
       dockerfile: docker/onyx-web/Dockerfile
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-web:${IMAGE_TAG:-latest}
+    # LAN ingress for the shared NPM: app surface (2080 is free on the host —
+    # 80 belongs to zeus-freepbx there).
+    ports:
+      - "${ONYX_WEB_PORT:-2080}:80"
     restart: unless-stopped
 
 
