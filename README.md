@@ -1,6 +1,6 @@
 <div align="center">
 
-[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0-or-later-brightgreen.svg)](LICENSE)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-brightgreen.svg)](LICENSE)
 
 
 # 🗄️ ONYX — Online Storage System
