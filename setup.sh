@@ -218,20 +218,17 @@ else
 fi
 echo "Docs: docs/design/11-platform-and-cloud.md · https://innotelinc.github.io/onyx/docs/"
 
-# ── Infisical (SecretOps) — opt-in secret provisioning ──────────────
-# Secrets for the Innotel Platform Stack live in Infisical. Enable by
-# setting INFISICAL_ADMIN_EMAIL / INFISICAL_ADMIN_PASSWORD and the
-# INFISICAL_* keys in .env, then re-run setup (idempotent).
-if grep -qE '^INFISICAL_ADMIN_EMAIL=.+' .env 2>/dev/null && \
-   grep -qE '^INFISICAL_ADMIN_PASSWORD=.+' .env 2>/dev/null; then
-  __root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
-  case "$__root" in
-    */scripts) __root="$(dirname "$__root")" ;;
-  esac
-  if [ -f "$__root/scripts/infisical-setup.sh" ]; then
-    echo ">> provisioning secrets into Infisical (SecretOps)..."
-    bash "$__root/scripts/infisical-setup.sh" \
-      || echo "!! infisical setup failed (see above); .env values remain valid" >&2
+# ── SecretOps — Cerulean Vault ──────────────────────────────────────
+# The platform's only secret store. Nothing to provision here: Vault runs
+# centrally as `cerulean-vault`, this stack reads it with its own path-scoped
+# token (./data/vault/token/onyx.token, minted there), and `vault://` references
+# in .env resolve at service startup. Move values in with the shared migrator:
+#   python3 scripts/vault-migrate.py --from-env-file .env --keys S3_ACCESS_KEY,S3_SECRET_KEY
+if grep -qE '^S3_ACCESS_KEY=vault://' .env 2>/dev/null; then
+  if [ -s ./data/vault/token/onyx.token ]; then
+    echo ">> SecretOps: Cerulean Vault (token present, S3 credentials resolve at startup)"
+  else
+    echo "!! S3_ACCESS_KEY is a vault:// reference but ./data/vault/token/onyx.token is" >&2
+    echo "   missing — copy it from Cerulean ('data/vault/token/onyx.token' there)." >&2
   fi
-  unset __root
 fi

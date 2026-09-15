@@ -87,16 +87,24 @@ services:
     volumes:
       - onyx-sockets:/run/onyx
       - onyx-api-state:/var/lib/onyx/api
+      # This product's Vault token, read-only. Cerulean's Vault bootstrap mints
+      # it (VAULT_PRODUCT_TOKENS=onyx there) and renews it in place; the stack
+      # only ever reads it. See data/vault/token/ (gitignored).
+      - ${ONYX_VAULT_TOKEN_DIR:-./data/vault/token}:/vault/token:ro
+    # Vault is published on the host, not on this compose network, so the
+    # containers reach it through the bridge gateway alias.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       # Device trust (docs/design/11 §10.3): drives GET /api/v1/devices/trust.
       DEVICE_TRUST: ${DEVICE_TRUST:-off}
       CERULEAN_API_URL: ${CERULEAN_API_URL:-}
       CERULEAN_API_TOKEN: ${CERULEAN_API_TOKEN:-}
       FLEET_ID: ${FLEET_ID:-}
-      # SecretOps (docs/design/11 §6.9): lets CERULEAN_API_TOKEN be a
-      # reference resolved at startup. `vault://` goes to Cerulean Vault (the
-      # store the platform runs); the INFISICAL_* pair below is the legacy path
-      # and reports its health on GET /api/v1/status only when it is configured.
+      # SecretOps (docs/design/11 §6.9): CERULEAN_API_TOKEN may be a
+      # `vault://<mount>/<path>#<key>` reference resolved at startup against
+      # Cerulean Vault — the platform's only secret store. Report health on
+      # GET /api/v1/system/status as `vault:`.
       VAULT_ADDR: ${VAULT_ADDR:-}
       VAULT_TOKEN: ${VAULT_TOKEN:-}
       VAULT_TOKEN_FILE: ${VAULT_TOKEN_FILE:-}
@@ -105,10 +113,6 @@ services:
       VAULT_NAMESPACE: ${VAULT_NAMESPACE:-}
       VAULT_SKIP_VERIFY: ${VAULT_SKIP_VERIFY:-}
       VAULT_CACERT: ${VAULT_CACERT:-}
-      INFISICAL_ADDR: ${INFISICAL_ADDR:-}
-      INFISICAL_TOKEN: ${INFISICAL_TOKEN:-}
-      INFISICAL_WORKSPACE_ID: ${INFISICAL_WORKSPACE_ID:-}
-      INFISICAL_ENVIRONMENT: ${INFISICAL_ENVIRONMENT:-prod}
     command: ["--listen", "0.0.0.0:8080"]
     restart: unless-stopped
 
@@ -173,6 +177,9 @@ services:
     volumes:
       - onyx-sockets:/run/onyx
       - onyx-ai-state:/var/lib/onyx/ai
+      - ${ONYX_VAULT_TOKEN_DIR:-./data/vault/token}:/vault/token:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       # The AI plane (docs/design/11 §6.5): ONYX consumes the platform's single
       # OmniRoute rather than shipping an upstream provider key. OMNIROUTE_API_KEY
@@ -195,10 +202,6 @@ services:
       VAULT_NAMESPACE: ${VAULT_NAMESPACE:-}
       VAULT_SKIP_VERIFY: ${VAULT_SKIP_VERIFY:-}
       VAULT_CACERT: ${VAULT_CACERT:-}
-      INFISICAL_ADDR: ${INFISICAL_ADDR:-}
-      INFISICAL_TOKEN: ${INFISICAL_TOKEN:-}
-      INFISICAL_WORKSPACE_ID: ${INFISICAL_WORKSPACE_ID:-}
-      INFISICAL_ENVIRONMENT: ${INFISICAL_ENVIRONMENT:-prod}
     restart: unless-stopped
 
   onyx-objectstore:
@@ -210,14 +213,18 @@ services:
     volumes:
       - onyx-sockets:/run/onyx
       - onyx-objectstore-state:/var/lib/onyx/objectstore
+      - ${ONYX_VAULT_TOKEN_DIR:-./data/vault/token}:/vault/token:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-}
       HYBRID_CLOUD_ENDPOINT: ${HYBRID_CLOUD_ENDPOINT:-}
-      # SecretOps (docs/design/11 §6.9): S3_* may be a reference resolved at
-      # startup — `vault://<mount>/<path>#<key>` through Cerulean Vault, or the
-      # legacy `infisical://<name>`; plain values are mirrored into Infisical on
-      # boot (best-effort, legacy path only) so .env can switch to references.
+      # SecretOps (docs/design/11 §6.9): S3_* are `vault://<mount>/<path>#<key>`
+      # references resolved at startup through Cerulean Vault. A reference that
+      # cannot be resolved stops the service rather than becoming an empty
+      # credential — an object store with no key is worse than one that refuses
+      # to start.
       VAULT_ADDR: ${VAULT_ADDR:-}
       VAULT_TOKEN: ${VAULT_TOKEN:-}
       VAULT_TOKEN_FILE: ${VAULT_TOKEN_FILE:-}
@@ -226,10 +233,6 @@ services:
       VAULT_NAMESPACE: ${VAULT_NAMESPACE:-}
       VAULT_SKIP_VERIFY: ${VAULT_SKIP_VERIFY:-}
       VAULT_CACERT: ${VAULT_CACERT:-}
-      INFISICAL_ADDR: ${INFISICAL_ADDR:-}
-      INFISICAL_TOKEN: ${INFISICAL_TOKEN:-}
-      INFISICAL_WORKSPACE_ID: ${INFISICAL_WORKSPACE_ID:-}
-      INFISICAL_ENVIRONMENT: ${INFISICAL_ENVIRONMENT:-prod}
     command: ["--http-listen", "0.0.0.0:9000"]
     # Memory posture: object store buffers uploads; cap moderately.
     mem_limit: 1g

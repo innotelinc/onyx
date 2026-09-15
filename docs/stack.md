@@ -76,59 +76,45 @@ policy token (`VAULT_PRODUCT_TOKENS=onyx` there), which arrives as
 `./data/vault/token/onyx.token`. Move the values across with the shared migrator:
 
 ```bash
-export VAULT_ADDR=http://vault:8200
+# The migrator runs on the Vault host (or with VAULT_ADDR pointing at it).
+export VAULT_ADDR=http://127.0.0.1:8200           # from a container: the stack's own VAULT_ADDR
 export VAULT_TOKEN_FILE=./data/vault/token/onyx.token
-python3 scripts/vault-migrate.py --dry-run    # what would move; nothing written
-python3 scripts/vault-migrate.py              # Infisical → Vault
+python3 scripts/vault-migrate.py --dry-run        # what would move; nothing written
+python3 scripts/vault-migrate.py --from-env-file .env \
+    --keys S3_ACCESS_KEY,S3_SECRET_KEY            # seed from .env
 ```
 
-### Legacy: the Infisical profile (profile-gated)
-
-The predecessor store. It still works and is kept for offline/standalone installs — the
-Go services resolve `infisical://` beside `vault://`, so nothing here is broken by the
-move; enable it with:
-
-```bash
-# generate the required keys and add them to .env
-openssl rand -base64 32   # INFISICAL_ENCRYPTION_KEY
-openssl rand -hex 16      # INFISICAL_AUTH_SECRET
-openssl rand -hex 16      # INFISICAL_DB_PASSWORD
-
-# start the profile and provision the workspace + import .env secrets
-docker compose -f docker-compose.yml -f compose.infisical.yml --profile infisical up -d
-bash scripts/infisical-setup.sh
-```
-
-See [compose.infisical.yml](../compose.infisical.yml) and
-[scripts/infisical-setup.py](../scripts/infisical-setup.py) for details.
+There is no second store. Infisical was the predecessor and the `infisical://` scheme,
+its compose profile, its setup scripts and the Go package that implemented it are **gone**
+from this repo — a value that still carries an `infisical://` reference is a deployment
+that has not finished moving, not a fallback this stack supports. `scripts/vault-migrate.py`
+can still read an Infisical instance as a *source* (`VAULT_*` unset, `INFISICAL_*` set) for
+the move itself.
 
 ### Runtime resolution
 
-`vault://` resolution **landed** (build-plane convergence §6.1): the Go services resolve
+`vault://` resolution is live: the Go services resolve
 references at startup, so switching a value in `.env` needs no code change and no restart
 of anything but the service.
 
-- `onyx-objectstore` — `S3_ACCESS_KEY` / `S3_SECRET_KEY` may be
-  `vault://cerulean/onyx#<KEY>`. Plain values still pass through, and are
-  **mirrored into Infisical on boot** (best-effort, legacy path only) so a stack
-  can move to references after one boot.
+- `onyx-objectstore` — `S3_ACCESS_KEY` / `S3_SECRET_KEY` are
+  `vault://cerulean/onyx#<KEY>` on a deployed stack. Plain values pass through, which
+  is what a local run uses; nothing is written back to the store at boot (secrets get
+  there through `scripts/vault-migrate.py`, which the services have no business
+  duplicating).
 - `onyx-api` — `CERULEAN_API_TOKEN` may be
   `vault://cerulean/onyx/api#CERULEAN_API_TOKEN`; SecretOps health is reported on
-  `GET /api/v1/system/status` as `vault: ok | not-configured | error`. (`infisical:` is
-  reported beside it only where a deployment still configures the legacy store,
-  so a migrated stack does not advertise a store it no longer uses.)
+  `GET /api/v1/system/status` as `vault: ok | not-configured | error`.
 
-Both schemes work at the same time: one call resolves `vault://` through Cerulean Vault
-and `infisical://<name>` through the legacy store, which is what makes the migration
-one-sided. A reference that cannot be resolved is a hard startup failure — an empty S3
-credential would open the endpoint rather than close it.
+A reference that cannot be resolved is a hard startup failure — an empty S3
+credential would open the endpoint rather than close it — and a value that is neither a
+`vault://` reference nor a plain value is passed through unchanged rather than guessed at.
 
-Shared clients: `services/vault/` (Cerulean Vault, KV v2 — the platform store) and
-`services/infisical/` (the legacy form). `services/vault/vault_test.go` covers the
-reference grammar, the KV v2 envelope, the KV v1 refusal and the legacy dispatch.
+Shared client: `services/vault/` (Cerulean Vault, KV v2). `services/vault/vault_test.go`
+covers the reference grammar, the KV v2 envelope, the KV v1 refusal, the pass-through
+cases and the status reporting.
 
-For a checkout with no platform Vault, `compose.vault.yml` runs a dev-mode one (the same
-fallback `compose.infisical.yml` provides for the legacy store):
+For a checkout with no platform Vault, `compose.vault.yml` runs a dev-mode one:
 
 ```bash
 docker compose -f compose.vault.yml --profile vault up -d
