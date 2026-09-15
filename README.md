@@ -88,10 +88,11 @@ pattern used across the innotelinc platform projects.
   docs/design/11 §10.
 - **Cerulean Vault secrets (runtime):** `S3_*` and `CERULEAN_API_TOKEN` are read
   from Cerulean Vault (KV v2) — `vault://cerulean/onyx#<KEY>`, resolved at
-  startup by the shared Go client in `services/vault/`. The legacy
-  `infisical://<name>` form still resolves beside it (`services/infisical/`),
-  so moving a value in `.env` needs no code change, and
-  `GET /api/v1/system/status` reports SecretOps health (`vault:`).
+  startup by the shared Go client in `services/vault/`. It is the platform's
+  only secret store: moving a value in `.env` needs no code change, and
+  `GET /api/v1/system/status` reports SecretOps health (`vault:`). The legacy
+  Infisical profile, its setup scripts and the `infisical://` resolver have been
+  removed.
 - **Landing page:** [`web/landing/`](web/landing/) — static, Prism-styled
   project page published to <https://innotelinc.github.io/onyx/> by
   [`.github/workflows/pages.yml`](.github/workflows/pages.yml).

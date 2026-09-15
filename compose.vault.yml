@@ -21,9 +21,9 @@
 # never the platform's mount-wide `cerulean` policy and never the root token,
 # which lives in ./data/vault/init/init.json, 0600).
 #
-# This file is the fallback for a checkout with no platform Vault — the same
-# role compose.infisical.yml plays for the legacy store, and the two are
-# deliberately separate profiles so neither is started by accident:
+# This file is the fallback for a checkout with no platform Vault. It is a
+# separate profile so a deployment that consumes Cerulean's Vault cannot start a
+# second, in-memory one by accident:
 #
 #   docker compose -f compose.vault.yml --profile vault up -d
 #   export VAULT_ADDR=http://127.0.0.1:8200
