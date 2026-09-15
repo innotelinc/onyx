@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -16,21 +17,38 @@ import (
 // server implements Health and Ai (proto/onyx/v1/ai.proto).
 //
 // The advisor runs deterministic heuristics in-process (no network, no
-// telemetry). When AI_PROVIDER + AI_API_KEY are configured the narrative is
-// meant to be enriched by the configured model (local or BYO-key) — the
-// provider client lands with the v0.5 milestone (docs/design/11 §6.5).
+// telemetry). When a model plane is configured — the shared OmniRoute gateway
+// (`OMNIROUTE_BASE_URL` + key), or the documented BYO-key hook
+// (`AI_PROVIDER`/`AI_API_KEY`/`AI_MODEL`) — the same findings are rewritten as
+// advice by that model, with the local summary as the fallback whenever the
+// call fails (docs/design/11 §6.5).
 type server struct {
 	onyxv1.UnimplementedHealthServer
 	onyxv1.UnimplementedAiServer
 
+	// provider is the raw BYO-key hook, kept for the startup log: it says which
+	// documented hook a deployment set, independent of resolution order.
 	provider string
+	// model is the AI plane this process will actually call, or the absence of
+	// one.
+	model modelConfig
 }
 
 var _ onyxv1.HealthServer = (*server)(nil)
 var _ onyxv1.AiServer = (*server)(nil)
 
 func newServer() *server {
-	return &server{provider: strings.TrimSpace(os.Getenv("AI_PROVIDER"))}
+	s := &server{
+		provider: strings.TrimSpace(os.Getenv("AI_PROVIDER")),
+		model:    readModelConfig(),
+	}
+	if s.model.configured() {
+		// Name and source only — the base URL and the key are never logged.
+		slog.Info("advisor model plane configured", "source", s.model.source, "model", s.model.model)
+	} else {
+		slog.Info("no model plane configured — local heuristics only")
+	}
+	return s
 }
 
 func (s *server) Check(_ context.Context, _ *onyxv1.HealthCheckRequest) (*onyxv1.HealthCheckResponse, error) {
@@ -41,7 +59,7 @@ func (s *server) Check(_ context.Context, _ *onyxv1.HealthCheckRequest) (*onyxv1
 }
 
 // AnalyzeStorage turns pool telemetry into findings + a 0..1 health score.
-func (s *server) AnalyzeStorage(_ context.Context, req *onyxv1.AnalyzeStorageRequest) (*onyxv1.AnalyzeStorageResponse, error) {
+func (s *server) AnalyzeStorage(ctx context.Context, req *onyxv1.AnalyzeStorageRequest) (*onyxv1.AnalyzeStorageResponse, error) {
 	if len(req.GetPools()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "at least one pool is required")
 	}
@@ -106,12 +124,12 @@ func (s *server) AnalyzeStorage(_ context.Context, req *onyxv1.AnalyzeStorageReq
 	return &onyxv1.AnalyzeStorageResponse{
 		Findings:  findings,
 		Health:    score,
-		Narrative: s.narrative("storage", findings),
+		Narrative: s.narrate(ctx, "storage", findings),
 	}, nil
 }
 
 // AnalyzeBackups reviews the onyx-backupd report (docs/design/11 §6.2).
-func (s *server) AnalyzeBackups(_ context.Context, req *onyxv1.AnalyzeBackupsRequest) (*onyxv1.AnalyzeBackupsResponse, error) {
+func (s *server) AnalyzeBackups(ctx context.Context, req *onyxv1.AnalyzeBackupsRequest) (*onyxv1.AnalyzeBackupsResponse, error) {
 	if req.GetReport() == nil {
 		return nil, status.Error(codes.InvalidArgument, "report is required")
 	}
@@ -162,13 +180,34 @@ func (s *server) AnalyzeBackups(_ context.Context, req *onyxv1.AnalyzeBackupsReq
 	return &onyxv1.AnalyzeBackupsResponse{
 		Findings:  findings,
 		Health:    req.GetReport().GetOverallHealth(),
-		Narrative: s.narrative("backup", findings),
+		Narrative: s.narrate(ctx, "backup", findings),
 	}, nil
 }
 
-// narrative summarizes findings in plain language. When a provider is
-// configured (AI_PROVIDER set), this is the hook where the model call
-// happens in v0.5 — until then the local summary stands in.
+// narrate is the one place the two sources are ordered: the local sentence is
+// computed first and is always the answer unless a configured model plane
+// improves on it. A model that is unreachable, slow, rate-limited or inventing
+// nothing is not an error the caller has to handle — the findings and the score
+// are the substance of the response, and the narrative is commentary on them.
+func (s *server) narrate(ctx context.Context, kind string, findings []*onyxv1.StorageFinding) string {
+	local := s.narrative(kind, findings)
+	if !s.model.configured() || len(findings) == 0 {
+		return local
+	}
+
+	advice, err := s.model.advise(ctx, kind, findings)
+	if err != nil {
+		// Never fatal, always logged: an operator needs to know that the advice
+		// is local rather than newly missing.
+		slog.Warn("advisor: using the local summary", "kind", kind, "source", s.model.source, "error", err)
+		return local
+	}
+	return advice
+}
+
+// narrative summarizes findings in plain language, deterministically and
+// without a network call — the local-first answer, and the fallback whenever
+// the model plane cannot be reached (docs/design/07 §Privacy).
 func (s *server) narrative(kind string, findings []*onyxv1.StorageFinding) string {
 	if len(findings) == 0 {
 		return "No " + kind + " concerns detected."

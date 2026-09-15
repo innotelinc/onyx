@@ -18,9 +18,20 @@ import (
 	"time"
 
 	"onyx.dev/onyx/services/infisical"
+	"onyx.dev/onyx/services/vault"
 )
 
 const deviceTrustUpstreamTimeout = 10 * time.Second
+
+// legacySecretResolver returns the Infisical client when one is configured, so
+// a single ResolveEnv call handles both reference schemes. Nil means this
+// deployment has no legacy store — which is the end state, not an error.
+func legacySecretResolver() vault.LegacyResolver {
+	if icfg := infisical.ConfigFromEnv(); icfg.Enabled() {
+		return infisical.New(icfg)
+	}
+	return nil
+}
 
 // deviceTrustConfig is the env-driven device-trust posture of this gateway.
 type deviceTrustConfig struct {
@@ -43,17 +54,28 @@ func loadDeviceTrustConfig() *deviceTrustConfig {
 		fleetID: os.Getenv("FLEET_ID"),
 		http:    &http.Client{Timeout: deviceTrustUpstreamTimeout},
 	}
-	// CERULEAN_API_TOKEN may be an infisical://<name> reference (SecretOps,
-	// the Innotel Platform Stack contract). Resolve it eagerly so a broken
-	// reference surfaces at startup, not on the first fleet request.
-	if name, ok := infisical.Ref(cfg.token); ok {
+	// CERULEAN_API_TOKEN may be a reference instead of a value: `vault://`
+	// (Cerulean Vault — SecretOps) or the legacy `infisical://<name>`. Resolve
+	// it eagerly so a broken reference surfaces at startup, not on the first
+	// fleet request — and so `.env` can be switched to a reference without a
+	// code change.
+	if _, isRef := vault.ParseRef(cfg.token); isRef {
+		vclient := vault.New(vault.ConfigFromEnv())
+		resolved, err := vclient.ResolveEnv(context.Background(), cfg.token, legacySecretResolver())
+		if err != nil {
+			slog.Warn("cerulean token: " + err.Error())
+		} else {
+			cfg.token = resolved
+			slog.Info("resolved CERULEAN_API_TOKEN from Cerulean Vault")
+		}
+	} else if name, ok := infisical.Ref(cfg.token); ok {
 		resolved, err := infisical.New(infisical.ConfigFromEnv()).ResolveEnv(
 			context.Background(), cfg.token)
 		if err != nil {
 			slog.Warn("cerulean token: " + err.Error())
 		} else {
 			cfg.token = resolved
-			slog.Info("resolved CERULEAN_API_TOKEN from Infisical", "secret", name)
+			slog.Info("resolved CERULEAN_API_TOKEN from Infisical (legacy)", "secret", name)
 		}
 	}
 	return cfg

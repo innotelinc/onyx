@@ -1,11 +1,18 @@
 // Command onyx-ai is the AI Storage Advisor + Backup Intelligence service
 // (docs/design/11 §6.5): deterministic storage/backup heuristics in-process,
-// with a provider hook (AI_PROVIDER/AI_API_KEY/AI_MODEL — local or BYO-key)
-// that turns findings into natural-language advice in v0.5. No telemetry
-// leaves the box unless a provider is configured.
+// with a model plane that turns the same findings into natural-language advice.
+//
+// The plane is the platform's shared OmniRoute
+// (OMNIROUTE_BASE_URL + OMNIROUTE_API_KEY, resolved from Cerulean Vault when
+// the value is a `vault://` reference); the BYO-key hook
+// (AI_PROVIDER/AI_API_KEY/AI_MODEL) is kept as the documented local escape
+// hatch. With neither set, the heuristics and the local summary are the whole
+// answer and **no telemetry leaves the box**. ONYX never holds an upstream
+// provider key: the gateway does.
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -35,6 +42,13 @@ func main() {
 	}
 	if err := os.MkdirAll(*stateDir, 0o750); err != nil {
 		fatal("create state dir", err)
+	}
+
+	// Resolve `vault://` references in the credential-shaped env values before
+	// anything reads them — a reference that cannot be resolved stops the boot
+	// rather than becoming an empty credential.
+	if err := resolveSecretEnv(context.Background(), "OMNIROUTE_API_KEY", "AI_API_KEY"); err != nil {
+		fatal("resolve model-plane credentials", err)
 	}
 
 	gs := grpc.NewServer()

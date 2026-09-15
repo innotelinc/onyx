@@ -79,7 +79,7 @@ services:
     # Memory posture (docs/service-audit.md): Go daemons are small; cap each.
     mem_limit: 512m
     memswap_limit: 512m
-    # LAN ingress for the shared Nginx Proxy Manager (192.168.1.71): api/admin
+    # LAN ingress for the shared Nginx Proxy Manager (192.168.1.46): api/admin
     # surfaces publish on the host so NPM can forward to them. 2081 is free on
     # the shared host (8080 belongs to signara there).
     ports:
@@ -93,9 +93,18 @@ services:
       CERULEAN_API_URL: ${CERULEAN_API_URL:-}
       CERULEAN_API_TOKEN: ${CERULEAN_API_TOKEN:-}
       FLEET_ID: ${FLEET_ID:-}
-      # SecretOps (docs/design/11 §6.9): lets CERULEAN_API_TOKEN be an
-      # infisical://<name> reference resolved at startup, and reports
-      # Infisical health on GET /api/v1/status.
+      # SecretOps (docs/design/11 §6.9): lets CERULEAN_API_TOKEN be a
+      # reference resolved at startup. `vault://` goes to Cerulean Vault (the
+      # store the platform runs); the INFISICAL_* pair below is the legacy path
+      # and reports its health on GET /api/v1/status only when it is configured.
+      VAULT_ADDR: ${VAULT_ADDR:-}
+      VAULT_TOKEN: ${VAULT_TOKEN:-}
+      VAULT_TOKEN_FILE: ${VAULT_TOKEN_FILE:-}
+      VAULT_PREFIX: ${VAULT_PREFIX:-cerulean}
+      VAULT_PATH: ${VAULT_PATH:-onyx}
+      VAULT_NAMESPACE: ${VAULT_NAMESPACE:-}
+      VAULT_SKIP_VERIFY: ${VAULT_SKIP_VERIFY:-}
+      VAULT_CACERT: ${VAULT_CACERT:-}
       INFISICAL_ADDR: ${INFISICAL_ADDR:-}
       INFISICAL_TOKEN: ${INFISICAL_TOKEN:-}
       INFISICAL_WORKSPACE_ID: ${INFISICAL_WORKSPACE_ID:-}
@@ -165,9 +174,31 @@ services:
       - onyx-sockets:/run/onyx
       - onyx-ai-state:/var/lib/onyx/ai
     environment:
+      # The AI plane (docs/design/11 §6.5): ONYX consumes the platform's single
+      # OmniRoute rather than shipping an upstream provider key. OMNIROUTE_API_KEY
+      # may be a `vault://<mount>/<path>#<key>` reference, resolved at startup by
+      # the same Cerulean Vault client onyx-objectstore uses; an unresolvable
+      # reference stops the service instead of becoming an empty credential.
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://10.10.2.1:20128/v1}
+      OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-}
+      OMNIROUTE_MODEL: ${OMNIROUTE_MODEL:-}
+      # Documented BYO-key escape hatch (local-first; docs/design/07). The
+      # gateway wins when both are set.
       AI_PROVIDER: ${AI_PROVIDER:-}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_MODEL: ${AI_MODEL:-}
+      VAULT_ADDR: ${VAULT_ADDR:-}
+      VAULT_TOKEN: ${VAULT_TOKEN:-}
+      VAULT_TOKEN_FILE: ${VAULT_TOKEN_FILE:-}
+      VAULT_PREFIX: ${VAULT_PREFIX:-cerulean}
+      VAULT_PATH: ${VAULT_PATH:-onyx}
+      VAULT_NAMESPACE: ${VAULT_NAMESPACE:-}
+      VAULT_SKIP_VERIFY: ${VAULT_SKIP_VERIFY:-}
+      VAULT_CACERT: ${VAULT_CACERT:-}
+      INFISICAL_ADDR: ${INFISICAL_ADDR:-}
+      INFISICAL_TOKEN: ${INFISICAL_TOKEN:-}
+      INFISICAL_WORKSPACE_ID: ${INFISICAL_WORKSPACE_ID:-}
+      INFISICAL_ENVIRONMENT: ${INFISICAL_ENVIRONMENT:-prod}
     restart: unless-stopped
 
   onyx-objectstore:
@@ -183,9 +214,18 @@ services:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-}
       HYBRID_CLOUD_ENDPOINT: ${HYBRID_CLOUD_ENDPOINT:-}
-      # SecretOps (docs/design/11 §6.9): S3_* may be infisical://<name>
-      # references resolved at startup; plain values are mirrored into
-      # Infisical on boot so .env can switch to references.
+      # SecretOps (docs/design/11 §6.9): S3_* may be a reference resolved at
+      # startup — `vault://<mount>/<path>#<key>` through Cerulean Vault, or the
+      # legacy `infisical://<name>`; plain values are mirrored into Infisical on
+      # boot (best-effort, legacy path only) so .env can switch to references.
+      VAULT_ADDR: ${VAULT_ADDR:-}
+      VAULT_TOKEN: ${VAULT_TOKEN:-}
+      VAULT_TOKEN_FILE: ${VAULT_TOKEN_FILE:-}
+      VAULT_PREFIX: ${VAULT_PREFIX:-cerulean}
+      VAULT_PATH: ${VAULT_PATH:-onyx}
+      VAULT_NAMESPACE: ${VAULT_NAMESPACE:-}
+      VAULT_SKIP_VERIFY: ${VAULT_SKIP_VERIFY:-}
+      VAULT_CACERT: ${VAULT_CACERT:-}
       INFISICAL_ADDR: ${INFISICAL_ADDR:-}
       INFISICAL_TOKEN: ${INFISICAL_TOKEN:-}
       INFISICAL_WORKSPACE_ID: ${INFISICAL_WORKSPACE_ID:-}

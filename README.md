@@ -30,7 +30,7 @@ minute and idles under 512 MB RAM.
 | Storage split across NAS + object store + backup tools | One platform: storage, virtualization, object storage, backup, and app hosting |
 | TrueNAS / ZimaOS lock-in | Fully self-hosted, open, replaceable; no vendor appliance required |
 | Identity per-service password stores | Cerulean Authentik-first where applicable; disable a user and their storage access dies |
-| Secrets committed to .env or repos | Infisical is the only secrets store; .env is derived and gitignored |
+| Secrets committed to .env or repos | Cerulean Vault is the only secrets store; .env carries derived references and is gitignored |
 | App hosting is a separate concern | ONYX is storage + virtualization + app hosting in one stack |
 
 > **About ONYX** — a next-generation storage and infrastructure platform that replaces
@@ -81,10 +81,12 @@ pattern used across the innotelinc platform projects.
   off, an ONYX-run device CA (standalone), or the **Cerulean** control plane
   (certificate issuance from its dashboard/MDM, remote NPM edge) —
   docs/design/11 §10.
-- **Infisical secrets (runtime):** `S3_*` and `CERULEAN_API_TOKEN` accept
-  `infisical://<name>` references resolved at startup (shared Go client in
-  `services/infisical/`); `onyx-objectstore` mirrors plain S3 credentials into
-  Infisical on boot, and `GET /api/v1/status` reports SecretOps health.
+- **Cerulean Vault secrets (runtime):** `S3_*` and `CERULEAN_API_TOKEN` are read
+  from Cerulean Vault (KV v2) — `vault://cerulean/onyx#<KEY>`, resolved at
+  startup by the shared Go client in `services/vault/`. The legacy
+  `infisical://<name>` form still resolves beside it (`services/infisical/`),
+  so moving a value in `.env` needs no code change, and `GET /api/v1/status`
+  reports SecretOps health (`vault:`).
 - **Landing page:** [`web/landing/`](web/landing/) — static, Prism-styled
   project page published to <https://innotelinc.github.io/onyx/> by
   [`.github/workflows/pages.yml`](.github/workflows/pages.yml).
@@ -157,6 +159,11 @@ the interactive web first-boot wizard on top of this base.
 cp .env.example .env        # edit: DOMAIN, NPM creds, TSIG key, Authentik secrets
 ./setup.sh                  # compose up → Authentik bootstrap → NPM provision
 ```
+
+`.env` is gitignored and carries this deployment's credentials — **never commit
+it**, and never paste its values into an issue, a commit message or a doc.
+`.env.example` is the tracked template; production values belong in Cerulean
+Vault, referenced as `vault://<mount>/<path>#<key>` and resolved at startup.
 
 `setup.sh` is idempotent: safe to re-run; it prints the final URL table
 (`app`/`api`/`auth`/`storage`/`backup`/`admin` on `onyx.innotel.us`).
@@ -271,8 +278,8 @@ docs/          design docs (+ MkDocs Material site, published to Pages) · RFCs
 
 ONYX is the ecosystem's **StorageOps** platform — file/object storage, backups, snapshots, and NAS features in the
 [**Innotel Platform Stack**](https://github.com/innotelinc/innotel-platform-stack) — the
-canonical single-responsibility architecture where Authentik owns identity, Infisical owns
+canonical single-responsibility architecture where Authentik owns identity, Cerulean Vault owns
 secrets, Cerulean owns trust, ONYX owns storage, Magnate owns revenue, NPM Edge owns the edge, and every other
 platform is a business function that consumes them. See
 [docs/stack.md](docs/stack.md) for this platform's owns/consumes boundaries and its
-Infisical secret setup.
+Cerulean Vault secret setup.

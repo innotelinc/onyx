@@ -158,6 +158,9 @@ Rules:
 - `onyx-ai` runs as an unprivileged service with **no direct FS/network privileges**; it can
   only call the public API as a constrained principal (read-only default, mutating tools
   require per-call user confirmation rendered in the UI — not just chat text).
+  Its one other egress is a single outbound HTTPS call to the shared OmniRoute gateway, and
+  only when `OMNIROUTE_BASE_URL` is set: with no model plane configured the advisor is fully
+  local.
 - Prompt-injection hardening: system prompt pins scope; tool results are treated as data,
   never instructions; sensitive actions (delete, rollback, user changes, firewall) are
   blocked for the assistant entirely unless explicitly enabled by an admin.
