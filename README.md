@@ -33,11 +33,16 @@ minute and idles under 512 MB RAM.
 | Secrets committed to .env or repos | Cerulean Vault is the only secrets store; .env carries derived references and is gitignored |
 | App hosting is a separate concern | ONYX is storage + virtualization + app hosting in one stack |
 
-> **About ONYX** — a next-generation storage and infrastructure platform that replaces
-> TrueNAS and ZimaOS: enterprise-grade storage, virtualization, object storage, backup
-> management, cloud synchronization, and application hosting in one self-hosted stack —
-> SSO everywhere via Cerulean Authentik, safe by default with snapshots and A/B rollback, and no
-> cloud account required. **Landing page:** [innotelinc.github.io/onyx](https://innotelinc.github.io/onyx)
+> **About ONYX** — the *Online Storage System*: a next-generation storage and
+> infrastructure platform that replaces TrueNAS and ZimaOS. Enterprise-grade storage,
+> virtualization, S3-compatible object storage, backup management, cloud synchronization
+> and application hosting in one self-hosted stack — SSO everywhere via Cerulean
+> Authentik, safe by default with Btrfs snapshots and atomic A/B rollback, and no cloud
+> account required. Currently at **v0.1 "Cinder"**: the control/data plane and the whole
+> platform layer ship today; the Prism web UI is the v0.2 milestone.
+>
+> **Landing page:** [innotelinc.github.io/onyx](https://innotelinc.github.io/onyx) ·
+> **Design docs:** [innotelinc.github.io/onyx/docs](https://innotelinc.github.io/onyx/docs)
 
 ---
 
@@ -47,12 +52,12 @@ Primary domain: `onyx.innotel.us`
 
 | Service | URL | Backed by |
 |---------|-----|-----------|
-| App (web UI) | `https://app.onyx.innotel.us` | `onyx-web` (SPA, v0.2) |
-| API gateway | `https://api.onyx.innotel.us` | `onyx-api` |
-| Identity / SSO | `https://auth.cerulean.innotel.us` | Cerulean Authentik (shared) |
-| Storage (S3-compatible) | `https://storage.onyx.innotel.us` | `onyx-objectstore` |
-| Backup | `https://backup.onyx.innotel.us` | `onyx-backupd` |
-| Admin | `https://admin.onyx.innotel.us` | `onyx-api` (admin surface) |
+| App (web UI) | `https://app.onyx.innotel.us` | `onyx-web` (placeholder, Prism SPA in v0.2) |
+| API gateway | `https://api.onyx.innotel.us` | `onyx-api` — health at `/healthz`, status at `/api/v1/system/status` |
+| Identity / SSO | `https://auth.onyx.innotel.us` | Cerulean Authentik (shared; also served as `auth.cerulean.innotel.us`) |
+| Storage (S3-compatible) | `https://storage.onyx.innotel.us` | `onyx-objectstore` (S3 endpoint — every request needs credentials) |
+| Backup | `https://backup.onyx.innotel.us` | `onyx-backupd` — health at `/healthz`, jobs at `/api/v1/backups` |
+| Admin | `https://admin.onyx.innotel.us` | **reserved** — no admin surface yet; the host exists so its certificate and edge wiring are ready |
 
 All traffic terminates TLS at **Nginx Proxy Manager**, which is provisioned
 automatically by `setup.sh` (via `scripts/npm-proxy-hosts.py`) with a
@@ -85,8 +90,8 @@ pattern used across the innotelinc platform projects.
   from Cerulean Vault (KV v2) — `vault://cerulean/onyx#<KEY>`, resolved at
   startup by the shared Go client in `services/vault/`. The legacy
   `infisical://<name>` form still resolves beside it (`services/infisical/`),
-  so moving a value in `.env` needs no code change, and `GET /api/v1/status`
-  reports SecretOps health (`vault:`).
+  so moving a value in `.env` needs no code change, and
+  `GET /api/v1/system/status` reports SecretOps health (`vault:`).
 - **Landing page:** [`web/landing/`](web/landing/) — static, Prism-styled
   project page published to <https://innotelinc.github.io/onyx/> by
   [`.github/workflows/pages.yml`](.github/workflows/pages.yml).
