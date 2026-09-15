@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"onyx.dev/onyx/services/infisical"
 	"onyx.dev/onyx/services/vault"
 
 	onyxv1 "onyx.dev/onyx/proto/gen/go/onyx/v1"
@@ -116,8 +115,7 @@ func readModelConfig() modelConfig {
 // cannot say which key it rejected.
 func resolveSecretEnv(ctx context.Context, keys ...string) error {
 	vcfg := vault.ConfigFromEnv()
-	icfg := infisical.ConfigFromEnv()
-	if !vcfg.Enabled() && !icfg.Enabled() {
+	if !vcfg.Enabled() {
 		// No secret store on this box. A plain value is the normal local case
 		// and passes through; a reference is not — without this check it would
 		// be sent to the gateway as `Bearer vault://…`, which is the silent
@@ -134,15 +132,11 @@ func resolveSecretEnv(ctx context.Context, keys ...string) error {
 		return nil
 	}
 
-	var legacy vault.LegacyResolver
-	if icfg.Enabled() {
-		legacy = infisical.New(icfg)
-	}
 	client := vault.New(vcfg)
 
 	for _, key := range keys {
 		value := os.Getenv(key)
-		resolved, err := client.ResolveEnv(ctx, value, legacy)
+		resolved, err := client.ResolveEnv(ctx, value)
 		if err != nil {
 			return fmt.Errorf("resolve %s: %w", key, err)
 		}

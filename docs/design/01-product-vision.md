@@ -90,6 +90,16 @@ Kubernetes, tape backup, S3 *serving* (outbound only), AD domain *controller* (j
 | **v0.5 "Quartz"** | Intelligence | AI admin assistant, audit reporting, advanced search, mobile app |
 | **v1.0** | Release | Security audit, docs, hardening, LTS update channel |
 
+> **Status (September 2026).** v0.1 "Cinder" is shipped — the bootable image,
+> OSTree base, `onyx-core`, the storage service, the API and the minimal CLI are
+> all in the repo. Work has **moved onto v0.2 "Flint"**, and its first slice has
+> landed: the **Prism web UI shell** (`docker/onyx-web/index.html`) replaces the
+> old placeholder with the design tokens from
+> [03-frontend-design-system.md](03-frontend-design-system.md) — a collapsible
+> Arc-style sidebar, contextual top bar, command palette (⌘K), activity rail and
+> a live status pill read from `onyx-api`. The file explorer, SMB/NFS shares and
+> users/permissions slices fill in behind those shells.
+
 ## 8. Open-source governance and licensing
 
 - **Core OS** (base image, system services, UI, API): **AGPL-3.0**. The core must stay free for

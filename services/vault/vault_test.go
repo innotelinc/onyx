@@ -102,10 +102,14 @@ func TestConfigFromEnvTokenFile(t *testing.T) {
 	}
 }
 
+// A plain value passes through untouched, and a legacy `infisical://` reference is
+// not a lookup this stack performs any more: it is left as-is rather than being
+// silently resolved from somewhere else. Pinned because the wrong behaviour here
+// (an empty string, or a guess) is a wrong credential.
 func TestResolveEnvPassthrough(t *testing.T) {
 	c := New(Config{})
 	for _, v := range []string{"plain", "", "infisical://S3_ACCESS_KEY"} {
-		got, err := c.ResolveEnv(context.Background(), v, nil)
+		got, err := c.ResolveEnv(context.Background(), v)
 		if err != nil || got != v {
 			t.Errorf("ResolveEnv(%q) = (%q, %v), want (%q, nil)", v, got, err, v)
 		}
@@ -114,7 +118,7 @@ func TestResolveEnvPassthrough(t *testing.T) {
 
 func TestResolveEnvRequiresConfiguration(t *testing.T) {
 	c := New(Config{}) // no addr, no token
-	_, err := c.ResolveEnv(context.Background(), "vault://cerulean/onyx#KEY", nil)
+	_, err := c.ResolveEnv(context.Background(), "vault://cerulean/onyx#KEY")
 	if err == nil {
 		t.Fatal("expected an error resolving a reference with no configured store")
 	}
@@ -166,7 +170,7 @@ func TestResolveEnvReadsKV2(t *testing.T) {
 		{"vault://cerulean/onyx/api#CERULEAN_API_TOKEN", "api-token"},
 	}
 	for _, c2 := range cases {
-		got, err := c.ResolveEnv(context.Background(), c2.in, nil)
+		got, err := c.ResolveEnv(context.Background(), c2.in)
 		if err != nil {
 			t.Fatalf("ResolveEnv(%q): %v", c2.in, err)
 		}
@@ -177,13 +181,13 @@ func TestResolveEnvReadsKV2(t *testing.T) {
 
 	// A key the secret does not hold, and a secret that is not there, are both
 	// hard errors — never an empty credential.
-	if _, err := c.ResolveEnv(context.Background(), "vault://cerulean/onyx#MISSING", nil); err == nil {
+	if _, err := c.ResolveEnv(context.Background(), "vault://cerulean/onyx#MISSING"); err == nil {
 		t.Error("expected an error for a key the secret does not hold")
 	}
-	if _, err := c.ResolveEnv(context.Background(), "vault://cerulean/nope#KEY", nil); err == nil {
+	if _, err := c.ResolveEnv(context.Background(), "vault://cerulean/nope#KEY"); err == nil {
 		t.Error("expected an error for a secret that does not exist")
 	}
-	if _, err := c.ResolveEnv(context.Background(), "vault://cerulean/onyx/scratch#KEY", nil); err == nil {
+	if _, err := c.ResolveEnv(context.Background(), "vault://cerulean/onyx/scratch#KEY"); err == nil {
 		t.Error("expected an error for an empty secret")
 	}
 }
@@ -223,39 +227,3 @@ func TestStatus(t *testing.T) {
 	}
 }
 
-// fakeLegacy stands in for *infisical.Client in the dispatcher test.
-type fakeLegacy struct {
-	values map[string]string
-	calls  []string
-}
-
-func (f *fakeLegacy) ResolveEnv(_ context.Context, value string) (string, error) {
-	f.calls = append(f.calls, value)
-	name := strings.TrimPrefix(value, "infisical://")
-	return f.values[name], nil
-}
-
-func TestResolveEnvDispatchesToLegacyStore(t *testing.T) {
-	c := New(Config{Addr: "http://127.0.0.1:8200", Token: "t", Prefix: DefaultPrefix, Path: DefaultPath})
-	legacy := &fakeLegacy{values: map[string]string{"S3_ACCESS_KEY": "from-infisical"}}
-
-	got, err := c.ResolveEnv(context.Background(), "infisical://S3_ACCESS_KEY", legacy)
-	if err != nil {
-		t.Fatalf("ResolveEnv legacy: %v", err)
-	}
-	if got != "from-infisical" {
-		t.Errorf("legacy resolve = %q, want from-infisical", got)
-	}
-	if len(legacy.calls) != 1 {
-		t.Errorf("legacy store called %d time(s), want 1", len(legacy.calls))
-	}
-
-	// A plain value still passes through untouched, and does not touch the store.
-	before := len(legacy.calls)
-	if got, err := c.ResolveEnv(context.Background(), "plain", legacy); err != nil || got != "plain" {
-		t.Errorf("ResolveEnv(plain) = (%q, %v), want (plain, nil)", got, err)
-	}
-	if len(legacy.calls) != before {
-		t.Error("a plain value should not reach the legacy store")
-	}
-}

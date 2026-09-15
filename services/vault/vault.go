@@ -1,7 +1,7 @@
 // Package vault is the ONYX client for Cerulean Vault (HashiCorp Vault, KV v2),
-// the platform's SecretOps layer. It is the `vault://` sibling of
-// services/infisical: the same job — keep real credentials out of .env and out
-// of the compose file — against the store the platform actually runs.
+// the platform's SecretOps layer: the job is to keep real credentials out of
+// .env and out of the compose file, resolved at startup from the one store the
+// platform runs.
 //
 // .env values may be plain text or `vault://<mount>/<path>#<key>` references:
 //
@@ -150,13 +150,6 @@ func ParseRef(value string) (Ref, bool) {
 	return ref, true
 }
 
-// LegacyResolver is the `infisical://` path, kept until every stack's .env has
-// moved to `vault://` (docs/stack.md, "Legacy: the Infisical profile").
-// *infisical.Client satisfies it; a nil resolver means "no legacy store here".
-type LegacyResolver interface {
-	ResolveEnv(ctx context.Context, value string) (string, error)
-}
-
 // Client talks to Vault. Construct with New; the zero value is not usable.
 type Client struct {
 	cfg Config
@@ -164,7 +157,7 @@ type Client struct {
 }
 
 // New returns a client for cfg. The HTTP client carries a 15 s per-request
-// timeout, matching the Infisical integration.
+// timeout, matching the other platform service clients.
 func New(cfg Config) *Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if cfg.SkipVerify || cfg.CACert != "" {
@@ -212,21 +205,20 @@ func (c *Client) token() (string, error) {
 	return token, nil
 }
 
-// ResolveEnv resolves a single .env-style value. `vault://` references read the
-// secret from Cerulean Vault; `infisical://` references go to the legacy store
-// when one was passed; anything else is returned unchanged.
+// ResolveEnv resolves a single .env-style value. A `vault://` reference reads the
+// secret from Cerulean Vault; anything else is returned unchanged (that is the
+// plain-value case, and the reason `.env` can hold either).
+//
+// Cerulean Vault is the platform's only secret store, so there is deliberately
+// no second scheme here: a value that still carries a legacy reference is not a
+// secret to look up, it is a deployment that has not finished moving.
 //
 // A reference to an unconfigured or unreachable store is an error, never an
 // empty string: the callers resolve credentials that gate an endpoint, and a
 // silently-empty one is worse than a service that refuses to start.
-func (c *Client) ResolveEnv(ctx context.Context, value string, legacy LegacyResolver) (string, error) {
+func (c *Client) ResolveEnv(ctx context.Context, value string) (string, error) {
 	ref, ok := ParseRef(value)
 	if !ok {
-		if legacy != nil {
-			if name, isLegacy := legacyRef(value); isLegacy && name != "" {
-				return legacy.ResolveEnv(ctx, value)
-			}
-		}
 		return value, nil
 	}
 	if !c.cfg.Enabled() {
@@ -250,18 +242,6 @@ func (c *Client) ResolveEnv(ctx context.Context, value string, legacy LegacyReso
 		return secret[k], nil
 	}
 	return "", fmt.Errorf("vault secret %s/%s is empty", ref.Mount, ref.Path)
-}
-
-// legacyRef reports whether value is an `infisical://<name>` reference. Kept
-// here so this package owns the whole "is this value a reference" question and
-// the dispatcher above stays in one place.
-func legacyRef(value string) (string, bool) {
-	const prefix = "infisical://"
-	if !strings.HasPrefix(value, prefix) {
-		return "", false
-	}
-	name := strings.TrimSpace(value[len(prefix):])
-	return name, name != ""
 }
 
 // ReadSecret reads every key of a KV v2 secret at <mount>/<path>. A missing

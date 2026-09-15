@@ -21,7 +21,7 @@ func clearModelEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"OMNIROUTE_BASE_URL", "OMNIROUTE_API_KEY", "OMNIROUTE_MODEL",
-		"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "VAULT_ADDR", "INFISICAL_ADDR",
+		"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "VAULT_ADDR", "VAULT_TOKEN",
 	} {
 		t.Setenv(key, "")
 	}
