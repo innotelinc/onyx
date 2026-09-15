@@ -192,13 +192,22 @@ Btrfs snapshot lifecycle on top of the fixed subvolume layout
 
 - `AnalyzeStorage`: pool/device telemetry (from `onyx-storaged`) →
   recommendations (free-space runway, snapshot cadence, scrub health,
-  expansion guidance). Deterministic heuristics are computed in-process;
-  a provider hook (`AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL` — local or BYO-key
-  remote) turns the same findings into natural-language advice.
+  expansion guidance). Deterministic heuristics are computed in-process and are
+  always the answer unless a model improves on them.
+- **The AI plane, as ONYX consumes it** (`§4.5` of the build-plane convergence
+  plan): ONYX does not own inference. The platform runs ONE OmniRoute (Group 2,
+  `10.10.2.1:20128`) and `onyx-ai` gets `OMNIROUTE_BASE_URL` +
+  `OMNIROUTE_API_KEY` — a gateway key, never an upstream provider key. The key
+  may be a `vault://` reference, resolved at startup like the S3 credentials;
+  a reference that cannot be resolved stops the service. The documented
+  BYO-key hook (`AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL` — local or remote)
+  stays as the escape hatch; the gateway wins when both are set.
 - `AnalyzeBackups`: consumes `onyx-backupd`'s report (6.2) and produces
   findings + priorities.
-- Privacy: no telemetry leaves the box unless an explicit BYO-key provider is
-  configured (docs/design/07).
+- Privacy: no telemetry leaves the box unless a model plane is configured,
+  and then only the findings already computed — severity, code, summary,
+  detail, action — are sent, with the local sentence as the fallback whenever
+  the call fails (docs/design/07 §12).
 
 ### 6.6 `onyx-objectstore` — object storage + hybrid cloud
 

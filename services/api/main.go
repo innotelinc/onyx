@@ -30,6 +30,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"onyx.dev/onyx/services/infisical"
+	"onyx.dev/onyx/services/vault"
 
 	onyxv1 "onyx.dev/onyx/proto/gen/go/onyx/v1"
 )
@@ -170,8 +171,14 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := protoMessage(resp)
-	// SecretOps health: "ok" | "not-configured" | "error: <detail>".
-	out["infisical"] = infisical.New(infisical.ConfigFromEnv()).Status(ctx)
+	// SecretOps health: "ok" | "not-configured" | "error: <detail>". Cerulean
+	// Vault is the store the platform runs; the Infisical entry stays only where
+	// a deployment still points the legacy resolver at one, so a migrated stack
+	// does not report a store it no longer uses as broken (docs/stack.md).
+	out["vault"] = vault.New(vault.ConfigFromEnv()).Status(ctx)
+	if icfg := infisical.ConfigFromEnv(); icfg.Enabled() {
+		out["infisical"] = infisical.New(icfg).Status(ctx)
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
