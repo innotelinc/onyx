@@ -16,6 +16,13 @@ base/image/sysroot/
 # Secrets + local env (setup.sh copies from .env.example)
 .env
 
+# Vault token copies (data/vault/token/<product>.token) — a live credential.
+# Cerulean's Vault bootstrap mints it; each stack mounts its own copy read-only.
+data/vault/token/
+# Dev-mode Vault storage + init material (compose.vault.yml, VAULT_INIT_FILE)
+data/vault/file/
+data/vault/init/
+
 # Device-trust PKI (scripts/provision-device-trust.sh) — private keys, never commit
 issued/
 *.p12
@@ -29,3 +36,9 @@ web/landing/docs/
 .DS_Store
 # Python bytecode
 __pycache__/
+
+# Env snapshots (pre-migration backups, .env.bak-<ts>, …) — these hold live
+# credentials. Never tracked: they leaked once (see the 2026-09-15 cleanup).
+.env.pre-*
+.env.bak*
+.env.*.bak
