@@ -21,19 +21,22 @@ import (
 	"google.golang.org/grpc"
 
 	"onyx.dev/onyx/services/infisical"
+	"onyx.dev/onyx/services/vault"
 
 	onyxv1 "onyx.dev/onyx/proto/gen/go/onyx/v1"
 )
 
 const version = "0.1.0-dev"
 
-// resolveS3Credentials resolves the S3_ACCESS_KEY/S3_SECRET_KEY env values
-// through the Infisical resolver, preserving plain values.
-func resolveS3Credentials(ctx context.Context, iclient *infisical.Client) ([2]string, error) {
+// resolveS3Credentials resolves the S3_ACCESS_KEY/S3_SECRET_KEY env values,
+// preserving plain values. A value may be a `vault://` reference (Cerulean
+// Vault) or the legacy `infisical://<name>` one; one call handles both, so the
+// switch from the legacy store is a `.env` edit rather than a code change.
+func resolveS3Credentials(ctx context.Context, vclient *vault.Client, legacy vault.LegacyResolver) ([2]string, error) {
 	var out [2]string
 	values := []string{os.Getenv("S3_ACCESS_KEY"), os.Getenv("S3_SECRET_KEY")}
 	for i, v := range values {
-		r, err := iclient.ResolveEnv(ctx, v)
+		r, err := vclient.ResolveEnv(ctx, v, legacy)
 		if err != nil {
 			return out, err
 		}
@@ -58,32 +61,40 @@ func main() {
 		fatal("create state dir", err)
 	}
 
-	// Static S3 credentials may be plain values or infisical://<name>
-	// references (SecretOps — the Innotel Platform Stack contract). Resolve
+	// Static S3 credentials may be plain values or a reference: `vault://`
+	// (Cerulean Vault — SecretOps) or the legacy `infisical://<name>`. Resolve
 	// refs at startup so a misconfigured secret store fails loudly instead of
 	// silently opening the endpoint.
+	vcfg := vault.ConfigFromEnv()
 	icfg := infisical.ConfigFromEnv()
-	if icfg.Enabled() {
-		iclient := infisical.New(icfg)
-		resolved, err := resolveS3Credentials(context.Background(), iclient)
+	if vcfg.Enabled() || icfg.Enabled() {
+		var legacy vault.LegacyResolver
+		if icfg.Enabled() {
+			legacy = infisical.New(icfg)
+		}
+		resolved, err := resolveS3Credentials(context.Background(), vault.New(vcfg), legacy)
 		if err != nil {
 			fatal("resolve S3 credentials", err)
 		}
-		// Seed Infisical with plain .env values (best-effort) so the stack can
-		// switch .env to references after the first boot.
-		if written, errs := iclient.Mirror(context.Background(), map[string]string{
-			"S3_ACCESS_KEY": os.Getenv("S3_ACCESS_KEY"),
-			"S3_SECRET_KEY": os.Getenv("S3_SECRET_KEY"),
-		}); len(written) > 0 {
-			slog.Info("mirrored S3 credentials into Infisical", "secrets", written)
-		} else {
-			for _, e := range errs {
-				slog.Warn("infisical mirror", "error", e)
+		// Seed the LEGACY store with plain .env values (best-effort) so a stack
+		// can switch .env to references after the first boot. Vault is not
+		// written from here: secrets get there through scripts/vault-migrate.py,
+		// which the service has no business duplicating at boot.
+		if iclient, ok := legacy.(*infisical.Client); ok {
+			if written, errs := iclient.Mirror(context.Background(), map[string]string{
+				"S3_ACCESS_KEY": os.Getenv("S3_ACCESS_KEY"),
+				"S3_SECRET_KEY": os.Getenv("S3_SECRET_KEY"),
+			}); len(written) > 0 {
+				slog.Info("mirrored S3 credentials into Infisical (legacy)", "secrets", written)
+			} else {
+				for _, e := range errs {
+					slog.Warn("infisical mirror", "error", e)
+				}
 			}
 		}
 		os.Setenv("S3_ACCESS_KEY", resolved[0])
 		os.Setenv("S3_SECRET_KEY", resolved[1])
-		slog.Info("infisical secret resolution enabled", "addr", icfg.Addr)
+		slog.Info("secret resolution enabled", "vault", vcfg.Enabled(), "infisical", icfg.Enabled())
 	}
 
 	gs := grpc.NewServer()
