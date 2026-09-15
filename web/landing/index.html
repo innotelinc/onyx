@@ -251,6 +251,18 @@
       border-radius: 999px;
       padding: 1px 8px;
     }
+    /* Reserved surface: the host and its certificate exist so the edge wiring
+       is ready, but nothing is served yet — never claim it is live. */
+    .surface.reserved { background: transparent; border-style: dashed; }
+    .surface.reserved b { color: var(--onyx-text-secondary); }
+    .surface .soon {
+      margin-left: auto;
+      font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+      color: var(--onyx-warning);
+      border: 1px solid rgba(245, 181, 68, 0.3);
+      border-radius: 999px;
+      padding: 1px 8px;
+    }
 
     /* ---- Stack / code ---------------------------------------------------- */
     .split { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: center; }
@@ -335,6 +347,7 @@
         <a href="#features">Features</a>
         <a href="#stack">Stack</a>
         <a href="#platform">Platform</a>
+        <a href="#about">About</a>
         <a href="#roadmap">Roadmap</a>
         <a href="docs/">Docs</a>
         <a class="gh" href="https://github.com/innotelinc/onyx">
@@ -369,7 +382,7 @@
           <div class="stat"><b>&lt; 512 MB</b><span>idle RAM target</span></div>
           <div class="stat"><b>&lt; 60 s</b><span>boot to login</span></div>
           <div class="stat"><b>6 protocols</b><span>SMB · NFS · FTP · SFTP · WebDAV · Rsync</span></div>
-          <div class="stat"><b>11 services</b><span>Go control plane · Rust data plane</span></div>
+          <div class="stat"><b>12 services</b><span>Go control plane · Rust data plane</span></div>
         </div>
       </div>
     </div>
@@ -470,14 +483,64 @@ $ <span class="p">bin/onyx</span> <span class="o">share create media /mnt/onyx/p
         <p class="section-sub">
           Every surface hangs off its own subdomain with a wildcard Let's Encrypt certificate —
           provisioned automatically, TLS terminated at Nginx Proxy Manager, SSO via Authentik.
+          Each link below is checked against what the surface actually serves: the API and
+          Backup links open a live endpoint, and <code>admin</code> is reserved until the
+          Prism UI ships in v0.2 (the host and certificate already exist).
         </p>
         <div class="surfaces">
-          <a class="surface" href="https://app.onyx.innotel.us"><b>App</b><small>app.onyx.innotel.us</small><span class="live">live</span></a>
-          <a class="surface" href="https://api.onyx.innotel.us"><b>API</b><small>api.onyx.innotel.us</small><span class="live">live</span></a>
+          <a class="surface" href="https://app.onyx.innotel.us"><b>App</b><small>app.onyx.innotel.us · placeholder</small><span class="live">live</span></a>
+          <a class="surface" href="https://api.onyx.innotel.us/api/v1/system/status"><b>API</b><small>api.onyx.innotel.us · /api/v1/system/status</small><span class="live">live</span></a>
           <a class="surface" href="https://auth.onyx.innotel.us"><b>Identity</b><small>auth.onyx.innotel.us · Authentik</small><span class="live">live</span></a>
-          <a class="surface" href="https://storage.onyx.innotel.us"><b>Storage</b><small>storage.onyx.innotel.us · S3</small><span class="live">live</span></a>
-          <a class="surface" href="https://backup.onyx.innotel.us"><b>Backup</b><small>backup.onyx.innotel.us</small><span class="live">live</span></a>
-          <a class="surface" href="https://admin.onyx.innotel.us"><b>Admin</b><small>admin.onyx.innotel.us</small><span class="live">live</span></a>
+          <a class="surface" href="https://storage.onyx.innotel.us"><b>Storage</b><small>storage.onyx.innotel.us · S3 (credentials required)</small><span class="live">live</span></a>
+          <a class="surface" href="https://backup.onyx.innotel.us/api/v1/backups"><b>Backup</b><small>backup.onyx.innotel.us · /api/v1/backups</small><span class="live">live</span></a>
+          <div class="surface reserved"><b>Admin</b><small>admin.onyx.innotel.us · reserved for the v0.2 Prism UI</small><span class="soon">planned</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- About -->
+    <section id="about">
+      <div class="wrap">
+        <h2>About ONYX<span class="accent">.</span></h2>
+        <p class="section-sub">
+          ONYX — the <em>Online Storage System</em> — is a next-generation storage and
+          infrastructure platform that replaces TrueNAS and ZimaOS: enterprise-grade
+          storage, virtualization, S3-compatible object storage, backup management, cloud
+          synchronization and application hosting in one self-hosted stack. SSO everywhere
+          via Cerulean Authentik, safe by default with Btrfs snapshots and atomic A/B
+          rollback, and no cloud account required.
+        </p>
+        <div class="grid grid-2">
+          <div class="card">
+            <h3>Where it stands today</h3>
+            <ul>
+              <li><b>v0.1 "Cinder"</b> — the control/data plane (onyx-core, storaged, privd,
+                shared, the API gateway and the CLI) and the full platform layer ship and run</li>
+              <li><b>v0.2 "Flint"</b> — the Prism web UI, file explorer, shares UX, users and
+                permissions (the Admin surface is reserved for it)</li>
+              <li>Boots in under a minute, idles under 512 MB RAM; 12 containerized services</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Who owns what</h3>
+            <ul>
+              <li><b>ONYX</b> — StorageOps: file and object storage, backups, snapshots, NAS</li>
+              <li><b>Cerulean</b> — identity, trust and secrets (Vault is the only secret store;
+                <code>.env</code> carries derived <code>vault://</code> references)</li>
+              <li><b>NPM Edge</b> — TLS and routing: one wildcard certificate per zone</li>
+            </ul>
+          </div>
+        </div>
+        <div class="card" style="margin-top:14px">
+          <h3>Licence and source</h3>
+          <p>
+            The core OS is <b>AGPL-3.0</b>; the SDK under <code>sdk/</code> is
+            <b>Apache-2.0</b>. Source, releases and the full twelve-document design
+            specification are public:
+            <a href="https://github.com/innotelinc/onyx">github.com/innotelinc/onyx</a> ·
+            <a href="docs/">design docs</a> ·
+            <a href="https://github.com/innotelinc/onyx/releases">releases</a>.
+          </p>
         </div>
       </div>
     </section>

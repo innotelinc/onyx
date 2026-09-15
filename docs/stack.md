@@ -48,7 +48,7 @@ provides, and explicitly does not own.
 
 | Component | Technology | Job |
 | --- | --- | --- |
-| `onyx-api` | Go | Control API; reports SecretOps health on `GET /api/v1/status` |
+| `onyx-api` | Go | Control API; reports SecretOps health on `GET /api/v1/system/status` |
 | `onyx-objectstore` | Go | S3-compatible object storage (buckets, keys, Basic-auth REST) |
 | `onyx-appd` | Go | Application hosting / deployment companion |
 | `onyx-ai` | Go | AI Storage Advisor + Backup Intelligence; consumes the shared OmniRoute (`OMNIROUTE_BASE_URL` + a gateway key, which may be a `vault://` reference — ONYX holds no provider key) and falls back to local heuristics |
@@ -114,7 +114,7 @@ of anything but the service.
   can move to references after one boot.
 - `onyx-api` — `CERULEAN_API_TOKEN` may be
   `vault://cerulean/onyx/api#CERULEAN_API_TOKEN`; SecretOps health is reported on
-  `GET /api/v1/status` as `vault: ok | not-configured | error`. (`infisical:` is
+  `GET /api/v1/system/status` as `vault: ok | not-configured | error`. (`infisical:` is
   reported beside it only where a deployment still configures the legacy store,
   so a migrated stack does not advertise a store it no longer uses.)
 
