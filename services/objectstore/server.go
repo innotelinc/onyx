@@ -191,6 +191,51 @@ func (s *server) GetObject(_ context.Context, req *onyxv1.GetObjectRequest) (*on
 	}, nil
 }
 
+// userMetaDir is where per-object user metadata lives: a hidden directory inside
+// the bucket, mirroring the key path. It is deliberately a directory rather than
+// a `<key>.meta.json` sibling because bucket listing skips directories, so the
+// sidecar never shows up as an object.
+func (s *server) userMetaDir(bucket string) string {
+	return filepath.Join(s.objects, bucket, ".meta")
+}
+
+func (s *server) userMetaPath(bucket, key string) string {
+	return filepath.Join(s.userMetaDir(bucket), filepath.Clean(key)+".json")
+}
+
+// saveUserMeta records the `x-amz-meta-*` headers a client sent with an object.
+// S3 keeps these alongside the object and returns them on HEAD/GET; storing them
+// is what lets a client check a downloaded document against the hash it uploaded
+// without a second lookup.
+func (s *server) saveUserMeta(bucket, key string, meta map[string]string) error {
+	if len(meta) == 0 {
+		return nil
+	}
+	path := s.userMetaPath(bucket, key)
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o640)
+}
+
+// loadUserMeta returns the stored metadata, or nil when there is none. A missing
+// or unreadable sidecar is not an error: the object is still the object.
+func (s *server) loadUserMeta(bucket, key string) map[string]string {
+	raw, err := os.ReadFile(s.userMetaPath(bucket, key))
+	if err != nil {
+		return nil
+	}
+	meta := map[string]string{}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return nil
+	}
+	return meta
+}
+
 func (s *server) DeleteObject(_ context.Context, req *onyxv1.DeleteObjectRequest) (*onyxv1.DeleteObjectResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -202,6 +247,9 @@ func (s *server) DeleteObject(_ context.Context, req *onyxv1.DeleteObjectRequest
 	if err != nil && !os.IsNotExist(err) {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+	// The sidecar goes with the object, or a later PUT under the same key would
+	// inherit the previous object's metadata.
+	_ = os.Remove(s.userMetaPath(req.GetBucket(), req.GetKey()))
 	return &onyxv1.DeleteObjectResponse{Deleted: err == nil}, nil
 }
 
