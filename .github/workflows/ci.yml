@@ -41,6 +41,16 @@ jobs:
       - name: Regenerate protobuf stubs
         run: make gen
 
+      # `make gen` succeeding is not evidence that the committed stubs match
+      # proto/: it rewrites them in place, so a stale stub is silently replaced
+      # and the run passes while the tree it checked is wrong. The check that
+      # actually holds is whether regeneration changed anything. Drift here is
+      # the failure mode that cannot be caught by review — the .pb.go files are
+      # generated text, so a descriptor edited by hand (or by a careless
+      # find-and-replace across the module path) looks like any other diff.
+      - name: Generated stubs must match proto/
+        run: make gen-check
+
       - name: Vet + test (Go + Rust)
         run: make check
 

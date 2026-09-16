@@ -22,7 +22,7 @@ export PROTOC     := $(TOOLS)/protoc/bin/protoc
 PREFIX ?= /usr/local
 DESTDIR ?=
 
-.PHONY: bootstrap gen build check vet test dev install clean
+.PHONY: bootstrap gen gen-check build check vet test dev install clean
 
 ## bootstrap — download repo-local Go + protoc toolchains and codegen plugins
 bootstrap:
@@ -36,6 +36,17 @@ gen:
 		--go-grpc_out=proto/gen/go --go-grpc_opt=module=github.com/innotelinc/onyx/proto/gen/go \
 		proto/onyx/v1/*.proto
 	@echo "generated Go stubs in proto/gen/go/"
+
+## gen-check — fail when the committed stubs do not match proto/ (CI runs this)
+# `make gen` cannot be the check: it rewrites the stubs, so a stale one is
+# silently replaced and the run passes while the tree it checked was wrong. Only
+# running it and asking whether anything changed proves the committed files are
+# the generator's output.
+gen-check: gen
+	@git diff --quiet -- proto/gen || { \
+		echo "proto/gen is out of date — run 'make gen' and commit the result"; \
+		git diff --stat -- proto/gen; exit 1; }
+	@echo "proto/gen matches proto/"
 
 ## build — compile all binaries into bin/
 build: gen
