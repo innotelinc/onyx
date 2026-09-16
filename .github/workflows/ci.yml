@@ -17,13 +17,13 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Cache repo-local toolchain (.tools)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .tools
           key: onyx-tools-${{ runner.os }}-${{ hashFiles('scripts/bootstrap-tools.sh', 'go.mod', 'go.sum') }}
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
