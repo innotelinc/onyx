@@ -183,7 +183,7 @@ const file_onyx_v1_health_proto_rawDesc = "" +
 	"\aSERVING\x10\x01\x12\x0f\n" +
 	"\vNOT_SERVING\x10\x022L\n" +
 	"\x06Health\x12B\n" +
-	"\x05Check\x12\x1b.onyx.v1.HealthCheckRequest\x1a\x1c.onyx.v1.HealthCheckResponseB+Z)onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
+	"\x05Check\x12\x1b.onyx.v1.HealthCheckRequest\x1a\x1c.onyx.v1.HealthCheckResponseB8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 
 var (
 	file_onyx_v1_health_proto_rawDescOnce sync.Once

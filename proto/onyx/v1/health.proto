@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package onyx.v1;
 
-option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+option go_package = "github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1";
 
 // Health is implemented by every service (docs/design/04-backend-service-architecture.md#8-observability).
 // onyx-agent aggregates these into the status pill and Health card.

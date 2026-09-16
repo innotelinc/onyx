@@ -523,7 +523,7 @@ const file_onyx_v1_vmm_proto_rawDesc = "" +
 	"\bCreateVM\x12\x18.onyx.v1.CreateVMRequest\x1a\v.onyx.v1.VM\x12/\n" +
 	"\aStartVM\x12\x17.onyx.v1.StartVMRequest\x1a\v.onyx.v1.VM\x12-\n" +
 	"\x06StopVM\x12\x16.onyx.v1.StopVMRequest\x1a\v.onyx.v1.VM\x12?\n" +
-	"\bDeleteVM\x12\x18.onyx.v1.DeleteVMRequest\x1a\x19.onyx.v1.DeleteVMResponseB+Z)onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
+	"\bDeleteVM\x12\x18.onyx.v1.DeleteVMRequest\x1a\x19.onyx.v1.DeleteVMResponseB8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 
 var (
 	file_onyx_v1_vmm_proto_rawDescOnce sync.Once

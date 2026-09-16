@@ -1,4 +1,4 @@
-module onyx.dev/onyx
+module github.com/innotelinc/onyx
 
 go 1.27
 

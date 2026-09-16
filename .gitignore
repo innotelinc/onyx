@@ -4,6 +4,11 @@
 # Build artifacts
 bin/
 services/*/target/
+# A service built in place (`go build ./services/ai`) writes ./ai at the repo root
+# rather than bin/onyx-ai — which is how an 18 MB binary ended up committed. The
+# Makefile is the only path that puts binaries where they belong.
+/onyx
+/ai
 
 # OSTree image compose outputs (base/compose.sh + assemble-boot.sh); keep the
 # assember script itself tracked.
