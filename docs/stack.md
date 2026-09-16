@@ -49,7 +49,7 @@ provides, and explicitly does not own.
 | Component | Technology | Job |
 | --- | --- | --- |
 | `onyx-api` | Go | Control API; reports SecretOps health on `GET /api/v1/system/status` |
-| `onyx-objectstore` | Go | S3-compatible object storage (buckets, keys, Basic-auth REST) |
+| `onyx-objectstore` | Go | S3-compatible object storage (buckets, keys, AWS SigV4 + presigned URLs; HTTP Basic accepted for compatibility) |
 | `onyx-appd` | Go | Application hosting / deployment companion |
 | `onyx-ai` | Go | AI Storage Advisor + Backup Intelligence; consumes the shared OmniRoute (`OMNIROUTE_BASE_URL` + a gateway key, which may be a `vault://` reference — ONYX holds no provider key) and falls back to local heuristics |
 
