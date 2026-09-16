@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package onyx.v1;
 
-option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+option go_package = "github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1";
 
 // Vmm manages virtual machines (libvirt/QEMU backend lands in v0.4; the
 // contract is the source of truth now — docs/design/11-platform-and-cloud.md#63-onyx-vmm).

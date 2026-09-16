@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package onyx.v1;
 
-option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+option go_package = "github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1";
 
 // ObjectStore provides S3-compatible object storage and hybrid cloud tiering
 // (docs/design/11-platform-and-cloud.md#66-onyx-objectstore). The gRPC

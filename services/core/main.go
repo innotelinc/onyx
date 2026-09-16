@@ -18,7 +18,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	onyxv1 "onyx.dev/onyx/proto/gen/go/onyx/v1"
+	onyxv1 "github.com/innotelinc/onyx/proto/gen/go/onyx/v1"
 )
 
 const version = "0.1.0-dev"

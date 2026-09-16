@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package onyx.v1;
 
-option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+option go_package = "github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1";
 
 // Shares are the single logical share model (docs/design/05#6-sharing-protocols):
 // one share, exposed over any enabled protocol. onyx-core owns the intent

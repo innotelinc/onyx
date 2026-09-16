@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package onyx.v1;
 
-option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+option go_package = "github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1";
 
 // Privd is the privilege helper (docs/design/04-backend-service-architecture.md#7-privilege-helper).
 // It is the single root process on the system and executes a strict allowlist

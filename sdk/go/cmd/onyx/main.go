@@ -16,7 +16,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"onyx.dev/onyx/sdk/go/client"
+	"github.com/innotelinc/onyx/sdk/go/client"
 )
 
 func main() {

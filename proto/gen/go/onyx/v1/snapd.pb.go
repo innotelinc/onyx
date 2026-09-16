@@ -517,7 +517,7 @@ const file_onyx_v1_snapd_proto_rawDesc = "" +
 	"\x0eCreateSnapshot\x12\x1e.onyx.v1.CreateSnapshotRequest\x1a\x11.onyx.v1.Snapshot\x12N\n" +
 	"\rListSnapshots\x12\x1d.onyx.v1.ListSnapshotsRequest\x1a\x1e.onyx.v1.ListSnapshotsResponse\x12Q\n" +
 	"\x0eDeleteSnapshot\x12\x1e.onyx.v1.DeleteSnapshotRequest\x1a\x1f.onyx.v1.DeleteSnapshotResponse\x12W\n" +
-	"\x10RollbackSnapshot\x12 .onyx.v1.RollbackSnapshotRequest\x1a!.onyx.v1.RollbackSnapshotResponseB+Z)onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
+	"\x10RollbackSnapshot\x12 .onyx.v1.RollbackSnapshotRequest\x1a!.onyx.v1.RollbackSnapshotResponseB8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 
 var (
 	file_onyx_v1_snapd_proto_rawDescOnce sync.Once

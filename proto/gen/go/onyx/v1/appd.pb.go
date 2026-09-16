@@ -691,7 +691,7 @@ const file_onyx_v1_appd_proto_rawDesc = "" +
 	"\x0eListContainers\x12\x1e.onyx.v1.ListContainersRequest\x1a\x1f.onyx.v1.ListContainersResponse\x12D\n" +
 	"\x0eStartContainer\x12\x1e.onyx.v1.StartContainerRequest\x1a\x12.onyx.v1.Container\x12B\n" +
 	"\rStopContainer\x12\x1d.onyx.v1.StopContainerRequest\x1a\x12.onyx.v1.Container\x12H\n" +
-	"\x10RestartContainer\x12 .onyx.v1.RestartContainerRequest\x1a\x12.onyx.v1.ContainerB+Z)onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
+	"\x10RestartContainer\x12 .onyx.v1.RestartContainerRequest\x1a\x12.onyx.v1.ContainerB8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 
 var (
 	file_onyx_v1_appd_proto_rawDescOnce sync.Once
