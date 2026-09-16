@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/xml"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -139,16 +140,19 @@ func (s *server) s3Bucket(w http.ResponseWriter, r *http.Request, bucket string)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case http.MethodGet:
-		s.s3ListObjects(w, bucket)
+		s.s3ListObjects(w, r, bucket)
 	default:
 		writeS3Error(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "unsupported method")
 	}
 }
 
-func (s *server) s3ListObjects(w http.ResponseWriter, bucket string) {
+func (s *server) s3ListObjects(w http.ResponseWriter, r *http.Request, bucket string) {
+	prefix := r.URL.Query().Get("prefix")
+	delimiter := r.URL.Query().Get("delimiter")
+
 	s.mu.Lock()
 	dir := filepath.Join(s.objects, bucket)
-	entries, err := os.ReadDir(dir)
+	keys, err := walkObjectKeys(dir)
 	s.mu.Unlock()
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -158,37 +162,96 @@ func (s *server) s3ListObjects(w http.ResponseWriter, bucket string) {
 		writeS3Error(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	type c struct {
+
+	type object struct {
 		Key          string `xml:"Key"`
 		LastModified string `xml:"LastModified"`
 		Size         int64  `xml:"Size"`
 	}
-	xmlList := struct {
-		XMLName     xml.Name `xml:"ListBucketResult"`
-		Xmlns       string   `xml:"xmlns,attr"`
-		Name        string   `xml:"Name"`
-		IsTruncated bool     `xml:"IsTruncated"`
-		Contents    []c      `xml:"Contents"`
-	}{Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/", Name: bucket}
-	keys := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if !e.IsDir() {
-			keys = append(keys, e.Name())
-		}
+	type commonPrefix struct {
+		Prefix string `xml:"Prefix"`
 	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		info, err := os.Stat(filepath.Join(dir, k))
-		if err != nil {
+	xmlList := struct {
+		XMLName        xml.Name       `xml:"ListBucketResult"`
+		Xmlns          string         `xml:"xmlns,attr"`
+		Name           string         `xml:"Name"`
+		Prefix         string         `xml:"Prefix"`
+		Delimiter      string         `xml:"Delimiter,omitempty"`
+		KeyCount       int            `xml:"KeyCount"`
+		IsTruncated    bool           `xml:"IsTruncated"`
+		Contents       []object       `xml:"Contents"`
+		CommonPrefixes []commonPrefix `xml:"CommonPrefixes,omitempty"`
+	}{
+		Xmlns:     "http://s3.amazonaws.com/doc/2006-03-01/",
+		Name:      bucket,
+		Prefix:    prefix,
+		Delimiter: delimiter,
+	}
+
+	seen := make(map[string]bool)
+	for _, key := range keys {
+		if prefix != "" && !strings.HasPrefix(key, prefix) {
 			continue
 		}
-		xmlList.Contents = append(xmlList.Contents, c{
-			Key:          k,
+		// With a delimiter, everything below the first occurrence of it rolls up
+		// into CommonPrefixes instead of being listed. `ls`-style clients rely on
+		// this to walk a deep tree a level at a time.
+		if delimiter != "" {
+			if i := strings.Index(strings.TrimPrefix(key, prefix), delimiter); i >= 0 {
+				common := prefix + strings.TrimPrefix(key, prefix)[:i+len(delimiter)]
+				if !seen[common] {
+					seen[common] = true
+					xmlList.CommonPrefixes = append(xmlList.CommonPrefixes, commonPrefix{Prefix: common})
+				}
+				continue
+			}
+		}
+		info, statErr := os.Stat(filepath.Join(dir, filepath.FromSlash(key)))
+		if statErr != nil {
+			continue
+		}
+		xmlList.Contents = append(xmlList.Contents, object{
+			Key:          key,
 			LastModified: info.ModTime().UTC().Format(time.RFC3339),
 			Size:         info.Size(),
 		})
 	}
+	sort.Slice(xmlList.CommonPrefixes, func(i, j int) bool {
+		return xmlList.CommonPrefixes[i].Prefix < xmlList.CommonPrefixes[j].Prefix
+	})
+	xmlList.KeyCount = len(xmlList.Contents)
 	writeS3XML(w, http.StatusOK, xmlList)
+}
+
+// walkObjectKeys lists every object key in a bucket directory, separated by `/`.
+//
+// The listing used to read only the bucket's top level and skip directories,
+// which hid every key containing a `/` — and every key Signara writes looks like
+// `<org>/documents/<uuid>.pdf`. A client enumerating the bucket therefore saw an
+// empty store, and anything that trusted that listing (a backup, an inventory, an
+// age-out sweep) would have omitted every document without saying so. Silence is
+// what made that dangerous rather than merely wrong.
+func walkObjectKeys(dir string) ([]string, error) {
+	keys := []string{}
+	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(dir, path)
+		if relErr != nil {
+			return relErr
+		}
+		keys = append(keys, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(keys)
+	return keys, nil
 }
 
 // userMetadata collects the `x-amz-meta-*` headers, keyed without the prefix —
