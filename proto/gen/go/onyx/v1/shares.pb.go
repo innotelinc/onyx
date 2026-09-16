@@ -676,7 +676,7 @@ const file_onyx_v1_shares_proto_rawDesc = "" +
 	"\vDeleteShare\x12\x1b.onyx.v1.DeleteShareRequest\x1a\x1c.onyx.v1.DeleteShareResponse2\x99\x01\n" +
 	"\x06Shared\x12K\n" +
 	"\fRenderConfig\x12\x1c.onyx.v1.RenderConfigRequest\x1a\x1d.onyx.v1.RenderConfigResponse\x12B\n" +
-	"\tRenderAll\x12\x19.onyx.v1.RenderAllRequest\x1a\x1a.onyx.v1.RenderAllResponseB+Z)onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
+	"\tRenderAll\x12\x19.onyx.v1.RenderAllRequest\x1a\x1a.onyx.v1.RenderAllResponseB8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 
 var (
 	file_onyx_v1_shares_proto_rawDescOnce sync.Once

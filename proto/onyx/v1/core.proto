@@ -5,7 +5,7 @@ package onyx.v1;
 import "onyx/v1/health.proto";
 import "onyx/v1/storaged.proto";
 
-option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+option go_package = "github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1";
 
 // Core is the orchestrator (docs/design/04-backend-service-architecture.md#1-service-inventory).
 // The HTTP gateway (onyx-api) talks only to this service; onyx-core applies policy,

@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"onyx.dev/onyx/services/vault"
+	"github.com/innotelinc/onyx/services/vault"
 )
 
 const deviceTrustUpstreamTimeout = 10 * time.Second

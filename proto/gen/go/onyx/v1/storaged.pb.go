@@ -918,7 +918,7 @@ const file_onyx_v1_storaged_proto_rawDesc = "" +
 	"\rUnmountDevice\x12\x1d.onyx.v1.UnmountDeviceRequest\x1a\x0f.onyx.v1.Device\x12E\n" +
 	"\n" +
 	"ListEvents\x12\x1a.onyx.v1.ListEventsRequest\x1a\x1b.onyx.v1.ListEventsResponse\x12D\n" +
-	"\fWatchDevices\x12\x1c.onyx.v1.WatchDevicesRequest\x1a\x14.onyx.v1.DeviceEvent0\x01B+Z)onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
+	"\fWatchDevices\x12\x1c.onyx.v1.WatchDevicesRequest\x1a\x14.onyx.v1.DeviceEvent0\x01B8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 
 var (
 	file_onyx_v1_storaged_proto_rawDescOnce sync.Once

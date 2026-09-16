@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"onyx.dev/onyx/services/vault"
+	"github.com/innotelinc/onyx/services/vault"
 
-	onyxv1 "onyx.dev/onyx/proto/gen/go/onyx/v1"
+	onyxv1 "github.com/innotelinc/onyx/proto/gen/go/onyx/v1"
 )
 
 // The AI plane, as ONYX consumes it (docs/design/11 §6.5).

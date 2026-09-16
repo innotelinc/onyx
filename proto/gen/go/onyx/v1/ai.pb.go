@@ -428,7 +428,7 @@ const file_onyx_v1_ai_proto_rawDesc = "" +
 	"\tnarrative\x18\x03 \x01(\tR\tnarrative2\xaa\x01\n" +
 	"\x02Ai\x12Q\n" +
 	"\x0eAnalyzeStorage\x12\x1e.onyx.v1.AnalyzeStorageRequest\x1a\x1f.onyx.v1.AnalyzeStorageResponse\x12Q\n" +
-	"\x0eAnalyzeBackups\x12\x1e.onyx.v1.AnalyzeBackupsRequest\x1a\x1f.onyx.v1.AnalyzeBackupsResponseB+Z)onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
+	"\x0eAnalyzeBackups\x12\x1e.onyx.v1.AnalyzeBackupsRequest\x1a\x1f.onyx.v1.AnalyzeBackupsResponseB8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 
 var (
 	file_onyx_v1_ai_proto_rawDescOnce sync.Once

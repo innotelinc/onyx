@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	onyxv1 "onyx.dev/onyx/proto/gen/go/onyx/v1"
+	onyxv1 "github.com/innotelinc/onyx/proto/gen/go/onyx/v1"
 )
 
 func dev(name, kname, state, mountpoint string) *onyxv1.Device {

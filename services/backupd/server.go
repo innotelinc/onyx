@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	onyxv1 "onyx.dev/onyx/proto/gen/go/onyx/v1"
+	onyxv1 "github.com/innotelinc/onyx/proto/gen/go/onyx/v1"
 )
 
 // server implements Health and Backupd (proto/onyx/v1/backupd.proto).

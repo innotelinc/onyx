@@ -250,7 +250,7 @@ const file_onyx_v1_privd_proto_rawDesc = "" +
 	"\x13WRITE_DAEMON_CONFIG\x10\a\x12\x12\n" +
 	"\x0eRELOAD_DAEMONS\x10\b2;\n" +
 	"\x05Privd\x122\n" +
-	"\x03Run\x12\x14.onyx.v1.PrivRequest\x1a\x15.onyx.v1.PrivResponseB+Z)onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
+	"\x03Run\x12\x14.onyx.v1.PrivRequest\x1a\x15.onyx.v1.PrivResponseB8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 
 var (
 	file_onyx_v1_privd_proto_rawDescOnce sync.Once

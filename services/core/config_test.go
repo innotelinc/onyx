@@ -8,7 +8,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	onyxv1 "onyx.dev/onyx/proto/gen/go/onyx/v1"
+	onyxv1 "github.com/innotelinc/onyx/proto/gen/go/onyx/v1"
 )
 
 // fakeShared implements SharedClient with a scripted RenderAll response.

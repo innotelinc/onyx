@@ -32,8 +32,8 @@ bootstrap:
 gen:
 	@mkdir -p proto/gen/go
 	@$(PROTOC) --proto_path=proto \
-		--go_out=proto/gen/go --go_opt=module=onyx.dev/onyx/proto/gen/go \
-		--go-grpc_out=proto/gen/go --go-grpc_opt=module=onyx.dev/onyx/proto/gen/go \
+		--go_out=proto/gen/go --go_opt=module=github.com/innotelinc/onyx/proto/gen/go \
+		--go-grpc_out=proto/gen/go --go-grpc_opt=module=github.com/innotelinc/onyx/proto/gen/go \
 		proto/onyx/v1/*.proto
 	@echo "generated Go stubs in proto/gen/go/"
 

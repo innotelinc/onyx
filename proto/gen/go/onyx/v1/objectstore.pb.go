@@ -795,7 +795,7 @@ const file_onyx_v1_objectstore_proto_rawDesc = "" +
 	"\fDeleteBucket\x12\x1c.onyx.v1.DeleteBucketRequest\x1a\x1d.onyx.v1.DeleteBucketResponse\x12;\n" +
 	"\tPutObject\x12\x19.onyx.v1.PutObjectRequest\x1a\x13.onyx.v1.ObjectMeta\x12B\n" +
 	"\tGetObject\x12\x19.onyx.v1.GetObjectRequest\x1a\x1a.onyx.v1.GetObjectResponse\x12K\n" +
-	"\fDeleteObject\x12\x1c.onyx.v1.DeleteObjectRequest\x1a\x1d.onyx.v1.DeleteObjectResponseB+Z)onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
+	"\fDeleteObject\x12\x1c.onyx.v1.DeleteObjectRequest\x1a\x1d.onyx.v1.DeleteObjectResponseB8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 
 var (
 	file_onyx_v1_objectstore_proto_rawDescOnce sync.Once

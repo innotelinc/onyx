@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	onyxv1 "onyx.dev/onyx/proto/gen/go/onyx/v1"
+	onyxv1 "github.com/innotelinc/onyx/proto/gen/go/onyx/v1"
 )
 
 // newS3Handler serves the S3-compatible endpoint for storage.onyx.innotel.us

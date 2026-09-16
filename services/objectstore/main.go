@@ -20,9 +20,9 @@ import (
 
 	"google.golang.org/grpc"
 
-	"onyx.dev/onyx/services/vault"
+	"github.com/innotelinc/onyx/services/vault"
 
-	onyxv1 "onyx.dev/onyx/proto/gen/go/onyx/v1"
+	onyxv1 "github.com/innotelinc/onyx/proto/gen/go/onyx/v1"
 )
 
 const version = "0.1.0-dev"

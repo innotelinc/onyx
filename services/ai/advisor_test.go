@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	onyxv1 "onyx.dev/onyx/proto/gen/go/onyx/v1"
+	onyxv1 "github.com/innotelinc/onyx/proto/gen/go/onyx/v1"
 )
 
 // The advisor's contract is that the local summary is always available and the

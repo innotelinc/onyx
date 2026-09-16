@@ -4,7 +4,7 @@ package onyx.v1;
 
 import "onyx/v1/backupd.proto";
 
-option go_package = "onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1";
+option go_package = "github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1";
 
 // Ai is the AI Storage Advisor + Backup Intelligence service
 // (docs/design/11-platform-and-cloud.md#65-onyx-ai). Deterministic heuristics

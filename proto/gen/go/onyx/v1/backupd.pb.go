@@ -1031,7 +1031,7 @@ const file_onyx_v1_backupd_proto_rawDesc = "" +
 	"\tRunBackup\x12\x19.onyx.v1.RunBackupRequest\x1a\x12.onyx.v1.BackupRun\x12H\n" +
 	"\vListBackups\x12\x1b.onyx.v1.ListBackupsRequest\x1a\x1c.onyx.v1.ListBackupsResponse\x12N\n" +
 	"\rRestoreBackup\x12\x1d.onyx.v1.RestoreBackupRequest\x1a\x1e.onyx.v1.RestoreBackupResponse\x12I\n" +
-	"\x0fGetBackupReport\x12\x1f.onyx.v1.GetBackupReportRequest\x1a\x15.onyx.v1.BackupReportB+Z)onyx.dev/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
+	"\x0fGetBackupReport\x12\x1f.onyx.v1.GetBackupReportRequest\x1a\x15.onyx.v1.BackupReportB8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 
 var (
 	file_onyx_v1_backupd_proto_rawDescOnce sync.Once
