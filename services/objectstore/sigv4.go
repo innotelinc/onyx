@@ -168,23 +168,39 @@ func authenticateS3Request(r *http.Request, accessKey, secretKey, service string
 	return nil
 }
 
-// verifySigV4 checks a signed request and leaves r.Body intact for the handler.
-func verifySigV4(r *http.Request, accessKey, secretKey, service string) error {
-	if r.Header.Get("Authorization") != "" {
-		return verifyHeaderAuth(r, accessKey, secretKey, service)
-	}
-	return verifyPresigned(r, accessKey, secretKey, service)
+// sigV4Verifier holds the credentials a request is checked against, and the clock
+// the check is evaluated at. The clock is a field rather than a direct time.Now()
+// so that the published AWS test vectors — which are fixed in 2015 — can be
+// replayed exactly; production passes time.Now.
+type sigV4Verifier struct {
+	accessKey string
+	secretKey string
+	service   string
+	now       func() time.Time
 }
 
-func verifyHeaderAuth(r *http.Request, accessKey, secretKey, service string) error {
+// verifySigV4 checks a signed request and leaves r.Body intact for the handler.
+func verifySigV4(r *http.Request, accessKey, secretKey, service string) error {
+	v := &sigV4Verifier{accessKey: accessKey, secretKey: secretKey, service: service, now: time.Now}
+	return v.verify(r)
+}
+
+func (v *sigV4Verifier) verify(r *http.Request) error {
+	if r.Header.Get("Authorization") != "" {
+		return v.verifyHeaderAuth(r)
+	}
+	return v.verifyPresigned(r)
+}
+
+func (v *sigV4Verifier) verifyHeaderAuth(r *http.Request) error {
 	auth, err := parseAuthHeader(r.Header.Get("Authorization"))
 	if err != nil {
 		return err
 	}
-	if auth.accessKey != accessKey {
+	if auth.accessKey != v.accessKey {
 		return authFail(http.StatusForbidden, "InvalidAccessKeyId", "unknown access key")
 	}
-	if auth.service != service {
+	if auth.service != v.service {
 		return authFail(http.StatusBadRequest, "AuthorizationHeaderMalformed", "credential scope names service "+strconv.Quote(auth.service))
 	}
 
@@ -192,22 +208,17 @@ func verifyHeaderAuth(r *http.Request, accessKey, secretKey, service string) err
 	if amzDate == "" {
 		return authFail(http.StatusBadRequest, "AccessDenied", "X-Amz-Date is required for AWS4-HMAC-SHA256 requests")
 	}
-	if err := checkTimestamp(amzDate); err != nil {
+	if err := v.checkTimestamp(amzDate); err != nil {
 		return err
 	}
 	// The date in the credential scope must be the date in X-Amz-Date, or the
 	// signing key is derived over the wrong day.
-	if scopeDate := amzDate; len(amzDate) >= 8 {
-		if scopeDate[:8] != auth.date {
-			return authFail(http.StatusBadRequest, "AuthorizationHeaderMalformed", "X-Amz-Date and the credential scope disagree on the date")
-		}
+	if len(amzDate) >= 8 && amzDate[:8] != auth.date {
+		return authFail(http.StatusBadRequest, "AuthorizationHeaderMalformed", "X-Amz-Date and the credential scope disagree on the date")
 	}
 
-	payloadHash := r.Header.Get("X-Amz-Content-Sha256")
-	if payloadHash == "" {
-		payloadHash = unsignedPayload
-	}
-	if err := verifyPayloadHash(r, payloadHash); err != nil {
+	payloadHash, err := v.payloadHash(r)
+	if err != nil {
 		return err
 	}
 
@@ -219,10 +230,10 @@ func verifyHeaderAuth(r *http.Request, accessKey, secretKey, service string) err
 	if err != nil {
 		return err
 	}
-	return compareSignature(r, auth, secretKey, canonical)
+	return v.compareSignature(r, auth, canonical)
 }
 
-func verifyPresigned(r *http.Request, accessKey, secretKey, service string) error {
+func (v *sigV4Verifier) verifyPresigned(r *http.Request) error {
 	query := r.URL.Query()
 	if got := query.Get("X-Amz-Algorithm"); got != sigV4Algorithm {
 		return authFail(http.StatusBadRequest, "AuthorizationQueryParametersError", "X-Amz-Algorithm must be "+sigV4Algorithm)
@@ -248,10 +259,10 @@ func verifyPresigned(r *http.Request, accessKey, secretKey, service string) erro
 		signedHeaders: splitSignedHeaders(signed),
 		signature:     signature,
 	}
-	if auth.accessKey != accessKey {
+	if auth.accessKey != v.accessKey {
 		return authFail(http.StatusForbidden, "InvalidAccessKeyId", "unknown access key")
 	}
-	if auth.service != service {
+	if auth.service != v.service {
 		return authFail(http.StatusBadRequest, "AuthorizationQueryParametersError", "the credential scope names service "+strconv.Quote(auth.service))
 	}
 
@@ -268,7 +279,7 @@ func verifyPresigned(r *http.Request, accessKey, secretKey, service string) erro
 	if perr != nil {
 		return authFail(http.StatusBadRequest, "AuthorizationQueryParametersError", "X-Amz-Date is not an ISO8601 basic timestamp")
 	}
-	now := time.Now().UTC()
+	now := v.now().UTC()
 	if now.After(signedAt.Add(time.Duration(expires) * time.Second)) {
 		return authFail(http.StatusForbidden, "AccessDenied", "the presigned URL has expired")
 	}
@@ -287,10 +298,10 @@ func verifyPresigned(r *http.Request, accessKey, secretKey, service string) erro
 	if err != nil {
 		return err
 	}
-	return compareSignature(r, auth, secretKey, canonical)
+	return v.compareSignature(r, auth, canonical)
 }
 
-func compareSignature(r *http.Request, auth *sigV4Auth, secretKey, canonical string) error {
+func (v *sigV4Verifier) compareSignature(r *http.Request, auth *sigV4Auth, canonical string) error {
 	// `X-Amz-Date` is what the string-to-sign uses for header auth; for a
 	// presigned URL it is the query parameter of the same name.
 	amzDate := r.Header.Get("X-Amz-Date")
@@ -306,7 +317,7 @@ func compareSignature(r *http.Request, auth *sigV4Auth, secretKey, canonical str
 		hex.EncodeToString(sum[:]),
 	}, "\n")
 
-	expected := signString(secretKey, auth.date, auth.region, auth.service, stringToSign)
+	expected := signString(v.secretKey, auth.date, auth.region, auth.service, stringToSign)
 	if !hmac.Equal([]byte(strings.ToLower(auth.signature)), []byte(expected)) {
 		return authFail(http.StatusForbidden, "SignatureDoesNotMatch", "the request signature we calculated does not match the signature you provided")
 	}
@@ -336,15 +347,54 @@ func hmacSHA256(key, data []byte) []byte {
 }
 
 // checkTimestamp refuses a signed request whose clock is outside the skew window.
-func checkTimestamp(amzDate string) error {
+func (v *sigV4Verifier) checkTimestamp(amzDate string) error {
 	t, err := time.Parse(amzDateFormat, amzDate)
 	if err != nil {
 		return authFail(http.StatusBadRequest, "AccessDenied", "X-Amz-Date is not an ISO8601 basic timestamp")
 	}
-	if diff := time.Since(t); diff > maxClockSkew || diff < -maxClockSkew {
+	if diff := v.now().UTC().Sub(t); diff > maxClockSkew || diff < -maxClockSkew {
 		return authFail(http.StatusForbidden, "RequestTimeTooSkewed", "the difference between the request time and the current time is too large")
 	}
 	return nil
+}
+
+// payloadHash is the hash the signature covers for a header-auth request.
+//
+// Clients normally declare it in X-Amz-Content-Sha256. When they do not, the
+// specification's rule is the hash of the body itself — deliberately *not*
+// UNSIGNED-PAYLOAD, which would leave the body unverified while looking
+// authenticated. AWS's published vector `get-vanilla` is exactly this case: a GET
+// carrying no such header, signed over the empty-body hash.
+func (v *sigV4Verifier) payloadHash(r *http.Request) (string, error) {
+	if declared := r.Header.Get("X-Amz-Content-Sha256"); declared != "" {
+		if err := verifyPayloadHash(r, declared); err != nil {
+			return "", err
+		}
+		return declared, nil
+	}
+	body, err := readSignedBody(r)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// readSignedBody buffers the body so its hash can be computed, then restores it:
+// authentication is a precondition of handling, not a consumer.
+func readSignedBody(r *http.Request) ([]byte, error) {
+	if r.Body == nil {
+		return nil, nil
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxSignedBody+1))
+	if err != nil {
+		return nil, authFail(http.StatusBadRequest, "InvalidRequest", "could not read the request body to verify its hash")
+	}
+	if int64(len(body)) > maxSignedBody {
+		return nil, authFail(http.StatusRequestEntityTooLarge, "EntityTooLarge", "the body is too large to verify against X-Amz-Content-Sha256")
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return body, nil
 }
 
 // verifyPayloadHash checks the declared body hash, then restores the body so the
@@ -356,24 +406,10 @@ func verifyPayloadHash(r *http.Request, expected string) error {
 	if strings.HasPrefix(expected, streamingPayloadPrefix) {
 		return authFail(http.StatusNotImplemented, "NotImplemented", "streaming SigV4 payloads are not supported")
 	}
-	if r.Body == nil {
-		// An empty body still has a hash, and it is the one clients send for GET.
-		if emptyHash := sha256.Sum256(nil); hex.EncodeToString(emptyHash[:]) == expected {
-			return nil
-		}
-		return authFail(http.StatusForbidden, "SignatureDoesNotMatch", "the body hash does not match X-Amz-Content-Sha256")
-	}
-
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxSignedBody+1))
+	body, err := readSignedBody(r)
 	if err != nil {
-		return authFail(http.StatusBadRequest, "InvalidRequest", "could not read the request body to verify its hash")
+		return err
 	}
-	if int64(len(body)) > maxSignedBody {
-		return authFail(http.StatusRequestEntityTooLarge, "EntityTooLarge", "the body is too large to verify against X-Amz-Content-Sha256")
-	}
-	// Restore it: authentication is a precondition of handling, not a consumer.
-	r.Body = io.NopCloser(bytes.NewReader(body))
-
 	sum := sha256.Sum256(body)
 	if !hmac.Equal([]byte(hex.EncodeToString(sum[:])), []byte(strings.ToLower(expected))) {
 		return authFail(http.StatusForbidden, "SignatureDoesNotMatch", "the body hash does not match X-Amz-Content-Sha256")
@@ -393,6 +429,10 @@ func canonicalRequest(r *http.Request, signedHeaders []string, query, payloadHas
 	if uri == "" {
 		uri = "/"
 	}
+	// The path is canonicalized exactly as sent — no `/./` or `//` collapsing.
+	// The generic algorithm normalizes it, but S3 does not, because `/./photo`
+	// and `/photo` are *different object keys* and normalizing would silently
+	// merge them. See TestSigV4VectorS3PathDivergence, which pins that choice.
 	return strings.Join([]string{
 		r.Method,
 		uri,
@@ -415,10 +455,19 @@ func canonicalHeaders(r *http.Request, signedHeaders []string) (string, string, 
 	var b strings.Builder
 	for _, name := range names {
 		var value string
-		if name == "host" {
+		switch name {
+		case "host":
 			// Go promotes the Host header onto the request, out of Header.
 			value = r.Host
-		} else {
+		case "content-length":
+			// Likewise: Go moves Content-Length onto the request, so a client that
+			// signs it (AWS's own post-x-www-form-urlencoded vector does) would be
+			// rejected over a header we simply could not see.
+			if r.ContentLength < 0 {
+				return "", "", authFail(http.StatusForbidden, "SignatureDoesNotMatch", "a header named in SignedHeaders is absent: "+name)
+			}
+			value = strconv.FormatInt(r.ContentLength, 10)
+		default:
 			values, ok := r.Header[http.CanonicalHeaderKey(name)]
 			if !ok {
 				// Every header named as signed must be present: otherwise a
