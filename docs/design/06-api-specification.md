@@ -92,10 +92,10 @@ reconnect.
 |--------|------|-------|
 | GET | `/files?path=&limit=&cursor=&q=` | Read-only directory listing rooted at the configured storage root; metadata includes size, mode, and modified time |
 | GET | `/files/meta?path=` | Single entry |
-| PUT | `/files/content?path=` | Upload (see §6, tus resumable) |
+| PUT | `/files/content?path=` | Planned resumable upload (see §6, tus resumable) |
 | GET | `/files/content?path=` | Download (range requests) |
-| POST | `/files/mkdir`, `/files/rename`, `/files/copy`, `/files/move` | Bulk `paths` arrays |
-| POST | `/files/delete` | Soft-delete → trash subvolume, 30-day retention |
+| POST | `/files/mkdir`, `/files/rename` | Root-confined mutations; rename refuses replacement |
+| POST | `/files/delete` | Soft-delete into `.trash` under the storage root; no permanent delete |
 | GET | `/files/search?q=` | Global + per-dir search |
 
 ### Snapshots
