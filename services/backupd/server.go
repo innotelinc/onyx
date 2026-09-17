@@ -18,8 +18,8 @@ import (
 
 // server implements Health and Backupd (proto/onyx/v1/backupd.proto).
 // Jobs and runs are persisted atomically in the service state directory;
-// execution remains explicitly simulated until the target-specific copy
-// engines are enabled (docs/design/11 §6.2).
+// local target jobs execute through the safe filesystem copier in copy.go.
+// Remote, NFS, SSH and S3 adapters remain explicit follow-up targets.
 type server struct {
 	onyxv1.UnimplementedHealthServer
 	onyxv1.UnimplementedBackupdServer
@@ -133,40 +133,59 @@ func (s *server) DeleteBackupJob(_ context.Context, req *onyxv1.DeleteBackupJobR
 	return &onyxv1.DeleteBackupJobResponse{Deleted: ok}, nil
 }
 
-// RunBackup executes a job. The v0.3 safety surface records a durable run,
-// applies retention, and feeds recovery reporting; target-specific copy engines
-// remain isolated behind this contract for the next implementation slice.
+// RunBackup executes a local job synchronously and records both successful
+// and failed runs. The run is persisted as running before any file I/O, so a
+// process restart never turns an untracked copy into an apparent success.
 func (s *server) RunBackup(_ context.Context, req *onyxv1.RunBackupRequest) (*onyxv1.BackupRun, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	job, ok := s.jobs[req.GetJobId()]
 	if !ok {
+		s.mu.Unlock()
 		return nil, status.Error(codes.NotFound, "job not found")
 	}
+	if job.TargetKind != "local" {
+		s.mu.Unlock()
+		return nil, status.Errorf(codes.Unimplemented, "backup target %q is not implemented; use target_kind local", job.TargetKind)
+	}
+	source, target := job.Source, job.Target
+	jobID, retention := job.Id, job.Retention
 	now := time.Now().UTC()
 	run := &onyxv1.BackupRun{
-		Id:        fmt.Sprintf("run-%d", now.UnixNano()),
-		JobId:     job.Id,
-		Status:    "succeeded",
-		StartedAt: now.Format(time.RFC3339),
+		Id: fmt.Sprintf("run-%d", now.UnixNano()), JobId: jobID,
+		Status: "running", StartedAt: now.Format(time.RFC3339),
 	}
-	if job.SnapshotBefore {
-		// Snapshot hand-off to onyx-snapd happens here in v0.3.
-	}
-	s.runs[job.Id] = append(s.runs[job.Id], run)
-	s.applyRetention(job)
+	s.runs[jobID] = append(s.runs[jobID], run)
 	if err := s.persistLocked(); err != nil {
-		return nil, status.Errorf(codes.Internal, "persist backup run: %v", err)
+		s.mu.Unlock()
+		return nil, status.Errorf(codes.Internal, "persist running backup: %v", err)
+	}
+	s.mu.Unlock()
+
+	bytes, copyErr := copyLocalBackup(source, target, run.Id)
+	finished := time.Now().UTC().Format(time.RFC3339)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run.BytesWritten = bytes
+	run.FinishedAt = finished
+	if copyErr != nil {
+		run.Status = "failed"
+		run.Error = copyErr.Error()
+	} else {
+		run.Status = "succeeded"
+	}
+	s.applyRetention(jobID, retention)
+	if err := s.persistLocked(); err != nil {
+		return nil, status.Errorf(codes.Internal, "persist completed backup: %v", err)
 	}
 	return run, nil
 }
 
-func (s *server) applyRetention(job *onyxv1.BackupJob) {
-	runs := s.runs[job.Id]
-	if job.Retention <= 0 || len(runs) <= int(job.Retention) {
+func (s *server) applyRetention(jobID string, retention int32) {
+	runs := s.runs[jobID]
+	if retention <= 0 || len(runs) <= int(retention) {
 		return
 	}
-	s.runs[job.Id] = runs[len(runs)-int(job.Retention):]
+	s.runs[jobID] = runs[len(runs)-int(retention):]
 }
 
 func (s *server) ListBackups(_ context.Context, req *onyxv1.ListBackupsRequest) (*onyxv1.ListBackupsResponse, error) {
