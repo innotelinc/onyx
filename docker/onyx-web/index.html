@@ -396,8 +396,25 @@
 
     function viewFiles() {
       return '<div class="page-head"><div><h1>Files</h1><div id="file-breadcrumb" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="btn" type="button" data-file-nav="">Storage root</button></div></div>' +
-        '<div><button class="btn" id="folder-create">New folder</button> <button class="btn primary" disabled title="Upload is the next file-pipeline slice">Upload</button></div></div>' +
+        '<div><button class="btn" id="folder-create">New folder</button> <button class="btn" id="trash-empty">Empty trash</button> <button class="btn primary" disabled title="Upload is the next file-pipeline slice">Upload</button></div></div>' +
+        '<div class="grid" id="file-storage-summary" style="margin-bottom:16px"><div class="card"><h3>Storage</h3><div class="stat">—</div><div class="sub">Loading disk capacity…</div></div><div class="card"><h3>Trash</h3><div class="stat">—</div><div class="sub">Loading trash usage…</div></div></div>' +
         '<div class="card" id="file-list"><div class="empty"><b>Loading files…</b>Reading the storage root.</div></div>';
+    }
+
+    function loadTrash() {
+      var summary = document.getElementById('file-storage-summary');
+      var empty = document.getElementById('trash-empty');
+      if (!summary) return;
+      apiJSON('/files/trash').then(function (data) {
+        summary.innerHTML = '<div class="card"><h3>Storage</h3><div class="stat">' + formatBytes(data.storage_total_bytes) + '</div><div class="sub">' + formatBytes(data.storage_free_bytes) + ' available on the current filesystem</div></div><div class="card"><h3>Trash</h3><div class="stat">' + formatBytes(data.size_bytes) + '</div><div class="sub">' + data.items + ' item(s) across mounted storage</div></div>';
+      }).catch(showError);
+      if (empty) empty.addEventListener('click', function () {
+        apiJSON('/files/trash').then(function (data) {
+          if (!data.items) { alert('Trash is already empty.'); return; }
+          if (!confirm('Permanently delete ' + data.items + ' trash item(s) using ' + formatBytes(data.size_bytes) + '?')) return;
+          apiJSON('/files/trash', { method: 'DELETE' }).then(loadTrash).catch(showError);
+        }).catch(showError);
+      });
     }
 
     function loadFiles(path) {
@@ -643,6 +660,7 @@
       if (v.id === 'files') {
         document.getElementById('folder-create').addEventListener('click', function () { var name = prompt('New folder name'); if (!name) return; var parent = window.__onyxFilePath || ''; var next = parent ? parent + '/' + name : name; apiJSON('/files/mkdir', { method: 'POST', body: JSON.stringify({ path: next }) }).then(function () { loadFiles(parent); }).catch(showError); });
         loadFiles('');
+        loadTrash();
       }
       if (v.id === 'snapshots') {
         document.getElementById('snapshot-create').addEventListener('click', function () {
