@@ -36,7 +36,8 @@ RUN case "${SERVICE}" in \
 # root; the rest run as the unprivileged "onyx" user).
 FROM alpine:3.20
 ARG SERVICE
-RUN addgroup -S onyx && adduser -S -G onyx onyx \
+RUN if [ "${SERVICE}" = "onyx-api" ] || [ "${SERVICE}" = "onyx-backupd" ]; then apk add --no-cache rclone; fi \
+    && addgroup -S onyx && adduser -S -G onyx onyx \
     && mkdir -p /run/onyx \
     && for d in api core shared snapd backupd vmm appd ai objectstore; do mkdir -p "/var/lib/onyx/$d"; done \
     && chown -R onyx:onyx /run/onyx /var/lib/onyx \
