@@ -93,7 +93,12 @@ func (s *server) findTrashDirs() ([]string, error) {
 	var dirs []string
 	err := filepath.Walk(s.filesRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			// Protected directories such as lost+found must not prevent trash
+			// accounting for the rest of the mounted storage.
+			if path == s.filesRoot {
+				return err
+			}
+			return filepath.SkipDir
 		}
 		if info.IsDir() && info.Name() == ".trash" {
 			dirs = append(dirs, path)
