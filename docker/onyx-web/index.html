@@ -544,7 +544,7 @@
         '<div class="card" style="margin-bottom:16px"><h3>Create a share</h3>' +
         '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end">' +
         '<label>Name<input id="share-name" class="search" style="width:100%;max-width:none" placeholder="media" autocomplete="off"></label>' +
-        '<label>Storage folder<select id="share-path" class="search" style="width:100%;max-width:none"><option value="">Loading folders…</option></select></label>' +
+        '<label>Storage folder<div id="share-browser" class="search" style="width:100%;max-width:none;min-height:38px">Loading folders…</div><input type="hidden" id="share-path"></label>' +
         '<label>Comment<input id="share-comment" class="search" style="width:100%;max-width:none" placeholder="Family media" autocomplete="off"></label>' +
         '</div>' +
         '<div style="display:flex;gap:16px;align-items:center;margin-top:16px;flex-wrap:wrap">' +
@@ -556,13 +556,24 @@
         '<div class="card" id="share-list"><div class="empty"><b>Loading shares…</b>Reading the share catalog.</div></div>';
     }
 
-    function loadSharePaths() {
-      var select = document.getElementById('share-path');
-      if (!select) return;
-      apiJSON('/files').then(function (data) {
+    function loadSharePaths(path) {
+      var browser = document.getElementById('share-browser');
+      var hidden = document.getElementById('share-path');
+      if (!browser || !hidden) return;
+      path = path || '';
+      apiJSON('/files' + (path ? '?path=' + encodeURIComponent(path) : '')).then(function (data) {
         var dirs = (data.entries || []).filter(function (entry) { return entry.type === 'directory'; });
-        select.innerHTML = dirs.length ? '<option value="">Choose a folder…</option>' + dirs.map(function (entry) { return '<option value="' + esc(entry.path) + '">' + esc(entry.name) + ' — ' + esc(entry.path) + '</option>'; }).join('') : '<option value="">No mounted storage folders</option>';
-      }).catch(function () { select.innerHTML = '<option value="">Storage unavailable</option>'; });
+        hidden.value = path;
+        var parent = path ? path.split('/').slice(0, -1).join('/') : '';
+        browser.innerHTML = '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span>Current: <b>' + esc(path || 'Storage root') + '</b></span>' + (path ? '<button class="btn" type="button" id="share-up">Up</button>' : '') + '</div>' +
+          (path ? '<button class="btn primary" type="button" id="share-use" style="margin-top:8px">Use this folder</button>' : '<div class="sub" style="margin-top:8px">Open a folder below to select it.</div>') +
+          (dirs.length ? '<div style="display:grid;gap:4px;margin-top:8px">' + dirs.map(function (entry) { return '<button class="btn" type="button" data-share-dir="' + esc(entry.path) + '" style="text-align:left">📁 ' + esc(entry.name) + '</button>'; }).join('') + '</div>' : '<div class="sub" style="margin-top:8px">No subfolders here.</div>');
+        var up = document.getElementById('share-up');
+        if (up) up.addEventListener('click', function () { loadSharePaths(parent); });
+        var use = document.getElementById('share-use');
+        if (use) use.addEventListener('click', function () { browser.insertAdjacentHTML('beforeend', '<div class="sub" style="margin-top:8px;color:var(--onyx-success)">Selected for sharing.</div>'); });
+        Array.prototype.forEach.call(browser.querySelectorAll('[data-share-dir]'), function (button) { button.addEventListener('click', function () { loadSharePaths(button.dataset.shareDir); }); });
+      }).catch(function () { browser.textContent = 'Storage unavailable'; });
     }
 
     function loadShares() {
