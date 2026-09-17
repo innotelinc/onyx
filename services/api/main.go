@@ -204,6 +204,7 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("DELETE /api/v1/backup-jobs/{id}", s.handleDeleteBackupJob)
 	mux.HandleFunc("POST /api/v1/backup-jobs/{id}/run", s.handleRunBackup)
 	mux.HandleFunc("GET /api/v1/backup-jobs/{id}/history", s.handleBackupHistory)
+	mux.HandleFunc("POST /api/v1/backups/{id}/restore", s.handleRestoreBackup)
 	mux.HandleFunc("GET /api/v1/backup-report", s.handleBackupReport)
 	// v0.2 Flint access metadata. Authentication remains delegated to Authentik;
 	// this store contains ONYX roles and share grants only, never passwords.
