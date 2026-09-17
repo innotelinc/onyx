@@ -87,6 +87,7 @@ services:
     volumes:
       - onyx-sockets:/run/onyx
       - onyx-api-state:/var/lib/onyx/api
+      - ${RCLONE_CONFIG_DIR:-./data/rclone}:/etc/rclone:ro
       # The file explorer and safe mutations operate on the same host storage
       # root as storaged; without this bind mount /mnt/onyx is absent in the API
       # container even while the data plane can see it.
@@ -141,6 +142,7 @@ services:
     volumes:
       - onyx-sockets:/run/onyx
       - onyx-backupd-state:/var/lib/onyx/backupd
+      - ${RCLONE_CONFIG_DIR:-./data/rclone}:/etc/rclone:ro
       # Backupd needs to read mounted source folders and write future pool
       # restore destinations; the API still owns path validation.
       - /mnt/onyx:/mnt/onyx
