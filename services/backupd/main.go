@@ -1,7 +1,8 @@
 // Command onyx-backupd is the backup service (docs/design/11 §6.2): jobs,
 // schedules, retention, restore, and the Backup Intelligence report consumed
 // by onyx-ai. v0.1 ships the contract + in-memory skeleton with a JSON API
-// surface for backup.onyx.innotel.us; the run engine lands with v0.3.
+// surface for backup.onyx.innotel.us; local target execution and recovery
+// reporting are available in the Obsidian line.
 package main
 
 import (

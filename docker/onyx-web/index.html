@@ -337,6 +337,7 @@
       { id: 'files',     label: 'Files',     icon: ICONS.files,     section: 'Data' },
       { id: 'snapshots', label: 'Snapshots', icon: ICONS.snapshots, section: 'Data', badge: '0' },
       { id: 'backups',   label: 'Backups',   icon: ICONS.backups,   section: 'Data' },
+      { id: 'scrub',     label: 'Scrub',     icon: ICONS.settings,  section: 'Data' },
       { id: 'apps',      label: 'Apps',      icon: ICONS.apps,      section: 'Platform' },
       { id: 'shares',    label: 'Shares',    icon: ICONS.shares,    section: 'Platform', badge: '0' },
       { id: 'users',     label: 'Users',     icon: ICONS.users,     section: 'Platform' },
@@ -456,6 +457,43 @@
       if (target) target.insertAdjacentHTML('afterbegin', '<div class="card" style="border-color:var(--onyx-danger);color:var(--onyx-danger)">' + esc(message) + '</div>');
     }
 
+    function viewShares() {
+      return '<div class="page-head"><div><h1>Shares</h1><p>One logical share, rendered to the enabled protocols.</p></div><button class="btn primary" id="share-create">Create share</button></div>' +
+        '<div class="card" id="share-list"><div class="empty"><b>Loading shares…</b>Reading the share catalog.</div></div>';
+    }
+
+    function loadShares() {
+      var list = document.getElementById('share-list');
+      if (!list) return;
+      apiJSON('/shares').then(function (data) {
+        var rows = data.shares || [];
+        list.innerHTML = rows.length ? '<div style="display:grid;gap:10px">' + rows.map(function (s) {
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(s.name) + '</b><div class="sub">' + esc(s.path) + ' · ' + esc((s.protocols || []).join(', ')) + '</div></div><span class="tag">' + (s.readonly ? 'read-only' : 'read-write') + '</span></div>';
+        }).join('') + '</div>' : '<div class="empty"><b>No shares yet</b>Create a share to expose a dataset over SMB or NFS.</div>';
+      }).catch(showError);
+    }
+
+    function viewUsers() {
+      return '<div class="page-head"><div><h1>Users</h1><p>Roles and share grants; authentication remains with Authentik.</p></div><button class="btn primary" id="user-create">Add user</button></div>' +
+        '<div class="card" id="user-list"><div class="empty"><b>Loading users…</b>Reading local permission metadata.</div></div>';
+    }
+
+    function loadUsers() {
+      var list = document.getElementById('user-list');
+      if (!list) return;
+      apiJSON('/users').then(function (data) {
+        var rows = data.users || [];
+        list.innerHTML = rows.length ? '<div style="display:grid;gap:10px">' + rows.map(function (u) {
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(u.display_name || u.username) + '</b><div class="sub">' + esc(u.username) + ' · ' + esc(u.status) + '</div></div><span class="tag">' + esc(u.role) + '</span></div>';
+        }).join('') + '</div>' : '<div class="empty"><b>No local role mappings</b>Add a user mapping after creating the identity in Authentik.</div>';
+      }).catch(showError);
+    }
+
+    function viewScrub() {
+      return '<div class="page-head"><div><h1>Scrub scheduling</h1><p>Checksum verification protects Btrfs pools from silent corruption.</p></div><button class="btn primary" id="scrub-configure">Configure pool</button></div>' +
+        '<div class="card" id="scrub-status"><div class="empty"><b>No pool selected</b>Choose a pool to inspect or configure its scrub cadence.</div></div>';
+    }
+
     function render(route) {
       var v = VIEWS.filter(function (x) { return x.id === route; })[0] || VIEWS[0];
       renderNav(v.id);
@@ -466,9 +504,10 @@
       else if (v.id === 'files') body = viewFiles();
       else if (v.id === 'snapshots') body = viewSnapshots();
       else if (v.id === 'backups') body = viewBackups();
+      else if (v.id === 'scrub') body = viewScrub();
       else if (v.id === 'apps') body = viewSimple('Apps', 'Self-hosted apps on this host.', 'The app store and sandboxing land in v0.4 “Jade”.');
-      else if (v.id === 'shares') body = viewSimple('Shares', 'SMB, NFS, WebDAV and SFTP shares.', 'Share management is part of the v0.2 “Flint” milestone.');
-      else if (v.id === 'users') body = viewSimple('Users', 'Accounts and permissions.', 'User and permission management lands with v0.2 “Flint”.');
+      else if (v.id === 'shares') body = viewShares();
+      else if (v.id === 'users') body = viewUsers();
       else body = viewSimple('Settings', 'Theme, density and system preferences.', 'Preferences persist per user in v0.2.');
       document.getElementById('content').innerHTML = body;
       if (v.id === 'dashboard') loadStatusStats();
@@ -480,6 +519,37 @@
           apiJSON('/snapshots', { method: 'POST', body: JSON.stringify({ pool: pool, subvolume: subvolume }) }).then(loadSnapshots).catch(showError);
         });
         loadSnapshots();
+      }
+      if (v.id === 'scrub') {
+        document.getElementById('scrub-configure').addEventListener('click', function () {
+          var pool = prompt('Pool name');
+          if (!pool) return;
+          apiJSON('/pools/' + encodeURIComponent(pool) + '/scrub-schedule').then(function (schedule) {
+            var frequency = prompt('Frequency: weekly or monthly', schedule.frequency || 'weekly');
+            if (!frequency) return;
+            apiJSON('/pools/' + encodeURIComponent(pool) + '/scrub-schedule', { method: 'PUT', body: JSON.stringify({ enabled: true, frequency: frequency, hour: 2 }) }).then(function (saved) {
+              document.getElementById('scrub-status').innerHTML = '<h3>' + esc(saved.pool) + '</h3><p class="sub">' + esc(saved.frequency) + ' at ' + esc(String(saved.hour)) + ':00 UTC · next run ' + esc(saved.next_run || 'pending') + '</p><button class="btn" id="scrub-run">Run now</button>';
+              document.getElementById('scrub-run').addEventListener('click', function () { apiJSON('/pools/' + encodeURIComponent(pool) + '/scrub', { method: 'POST' }).then(function () { alert('Scrub queued'); }).catch(showError); });
+            }).catch(showError);
+          }).catch(showError);
+        });
+      }
+      if (v.id === 'shares') {
+        document.getElementById('share-create').addEventListener('click', function () {
+          var name = prompt('Share name');
+          var path = prompt('Absolute dataset path');
+          if (!name || !path) return;
+          apiJSON('/shares', { method: 'POST', body: JSON.stringify({ name: name, path: path, protocols: ['smb', 'nfs'] }) }).then(loadShares).catch(showError);
+        });
+        loadShares();
+      }
+      if (v.id === 'users') {
+        document.getElementById('user-create').addEventListener('click', function () {
+          var username = prompt('Authentik username');
+          if (!username) return;
+          apiJSON('/users', { method: 'POST', body: JSON.stringify({ username: username, role: 'user', status: 'active' }) }).then(loadUsers).catch(showError);
+        });
+        loadUsers();
       }
       if (v.id === 'backups') {
         document.getElementById('backup-create').addEventListener('click', function () {
