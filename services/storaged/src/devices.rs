@@ -504,6 +504,9 @@ impl DeviceManager {
         if !attachable(&dev.r#type, &dev.fs_type) {
             return Err(format!("device {} has no supported filesystem; format it before attaching", dev.name));
         }
+        if !dev.mountpoint.is_empty() && !Path::new(&dev.mountpoint).starts_with(&self.mount_root) {
+            return Err(format!("device {} is already mounted at {}; refusing to attach an OS/system volume", dev.name, dev.mountpoint));
+        }
         // A manual attach reverses a previous `device detach`: clear the
         // opt-out and restore the fresh auto-attach policy so a future replug
         // mounts the drive again.
