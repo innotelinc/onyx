@@ -26,5 +26,8 @@ RUN mkdir -p /out \
     && cp services/storaged/target/"${MUSL_TARGET}"/release/onyx-storaged /out/onyx-storaged
 
 FROM alpine:3.20
+# Keep the data-plane runtime able to inspect the kernel block-device view
+# when its uevent/sysfs fallback runs inside the container.
+RUN apk add --no-cache util-linux
 COPY --from=build /out/onyx-storaged /usr/local/bin/onyx-storaged
 ENTRYPOINT ["/bin/sh", "-c", "umask 000; mkdir -p /run/onyx; chmod 0777 /run/onyx 2>/dev/null; exec /usr/local/bin/onyx-storaged \"$@\"", "--"]
