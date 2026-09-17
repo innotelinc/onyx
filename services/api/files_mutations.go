@@ -107,7 +107,10 @@ func (s *server) handleFileDelete(w http.ResponseWriter, r *http.Request) {
 		writeEnvelope(w, 404, apiError{Code: "not_found", Message: "path not found"})
 		return
 	}
-	trashDir := filepath.Join(s.filesRoot, ".trash")
+	// Keep trash on the same mounted filesystem as the source. A shared
+	// storage-root trash directory may be unwritable when the root is a
+	// container mount, and cross-filesystem renames cannot be atomic.
+	trashDir := filepath.Join(filepath.Dir(source), ".trash")
 	if err := os.MkdirAll(trashDir, 0o750); err != nil {
 		writeEnvelope(w, 500, apiError{Code: "internal", Message: err.Error()})
 		return
