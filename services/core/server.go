@@ -20,6 +20,8 @@ type server struct {
 	storagedHealth onyxv1.HealthClient
 	sharedHealth   onyxv1.HealthClient
 	privdHealth    onyxv1.HealthClient
+	snapdHealth    onyxv1.HealthClient
+	backupdHealth  onyxv1.HealthClient
 	config         *configApplier
 }
 
@@ -47,6 +49,12 @@ func (s *server) SystemStatus(ctx context.Context, _ *onyxv1.SystemStatusRequest
 		services = append(services, st)
 	}
 	if st := healthOf(ctx, s.privdHealth, "onyx-privd", 2*time.Second); st != nil {
+		services = append(services, st)
+	}
+	if st := healthOf(ctx, s.snapdHealth, "onyx-snapd", 2*time.Second); st != nil {
+		services = append(services, st)
+	}
+	if st := healthOf(ctx, s.backupdHealth, "onyx-backupd", 2*time.Second); st != nil {
 		services = append(services, st)
 	}
 	return &onyxv1.SystemStatusResponse{CoreVersion: version, Services: services}, nil

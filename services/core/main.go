@@ -31,6 +31,8 @@ func main() {
 		storagedSock   = flag.String("storaged-socket", "", "onyx-storaged socket (default: <socket-dir>/onyx-storaged.sock)")
 		privdSock      = flag.String("privd-socket", "", "onyx-privd socket (default: <socket-dir>/onyx-privd.sock)")
 		sharedSock     = flag.String("shared-socket", "", "onyx-shared socket (default: <socket-dir>/onyx-shared.sock)")
+		snapdSock      = flag.String("snapd-socket", "", "onyx-snapd socket (default: <socket-dir>/onyx-snapd.sock)")
+		backupdSock    = flag.String("backupd-socket", "", "onyx-backupd socket (default: <socket-dir>/onyx-backupd.sock)")
 		reconcileEvery = flag.Duration("device-reconcile-interval", 2*time.Second, "how often shares are reconciled with the hotplug device list")
 		mountRoot      = flag.String("device-mount-root", "/mnt/onyx", "only drives mounted under this root become auto shares")
 	)
@@ -50,6 +52,12 @@ func main() {
 	}
 	if *sharedSock == "" {
 		*sharedSock = absSocketPath(*socketDir, "onyx-shared.sock")
+	}
+	if *snapdSock == "" {
+		*snapdSock = absSocketPath(*socketDir, "onyx-snapd.sock")
+	}
+	if *backupdSock == "" {
+		*backupdSock = absSocketPath(*socketDir, "onyx-backupd.sock")
 	}
 
 	db, err := openDB(*stateDir)
@@ -85,6 +93,24 @@ func main() {
 	}
 	defer sharedConn.Close()
 
+	snapdConn, err := grpc.NewClient(
+		"unix://"+*snapdSock,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		fatal("dial snapd", err)
+	}
+	defer snapdConn.Close()
+
+	backupdConn, err := grpc.NewClient(
+		"unix://"+*backupdSock,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		fatal("dial backupd", err)
+	}
+	defer backupdConn.Close()
+
 	sharedClient := onyxv1.NewSharedClient(sharedConn)
 	privdClient := onyxv1.NewPrivdClient(privdConn)
 	applier := newConfigApplier(db, sharedClient, privdClient)
@@ -96,6 +122,8 @@ func main() {
 		storagedHealth: onyxv1.NewHealthClient(storagedConn),
 		sharedHealth:   onyxv1.NewHealthClient(sharedConn),
 		privdHealth:    onyxv1.NewHealthClient(privdConn),
+		snapdHealth:    onyxv1.NewHealthClient(snapdConn),
+		backupdHealth:  onyxv1.NewHealthClient(backupdConn),
 		config:         applier,
 	}
 	onyxv1.RegisterHealthServer(gs, srv)
