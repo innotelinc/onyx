@@ -173,7 +173,11 @@ func (s *server) handleFileContent(w http.ResponseWriter, r *http.Request) {
 		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "content is only available for regular files"})
 		return
 	}
-	w.Header().Set("Content-Disposition", `inline; filename="`+strings.ReplaceAll(info.Name(), `"`, "")+`"`)
+	mode := "inline"
+	if r.URL.Query().Get("download") == "1" {
+		mode = "attachment"
+	}
+	w.Header().Set("Content-Disposition", mode+`; filename="`+strings.ReplaceAll(info.Name(), `"`, "")+`"`)
 	http.ServeFile(w, r, path)
 }
 
