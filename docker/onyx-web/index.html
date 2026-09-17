@@ -326,6 +326,7 @@
       apps: I('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'),
       shares: I('<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5 8.6 10.5"/>'),
       users: I('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>'),
+      storage: I('<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'),
       settings: I('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>')
     };
 
@@ -335,6 +336,7 @@
     var VIEWS = [
       { id: 'dashboard', label: 'Dashboard', icon: ICONS.dashboard, section: 'Home' },
       { id: 'files',     label: 'Files',     icon: ICONS.files,     section: 'Data' },
+      { id: 'storage',   label: 'Storage',   icon: ICONS.storage,   section: 'Data' },
       { id: 'snapshots', label: 'Snapshots', icon: ICONS.snapshots, section: 'Data', badge: '0' },
       { id: 'backups',   label: 'Backups',   icon: ICONS.backups,   section: 'Data' },
       { id: 'scrub',     label: 'Scrub',     icon: ICONS.settings,  section: 'Data' },
@@ -421,6 +423,45 @@
     function viewSimple(title, blurb, action) {
       return '<div class="page-head"><div><h1>' + esc(title) + '</h1><p>' + blurb + '</p></div></div>' +
         '<div class="empty"><b>' + esc(title) + '</b>' + esc(action) + '</div>';
+    }
+
+    function viewStorage() {
+      return '<div class="page-head"><div><h1>Storage</h1><p>Attach a device, inspect pools and make storage available to Files.</p></div>' +
+        '<button class="btn" id="storage-refresh">Refresh</button></div>' +
+        '<div class="card" id="storage-pools"><div class="empty"><b>Loading pools…</b>Checking mounted storage.</div></div>' +
+        '<div class="card" style="margin-top:16px" id="storage-devices"><div class="empty"><b>Loading devices…</b>Scanning block devices.</div></div>';
+    }
+
+    function formatBytes(value) {
+      var n = Number(value || 0);
+      if (!n) return '—';
+      var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+      var i = 0;
+      while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+      return n.toFixed(i ? 1 : 0) + ' ' + units[i];
+    }
+
+    function loadStorage() {
+      var pools = document.getElementById('storage-pools');
+      var devices = document.getElementById('storage-devices');
+      if (!pools || !devices) return;
+      Promise.all([apiJSON('/pools'), apiJSON('/devices')]).then(function (parts) {
+        var poolRows = parts[0].pools || [], deviceRows = parts[1].devices || [];
+        pools.innerHTML = poolRows.length ? '<h3>Mounted pools</h3><div style="display:grid;gap:10px">' + poolRows.map(function (pool) {
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(pool.name) + '</b><div class="sub">' + esc(pool.fsType || 'unknown') + ' · ' + formatBytes(pool.usedBytes) + ' used of ' + formatBytes(pool.totalBytes) + '</div></div><span class="tag">' + esc(pool.state || 'unknown') + '</span></div>';
+        }).join('') + '</div>' : '<div class="empty"><b>No storage pools mounted</b>Attach a formatted device below or connect a pool on the host.</div>';
+        devices.innerHTML = '<h3>Devices</h3>' + (deviceRows.length ? '<div style="display:grid;gap:10px">' + deviceRows.map(function (device) {
+          var attached = device.state === 'mounted' || !!device.mountpoint;
+          var action = attached ? '<button class="btn" data-device-detach="' + esc(device.name) + '">Detach</button>' : '<button class="btn primary" data-device-attach="' + esc(device.name) + '">Attach</button>';
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(device.label || device.name) + '</b><div class="sub">' + esc(device.path || device.kname) + ' · ' + esc(device.fsType || 'unformatted') + ' · ' + formatBytes(device.sizeBytes) + (device.mountpoint ? ' · ' + esc(device.mountpoint) : '') + '</div></div><div style="display:flex;align-items:center;gap:8px"><span class="tag">' + esc(device.state || 'unknown') + '</span>' + action + '</div></div>';
+        }).join('') + '</div>' : '<div class="empty"><b>No devices detected</b>Connect a disk or partition to make it available to Onyx.</div>');
+        Array.prototype.forEach.call(devices.querySelectorAll('[data-device-attach]'), function (button) {
+          button.addEventListener('click', function () { button.disabled = true; apiJSON('/devices/' + encodeURIComponent(button.dataset.deviceAttach) + '/attach', { method: 'POST' }).then(loadStorage).catch(showError); });
+        });
+        Array.prototype.forEach.call(devices.querySelectorAll('[data-device-detach]'), function (button) {
+          button.addEventListener('click', function () { if (!confirm('Detach this device and its shares?')) return; button.disabled = true; apiJSON('/devices/' + encodeURIComponent(button.dataset.deviceDetach) + '/detach', { method: 'POST' }).then(loadStorage).catch(showError); });
+        });
+      }).catch(showError);
     }
 
     function viewSnapshots() {
@@ -526,6 +567,7 @@
       var body;
       if (v.id === 'dashboard') body = viewDashboard();
       else if (v.id === 'files') body = viewFiles();
+      else if (v.id === 'storage') body = viewStorage();
       else if (v.id === 'snapshots') body = viewSnapshots();
       else if (v.id === 'backups') body = viewBackups();
       else if (v.id === 'scrub') body = viewScrub();
@@ -535,6 +577,10 @@
       else body = viewSimple('Settings', 'Theme, density and system preferences.', 'Preferences persist per user in v0.2.');
       document.getElementById('content').innerHTML = body;
       if (v.id === 'dashboard') loadStatusStats();
+      if (v.id === 'storage') {
+        document.getElementById('storage-refresh').addEventListener('click', loadStorage);
+        loadStorage();
+      }
       if (v.id === 'files') {
         document.getElementById('folder-create').addEventListener('click', function () { var name = prompt('New folder name'); if (!name) return; var parent = window.__onyxFilePath || ''; var next = parent ? parent + '/' + name : name; apiJSON('/files/mkdir', { method: 'POST', body: JSON.stringify({ path: next }) }).then(function () { loadFiles(parent); }).catch(showError); });
         loadFiles('');
