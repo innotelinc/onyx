@@ -125,10 +125,7 @@ func (s *server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	out := fileListing{Path: rel, Entries: make([]fileEntry, 0, end-cursor)}
 	for _, entry := range filtered[cursor:end] {
 		entryInfo, infoErr := entry.Info()
-		if infoErr != nil {
-			continue
-		}
-		if entryInfo.Mode()&os.ModeSymlink != 0 {
+		if infoErr != nil || entryInfo.Mode()&os.ModeSymlink != 0 {
 			continue
 		}
 		typ := "file"
@@ -141,6 +138,43 @@ func (s *server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		out.NextCursor = strconv.Itoa(end)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *server) handleFileMeta(w http.ResponseWriter, r *http.Request) {
+	path, rel, err := resolveFilePath(s.filesRoot, r.URL.Query().Get("path"))
+	if err != nil {
+		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: err.Error()})
+		return
+	}
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 {
+		writeEnvelope(w, http.StatusNotFound, apiError{Code: "not_found", Message: "file not found"})
+		return
+	}
+	typ := "file"
+	if info.IsDir() {
+		typ = "directory"
+	}
+	writeJSON(w, http.StatusOK, fileEntry{Name: info.Name(), Path: rel, Type: typ, Size: info.Size(), ModifiedAt: info.ModTime().UTC().Format(time.RFC3339), Mode: info.Mode().Perm().String()})
+}
+
+func (s *server) handleFileContent(w http.ResponseWriter, r *http.Request) {
+	path, _, err := resolveFilePath(s.filesRoot, r.URL.Query().Get("path"))
+	if err != nil {
+		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: err.Error()})
+		return
+	}
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 {
+		writeEnvelope(w, http.StatusNotFound, apiError{Code: "not_found", Message: "file not found"})
+		return
+	}
+	if !info.Mode().IsRegular() {
+		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "content is only available for regular files"})
+		return
+	}
+	w.Header().Set("Content-Disposition", `inline; filename="`+strings.ReplaceAll(info.Name(), `"`, "")+`"`)
+	http.ServeFile(w, r, path)
 }
 
 func joinFilePath(parent, name string) string {
