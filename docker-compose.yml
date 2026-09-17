@@ -193,7 +193,12 @@ services:
       # may be a `vault://<mount>/<path>#<key>` reference, resolved at startup by
       # the same Cerulean Vault client onyx-objectstore uses; an unresolvable
       # reference stops the service instead of becoming an empty credential.
-      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://10.10.2.1:20128/v1}
+      # The door is the proxy in front of the gateway (:20129), not the
+      # gateway's own port: Cerulean SSO is the gateway's only gate, so 20128
+      # answers on the gateway host's loopback and bridge alone. What matters
+      # here is that it is a routable address: the image's own default is
+      # `http://localhost:20128`, which inside this container is itself.
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://192.168.1.46:20129/v1}
       OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-}
       OMNIROUTE_MODEL: ${OMNIROUTE_MODEL:-}
       # Documented BYO-key escape hatch (local-first; docs/design/07). The
