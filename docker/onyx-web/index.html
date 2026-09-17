@@ -403,10 +403,11 @@
         if (crumb) crumb.textContent = data.path ? 'Storage root / ' + data.path : 'Storage root';
         var rows = data.entries || [];
         list.innerHTML = rows.length ? '<div style="display:grid;gap:8px">' + rows.map(function (entry) {
-          var action = entry.type === 'directory' ? ' data-file-dir="' + esc(entry.path) + '"' : '';
-          return '<div class="event"' + action + ' style="align-items:center;border-bottom:1px solid var(--onyx-border);padding:8px;cursor:' + (entry.type === 'directory' ? 'pointer' : 'default') + '"><span class="tag">' + (entry.type === 'directory' ? 'DIR' : 'FILE') + '</span><div style="flex:1"><b>' + esc(entry.name) + '</b><div class="sub">' + esc(entry.type === 'file' ? String(entry.size) + ' bytes · ' + entry.modified_at : entry.path) + '</div></div></div>';
+          var action = entry.type === 'directory' ? ' data-file-dir="' + esc(entry.path) + '"' : ' data-file-content="' + esc(entry.path) + '"';
+          return '<div class="event"' + action + ' style="align-items:center;border-bottom:1px solid var(--onyx-border);padding:8px;cursor:pointer"><span class="tag">' + (entry.type === 'directory' ? 'DIR' : 'FILE') + '</span><div style="flex:1"><b>' + esc(entry.name) + '</b><div class="sub">' + esc(entry.type === 'file' ? String(entry.size) + ' bytes · ' + entry.modified_at : entry.path) + '</div></div></div>';
         }).join('') + '</div>' : '<div class="empty"><b>This folder is empty</b>There are no visible entries here.</div>';
         Array.prototype.forEach.call(list.querySelectorAll('[data-file-dir]'), function (row) { row.addEventListener('click', function () { loadFiles(row.dataset.fileDir); }); });
+        Array.prototype.forEach.call(list.querySelectorAll('[data-file-content]'), function (row) { row.addEventListener('click', function () { window.open(API + '/files/content?path=' + encodeURIComponent(row.dataset.fileContent), '_blank', 'noopener'); }); });
       }).catch(showError);
     }
 
