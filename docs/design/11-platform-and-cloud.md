@@ -196,7 +196,9 @@ Btrfs snapshot lifecycle on top of the fixed subvolume layout
   always the answer unless a model improves on them.
 - **The AI plane, as ONYX consumes it** (`§4.5` of the build-plane convergence
   plan): ONYX does not own inference. The platform runs ONE OmniRoute (Group 2,
-  `10.10.2.1:20128`) and `onyx-ai` gets `OMNIROUTE_BASE_URL` +
+  on the gateway host `192.168.1.46`, reached at `:20129` through the SSO proxy in
+  front of it — its own `:20128` answers on that host's loopback and bridge alone)
+  and `onyx-ai` gets `OMNIROUTE_BASE_URL` +
   `OMNIROUTE_API_KEY` — a gateway key, never an upstream provider key. The key
   may be a `vault://` reference, resolved at startup like the S3 credentials;
   a reference that cannot be resolved stops the service. The documented
