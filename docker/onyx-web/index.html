@@ -527,8 +527,12 @@
     }
 
     function viewBackups() {
-      return '<div class="page-head"><div><h1>Backups</h1><p>Scheduled jobs, restore points and recovery health.</p></div>' +
-        '<button class="btn primary" id="backup-create">Create backup job</button></div>' +
+      return '<div class="page-head"><div><h1>Backups</h1><p>Choose a file, folder, or whole mounted drive to protect. Restore into the future storage pool when it is ready.</p></div></div>' +
+        '<div class="card" style="margin-bottom:16px"><h3>Create a backup</h3><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));align-items:end">' +
+        '<label>Name<input id="backup-name" class="search" style="width:100%;max-width:none" placeholder="USB drive backup"></label>' +
+        '<label>Source path<input id="backup-source" class="search" style="width:100%;max-width:none" placeholder="/mnt/onyx/2a0ed918/Docs"></label>' +
+        '<label>Backup destination<input id="backup-target" class="search" style="width:100%;max-width:none" placeholder="/mnt/backup-disk/onyx"></label>' +
+        '</div><div style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap"><button class="btn" id="backup-source-files">Choose source in Files</button><label>Retention<input id="backup-retention" class="search" style="width:80px" type="number" min="1" value="7"></label><label><input id="backup-snapshot" type="checkbox"> Snapshot before backup</label><button class="btn primary" id="backup-create">Create and run backup</button></div><p class="sub" style="margin-bottom:0">Choose a destination on a separate disk or network mount. Onyx rejects backup targets inside the source storage root.</p></div>' +
         '<div class="grid" id="backup-summary"><div class="card"><h3>Recovery health</h3><div class="stat">—</div><div class="sub">Loading report…</div></div></div>' +
         '<div class="card" style="margin-top:16px" id="backup-list"><div class="empty"><b>Loading backup jobs…</b>Reading configured jobs.</div></div>';
     }
@@ -734,12 +738,14 @@
         loadUsers();
       }
       if (v.id === 'backups') {
+        document.getElementById('backup-source-files').addEventListener('click', function () { location.hash = '#/files'; });
         document.getElementById('backup-create').addEventListener('click', function () {
-          var name = prompt('Job name');
-          var source = prompt('Source share or snapshot');
-          var target = prompt('Target path or endpoint');
-          if (!name || !source || !target) return;
-          apiJSON('/backup-jobs', { method: 'POST', body: JSON.stringify({ name: name, source: source, target_kind: 'local', target: target, snapshot_before: true, retention: 7 }) }).then(loadBackups).catch(showError);
+          var name = document.getElementById('backup-name').value.trim();
+          var source = document.getElementById('backup-source').value.trim();
+          var target = document.getElementById('backup-target').value.trim();
+          var retention = Number(document.getElementById('backup-retention').value || 7);
+          if (!name || !source || !target) { showError({ error: { message: 'Provide a backup name, source path, and separate destination.' } }); return; }
+          apiJSON('/backup-jobs', { method: 'POST', body: JSON.stringify({ name: name, source: source, target_kind: 'local', target: target, snapshot_before: document.getElementById('backup-snapshot').checked, retention: retention }) }).then(function (job) { return apiJSON('/backup-jobs/' + encodeURIComponent(job.id) + '/run', { method: 'POST' }); }).then(function () { loadBackups(); alert('Backup started.'); }).catch(showError);
         });
         loadBackups();
       }
