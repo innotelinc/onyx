@@ -441,6 +441,20 @@
       return n.toFixed(i ? 1 : 0) + ' ' + units[i];
     }
 
+    function deviceRole(device) {
+      if (device.mountpoint && device.mountpoint.indexOf('/mnt/onyx') !== 0) return 'Mounted outside Onyx — likely an OS or system volume';
+      if (device.type === 'disk') return device.removable ? 'Removable disk (USB/SD)' : 'Whole disk';
+      if (device.type === 'part') return device.removable ? 'Removable partition' : 'Partition';
+      return device.type || 'Block device';
+    }
+
+    function deviceWarning(device) {
+      if (device.mountpoint && device.mountpoint.indexOf('/mnt/onyx') !== 0) return 'Already mounted by the host; Onyx will not touch it.';
+      if (!device.fsType) return 'No filesystem signature detected. It may be unused, encrypted, RAID/LVM metadata, or an unformatted partition.';
+      if (['vfat', 'fat32', 'exfat', 'ntfs', 'ext2', 'ext3', 'ext4', 'xfs', 'btrfs', 'hfsplus', 'apfs'].indexOf(String(device.fsType).toLowerCase()) < 0) return 'Filesystem detected. Attach will ask the Linux kernel to mount it; support depends on the host kernel/tools.';
+      return 'Readable filesystem detected; attaching does not format or erase it.';
+    }
+
     function loadStorage() {
       var pools = document.getElementById('storage-pools');
       var devices = document.getElementById('storage-devices');
@@ -449,13 +463,15 @@
         var poolRows = parts[0].pools || [], deviceRows = parts[1].devices || [];
         pools.innerHTML = poolRows.length ? '<h3>Mounted pools</h3><div style="display:grid;gap:10px">' + poolRows.map(function (pool) {
           return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(pool.name) + '</b><div class="sub">' + esc(pool.fsType || 'unknown') + ' · ' + formatBytes(pool.usedBytes) + ' used of ' + formatBytes(pool.totalBytes) + '</div></div><span class="tag">' + esc(pool.state || 'unknown') + '</span></div>';
-        }).join('') + '</div>' : '<div class="empty"><b>No storage pools mounted</b>Attach a formatted device below or connect a pool on the host.</div>';
-        devices.innerHTML = '<h3>Devices</h3>' + (deviceRows.length ? '<div style="display:grid;gap:10px">' + deviceRows.map(function (device) {
+        }).join('') + '</div>' : '<div class="empty"><b>No storage pools mounted</b>Attach a readable device below or connect a pool on the host.</div>';
+        devices.innerHTML = '<h3>Devices</h3><p class="sub">Onyx identifies disks by label, UUID, filesystem, size, mountpoint, and removable status. It never formats a device from this screen.</p>' + (deviceRows.length ? '<div style="display:grid;gap:10px">' + deviceRows.map(function (device) {
           var attached = device.state === 'mounted' || !!device.mountpoint;
-          var attachable = !!device.fsType;
-          var action = attached ? '<button class="btn" data-device-detach="' + esc(device.name) + '">Detach</button>' : (attachable ? '<button class="btn primary" data-device-attach="' + esc(device.name) + '">Attach</button>' : '<button class="btn" disabled title="Format the device before attaching">Format required</button>');
-          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(device.label || device.name) + '</b><div class="sub">' + esc(device.path || device.kname) + ' · ' + esc(device.fsType || 'unformatted') + ' · ' + formatBytes(device.sizeBytes) + (device.mountpoint ? ' · ' + esc(device.mountpoint) : '') + '</div></div><div style="display:flex;align-items:center;gap:8px"><span class="tag">' + esc(device.state || 'unknown') + '</span>' + action + '</div></div>';
-        }).join('') + '</div>' : '<div class="empty"><b>No devices detected</b>Connect a disk or partition to make it available to Onyx.</div>');
+          var outside = device.mountpoint && device.mountpoint.indexOf('/mnt/onyx') !== 0;
+          var attachable = !!device.fsType && !outside;
+          var action = attached ? (outside ? '<button class="btn" disabled title="Mounted outside Onyx">Host mounted</button>' : '<button class="btn" data-device-detach="' + esc(device.name) + '">Detach</button>') : (attachable ? '<button class="btn primary" data-device-attach="' + esc(device.name) + '">Attach</button>' : '<button class="btn" disabled title="No filesystem signature; formatting is intentionally not offered here">Needs filesystem</button>');
+          var identity = [device.path || device.kname, device.fsType || 'no filesystem signature', formatBytes(device.sizeBytes), device.uuid ? 'UUID ' + device.uuid : 'no UUID'].join(' · ');
+          return '<div class="event" style="justify-content:space-between;align-items:flex-start;border-bottom:1px solid var(--onyx-border);padding:12px 0"><div style="min-width:0"><b>' + esc(device.label || device.name) + '</b><div class="sub">' + esc(deviceRole(device)) + ' · ' + esc(identity) + '</div><div class="sub">' + esc(deviceWarning(device)) + (device.mountpoint ? ' · ' + esc(device.mountpoint) : '') + '</div></div><div style="display:flex;align-items:center;gap:8px;flex-shrink:0"><span class="tag">' + esc(device.state || 'unknown') + '</span>' + action + '</div></div>';
+        }).join('') + '</div>' : '<div class="empty"><b>No devices detected</b>Connect a disk or USB drive to make it available to Onyx.</div>');
         Array.prototype.forEach.call(devices.querySelectorAll('[data-device-attach]'), function (button) {
           button.addEventListener('click', function () { button.disabled = true; apiJSON('/devices/' + encodeURIComponent(button.dataset.deviceAttach) + '/attach', { method: 'POST' }).then(loadStorage).catch(showError); });
         });
@@ -524,8 +540,29 @@
     }
 
     function viewShares() {
-      return '<div class="page-head"><div><h1>Shares</h1><p>One logical share, rendered to the enabled protocols.</p></div><button class="btn primary" id="share-create">Create share</button></div>' +
+      return '<div class="page-head"><div><h1>Shares</h1><p>Pick a storage folder, choose protocols, and publish it safely.</p></div></div>' +
+        '<div class="card" style="margin-bottom:16px"><h3>Create a share</h3>' +
+        '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end">' +
+        '<label>Name<input id="share-name" class="search" style="width:100%;max-width:none" placeholder="media" autocomplete="off"></label>' +
+        '<label>Storage folder<select id="share-path" class="search" style="width:100%;max-width:none"><option value="">Loading folders…</option></select></label>' +
+        '<label>Comment<input id="share-comment" class="search" style="width:100%;max-width:none" placeholder="Family media" autocomplete="off"></label>' +
+        '</div>' +
+        '<div style="display:flex;gap:16px;align-items:center;margin-top:16px;flex-wrap:wrap">' +
+        '<label><input type="checkbox" id="share-smb" checked> SMB</label>' +
+        '<label><input type="checkbox" id="share-nfs" checked> NFS</label>' +
+        '<label><input type="checkbox" id="share-readonly"> Read-only</label>' +
+        '<button class="btn primary" id="share-create">Create share</button>' +
+        '</div><p class="sub" style="margin-bottom:0">Only folders under the mounted Onyx storage root can be shared. No disk formatting is performed here.</p></div>' +
         '<div class="card" id="share-list"><div class="empty"><b>Loading shares…</b>Reading the share catalog.</div></div>';
+    }
+
+    function loadSharePaths() {
+      var select = document.getElementById('share-path');
+      if (!select) return;
+      apiJSON('/files').then(function (data) {
+        var dirs = (data.entries || []).filter(function (entry) { return entry.type === 'directory'; });
+        select.innerHTML = dirs.length ? '<option value="">Choose a folder…</option>' + dirs.map(function (entry) { return '<option value="' + esc(entry.path) + '">' + esc(entry.name) + ' — ' + esc(entry.path) + '</option>'; }).join('') : '<option value="">No mounted storage folders</option>';
+      }).catch(function () { select.innerHTML = '<option value="">Storage unavailable</option>'; });
     }
 
     function loadShares() {
@@ -610,11 +647,18 @@
         });
       }
       if (v.id === 'shares') {
+        loadSharePaths();
         document.getElementById('share-create').addEventListener('click', function () {
-          var name = prompt('Share name');
-          var path = prompt('Absolute dataset path');
-          if (!name || !path) return;
-          apiJSON('/shares', { method: 'POST', body: JSON.stringify({ name: name, path: path, protocols: ['smb', 'nfs'] }) }).then(loadShares).catch(showError);
+          var name = document.getElementById('share-name').value.trim();
+          var relativePath = document.getElementById('share-path').value;
+          var protocols = [];
+          if (document.getElementById('share-smb').checked) protocols.push('smb');
+          if (document.getElementById('share-nfs').checked) protocols.push('nfs');
+          if (!name || !relativePath || !protocols.length) {
+            showError({ error: { message: 'Choose a name, storage folder, and at least one protocol.' } });
+            return;
+          }
+          apiJSON('/shares', { method: 'POST', body: JSON.stringify({ name: name, path: '/mnt/onyx/' + relativePath, comment: document.getElementById('share-comment').value.trim(), readonly: document.getElementById('share-readonly').checked, protocols: protocols }) }).then(loadShares).catch(showError);
         });
         loadShares();
       }
