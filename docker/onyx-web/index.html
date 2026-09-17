@@ -344,7 +344,11 @@
       { id: 'settings',  label: 'Settings',  icon: ICONS.settings,  section: 'Platform' }
     ];
 
-    var API = '/api/v1';
+    var API = window.ONYX_API_BASE || (function () {
+      var host = window.location.hostname;
+      if (host === 'app.onyx.innotel.us') return 'https://api.onyx.innotel.us/api/v1';
+      return '/api/v1';
+    })();
 
     function esc(s) {
       return String(s).replace(/[&<>"']/g, function (c) {
