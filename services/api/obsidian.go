@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"path/filepath"
 
 	onyxv1 "github.com/innotelinc/onyx/proto/gen/go/onyx/v1"
 )
@@ -84,6 +86,18 @@ func (s *server) handleCreateBackupJob(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "invalid JSON body: " + err.Error()})
 		return
+	}
+	if body.TargetKind == "local" {
+		targetAbs, err := filepath.Abs(body.Target)
+		if err != nil {
+			writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "invalid backup target"})
+			return
+		}
+		rootAbs, _ := filepath.Abs(s.filesRoot)
+		if rel, relErr := filepath.Rel(rootAbs, targetAbs); relErr == nil && rel != ".." && rel != "." && len(rel) > 0 && rel[0] != '.' {
+			writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: fmt.Sprintf("backup target %q is inside the source storage root; choose a separate disk or network mount", body.Target)})
+			return
+		}
 	}
 	resp, err := s.backupd.CreateBackupJob(r.Context(), &onyxv1.CreateBackupJobRequest{
 		Name: body.Name, Source: body.Source, TargetKind: body.TargetKind, Target: body.Target,
