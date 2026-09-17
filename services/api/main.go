@@ -176,6 +176,7 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("GET /api/v1/files/size", s.handleFileSize)
 	mux.HandleFunc("GET /api/v1/files/archive", s.handleFileArchive)
 	mux.HandleFunc("GET /api/v1/files/content", s.handleFileContent)
+	mux.HandleFunc("GET /api/v1/storage/remotes", s.handleRcloneRemotes)
 	mux.HandleFunc("POST /api/v1/files/upload", s.handleFileUpload)
 	mux.HandleFunc("POST /api/v1/files/mkdir", s.handleFileMkdir)
 	mux.HandleFunc("POST /api/v1/files/rename", s.handleFileRename)

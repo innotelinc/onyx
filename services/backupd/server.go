@@ -143,9 +143,9 @@ func (s *server) RunBackup(_ context.Context, req *onyxv1.RunBackupRequest) (*on
 		s.mu.Unlock()
 		return nil, status.Error(codes.NotFound, "job not found")
 	}
-	if job.TargetKind != "local" {
+	if job.TargetKind != "local" && job.TargetKind != "rclone" {
 		s.mu.Unlock()
-		return nil, status.Errorf(codes.Unimplemented, "backup target %q is not implemented; use target_kind local", job.TargetKind)
+		return nil, status.Errorf(codes.Unimplemented, "backup target %q is not implemented; use target_kind local or rclone", job.TargetKind)
 	}
 	source, target := job.Source, job.Target
 	jobID, retention := job.Id, job.Retention
@@ -161,7 +161,13 @@ func (s *server) RunBackup(_ context.Context, req *onyxv1.RunBackupRequest) (*on
 	}
 	s.mu.Unlock()
 
-	bytes, copyErr := copyLocalBackup(source, target, run.Id)
+	var bytes int64
+	var copyErr error
+	if job.TargetKind == "rclone" {
+		bytes, copyErr = copyRcloneBackup(context.Background(), source, target, run.Id)
+	} else {
+		bytes, copyErr = copyLocalBackup(source, target, run.Id)
+	}
 	finished := time.Now().UTC().Format(time.RFC3339)
 	s.mu.Lock()
 	defer s.mu.Unlock()
