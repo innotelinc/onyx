@@ -87,6 +87,10 @@ services:
     volumes:
       - onyx-sockets:/run/onyx
       - onyx-api-state:/var/lib/onyx/api
+      # The file explorer and safe mutations operate on the same host storage
+      # root as storaged; without this bind mount /mnt/onyx is absent in the API
+      # container even while the data plane can see it.
+      - /mnt/onyx:/mnt/onyx:shared
       # This product's Vault token, read-only. Cerulean's Vault bootstrap mints
       # it (VAULT_PRODUCT_TOKENS=onyx there) and renews it in place; the stack
       # only ever reads it. See data/vault/token/ (gitignored).
