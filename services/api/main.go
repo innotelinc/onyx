@@ -177,6 +177,8 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("POST /api/v1/files/mkdir", s.handleFileMkdir)
 	mux.HandleFunc("POST /api/v1/files/rename", s.handleFileRename)
 	mux.HandleFunc("POST /api/v1/files/delete", s.handleFileDelete)
+	mux.HandleFunc("GET /api/v1/files/trash", s.handleTrash)
+	mux.HandleFunc("DELETE /api/v1/files/trash", s.handleEmptyTrash)
 	mux.HandleFunc("GET /api/v1/pools", s.handlePools)
 	mux.HandleFunc("GET /api/v1/pools/{name}", s.handlePool)
 	mux.HandleFunc("GET /api/v1/shares", s.handleShares)
