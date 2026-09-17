@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -13,21 +16,48 @@ import (
 )
 
 // server implements Health and Snapd (proto/onyx/v1/snapd.proto).
-// Snapshot metadata lives in memory at v0.1; the btrfs-backed registry lands
-// with v0.3 (docs/design/11 §6.1).
+// Snapshot metadata is persisted atomically in the service state directory;
+// the storage operation remains guarded by the snapd contract until the
+// privileged Btrfs executor is enabled (docs/design/11 §6.1).
 type server struct {
 	onyxv1.UnimplementedHealthServer
 	onyxv1.UnimplementedSnapdServer
 
 	mu        sync.Mutex
 	snapshots map[string]*onyxv1.Snapshot
+	statePath string
 }
 
 var _ onyxv1.HealthServer = (*server)(nil)
 var _ onyxv1.SnapdServer = (*server)(nil)
 
-func newServer() *server {
-	return &server{snapshots: map[string]*onyxv1.Snapshot{}}
+func newServer(stateDir string) *server {
+	s := &server{snapshots: map[string]*onyxv1.Snapshot{}, statePath: filepath.Join(stateDir, "snapshots.json")}
+	if b, err := os.ReadFile(s.statePath); err == nil {
+		var saved map[string]*onyxv1.Snapshot
+		if json.Unmarshal(b, &saved) == nil && saved != nil {
+			s.snapshots = saved
+		}
+	}
+	return s
+}
+
+func (s *server) persistLocked() error {
+	if s.statePath == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(s.statePath), 0o750); err != nil {
+		return err
+	}
+	b, err := json.Marshal(s.snapshots)
+	if err != nil {
+		return err
+	}
+	tmp := s.statePath + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o640); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.statePath)
 }
 
 func (s *server) Check(_ context.Context, _ *onyxv1.HealthCheckRequest) (*onyxv1.HealthCheckResponse, error) {
@@ -60,6 +90,10 @@ func (s *server) CreateSnapshot(_ context.Context, req *onyxv1.CreateSnapshotReq
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.snapshots[snap.Id] = snap
+	if err := s.persistLocked(); err != nil {
+		delete(s.snapshots, snap.Id)
+		return nil, status.Errorf(codes.Internal, "persist snapshot: %v", err)
+	}
 	return snap, nil
 }
 
@@ -89,6 +123,9 @@ func (s *server) DeleteSnapshot(_ context.Context, req *onyxv1.DeleteSnapshotReq
 	_, ok := s.snapshots[req.GetId()]
 	if ok {
 		delete(s.snapshots, req.GetId())
+		if err := s.persistLocked(); err != nil {
+			return nil, status.Errorf(codes.Internal, "persist snapshot deletion: %v", err)
+		}
 	}
 	return &onyxv1.DeleteSnapshotResponse{Deleted: ok}, nil
 }

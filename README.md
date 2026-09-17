@@ -38,8 +38,9 @@ minute and idles under 512 MB RAM.
 > virtualization, S3-compatible object storage, backup management, cloud synchronization
 > and application hosting in one self-hosted stack — SSO everywhere via Cerulean
 > Authentik, safe by default with Btrfs snapshots and atomic A/B rollback, and no cloud
-> account required. Currently at **v0.1 "Cinder"**: the control/data plane and the whole
-> platform layer ship today; the Prism web UI is the v0.2 milestone.
+> account required. Currently at **v0.3 "Obsidian"**: the control/data plane, Prism admin surface,
+> user/share permission metadata, snapshots, backup jobs, and SMART-backed device
+> health are shipped; the v0.4 app milestone is next.
 >
 > **Landing page:** [innotelinc.github.io/onyx](https://innotelinc.github.io/onyx) ·
 > **Design docs:** [innotelinc.github.io/onyx/docs](https://innotelinc.github.io/onyx/docs)
@@ -126,7 +127,7 @@ management, AI advisor, object storage + hybrid cloud).
 
 ## Status
 
-**Phase: v0.1 "Cinder" — core skeleton + platform layer.** The appliance
+**Phase: v0.3 "Obsidian" — safety surfaces shipped.** The appliance
 skeleton is complete and installable: `onyx-core` (Go control plane),
 `onyx-api` (HTTP gateway), `onyx-shared` (Go share manager), `onyx-storaged` +
 `onyx-privd` (Rust data plane), and the `onyx` CLI, wired together via gRPC
@@ -155,9 +156,11 @@ On top of that, the **platform layer** is in place:
   `onyx-ai`, `onyx-objectstore`) as compilable gRPC service skeletons with
   proto contracts — see [`services/README.md`](services/README.md).
 
-Next milestone: [v0.2 "Flint"](docs/design/01-product-vision.md#7-roadmap) —
-the web UI (Prism), file explorer, SMB/NFS shares UX, users & permissions, and
-the interactive web first-boot wizard on top of this base.
+The v0.2 Flint and v0.3 Obsidian foundations are now integrated: the Prism shell
+reads the versioned API, user roles and share grants persist without storing
+credentials, snapshots survive restarts, backup jobs retain history, and the API
+exposes rollback, recovery reports, and SMART-backed device health. v0.4 Jade is
+next for the app store and full protocol surface.
 
 ## Quick start (Docker platform)
 
@@ -196,8 +199,23 @@ make bootstrap   # repo-local Go + protoc toolchain into .tools/ (no system inst
 make build       # compiles everything into bin/
 scripts/dev.sh start   # unix sockets under .run/onyx, HTTP gateway on 127.0.0.1:8080
 bin/onyx status        # CLI → API → core → shared → storaged → privd (all SERVING)
+bin/onyx version       # release, API namespace, and build metadata
 scripts/dev.sh stop
 ```
+
+## Versioning
+
+The release version is defined once in `services/version` and injected into every
+Go binary at build time. Development builds use `0.1.0-dev`; release builds should
+pass the tag and commit explicitly, for example:
+
+```bash
+make build VERSION=0.2.0 COMMIT=$(git rev-parse HEAD)
+```
+
+The REST surface remains `/api/v1`: additive changes stay in v1, while breaking
+changes require a new major API namespace. `GET /api/v1/system/version` exposes
+the release version, API namespace, codename, and commit.
 
 ## What works today
 

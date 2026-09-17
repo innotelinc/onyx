@@ -102,7 +102,10 @@ reconnect.
 | Method | Path |
 |--------|------|
 | GET/POST | `/snapshots` (list/create for dataset) |
-| POST | `/snapshots/{id}/rollback` |
+| POST | `/snapshots/{id}/rollback` | Requires an unmounted source; returns the completed restore point |
+| GET | `/pools/{name}/scrub-schedule` | Current scrub schedule and last/next run |
+| PUT | `/pools/{name}/scrub-schedule` | Set weekly/monthly scrub cadence |
+| POST | `/pools/{name}/scrub` | Queue a manual scrub |
 | GET | `/snapshots/{id}/browse?path=` |
 | POST | `/snapshots/{id}/restore` (file-level, target path) |
 | PUT | `/datasets/{id}/snapshot-policy` |
@@ -114,6 +117,7 @@ reconnect.
 | GET/PATCH/DELETE | `/backup-jobs/{id}` |
 | POST | `/backup-jobs/{id}/run`, `/backup-jobs/{id}/cancel` |
 | GET | `/backup-jobs/{id}/history` |
+| GET | `/backup-report` | Recovery health, RPO/RTO estimates, and trend |
 
 ### Apps
 | Method | Path |
@@ -163,6 +167,9 @@ reconnect.
 ## 7. Versioning and stability
 
 - `v1` is additive-only while stable; new fields are optional, never breaking.
+- Runtime release metadata is exposed by `GET /api/v1/system/version`: `version`,
+  `api_version`, `codename`, and `commit`. The release version is injected at build
+  time so all daemons report the same artifact identity.
 - Deprecations: marked `Deprecated: true` in OpenAPI, minimum 2 minor releases before removal.
 - The OpenAPI document is published at `/api/v1/openapi.json` and drives the typed SDKs and
   the Prism form generator (schemas → forms), so UI forms and API validation never drift.

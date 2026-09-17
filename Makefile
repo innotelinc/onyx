@@ -21,6 +21,9 @@ export PROTOC     := $(TOOLS)/protoc/bin/protoc
 
 PREFIX ?= /usr/local
 DESTDIR ?=
+VERSION ?= 0.3.0-dev
+COMMIT ?= unknown
+GO_LDFLAGS := -X github.com/innotelinc/onyx/services/version.Version=$(VERSION) -X github.com/innotelinc/onyx/services/version.Commit=$(COMMIT)
 
 .PHONY: bootstrap gen gen-check build check vet test dev install clean
 
@@ -51,16 +54,16 @@ gen-check: gen
 ## build — compile all binaries into bin/
 build: gen
 	@mkdir -p $(BIN)
-	$(GO) build -o $(BIN)/onyx-core ./services/core
-	$(GO) build -o $(BIN)/onyx-api ./services/api
-	$(GO) build -o $(BIN)/onyx-shared ./services/shared
-	$(GO) build -o $(BIN)/onyx-snapd ./services/snapd
-	$(GO) build -o $(BIN)/onyx-backupd ./services/backupd
-	$(GO) build -o $(BIN)/onyx-vmm ./services/vmm
-	$(GO) build -o $(BIN)/onyx-appd ./services/appd
-	$(GO) build -o $(BIN)/onyx-ai ./services/ai
-	$(GO) build -o $(BIN)/onyx-objectstore ./services/objectstore
-	$(GO) build -o $(BIN)/onyx ./sdk/go/cmd/onyx
+	$(GO) build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(BIN)/onyx-core ./services/core
+	$(GO) build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(BIN)/onyx-api ./services/api
+	$(GO) build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(BIN)/onyx-shared ./services/shared
+	$(GO) build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(BIN)/onyx-snapd ./services/snapd
+	$(GO) build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(BIN)/onyx-backupd ./services/backupd
+	$(GO) build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(BIN)/onyx-vmm ./services/vmm
+	$(GO) build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(BIN)/onyx-appd ./services/appd
+	$(GO) build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(BIN)/onyx-ai ./services/ai
+	$(GO) build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(BIN)/onyx-objectstore ./services/objectstore
+	$(GO) build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(BIN)/onyx ./sdk/go/cmd/onyx
 	@cd services/storaged && cargo build --quiet
 	@cp services/storaged/target/debug/onyx-storaged $(BIN)/onyx-storaged
 	@cd services/privd && cargo build --quiet

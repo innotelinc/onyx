@@ -122,7 +122,7 @@ func cmdVersion(ctx context.Context, c *client.Client, jsonOut bool) error {
 	if jsonOut {
 		return printJSON(v)
 	}
-	fmt.Printf("onyx %s (api %s)\n", v.Version, v.APIVersion)
+	fmt.Printf("onyx %s (%s, api %s, commit %s)\n", v.Version, v.Codename, v.APIVersion, v.Commit)
 	return nil
 }
 

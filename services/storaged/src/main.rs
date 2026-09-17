@@ -49,7 +49,7 @@ use onyx::{
 };
 use registry::Registry;
 
-const VERSION: &str = "0.1.0-dev";
+const VERSION: &str = "0.3.0-dev";
 
 /// Retries when connecting to onyx-privd at startup (dev.sh starts privd first,
 /// but the socket can become writable a moment before privd accepts).
