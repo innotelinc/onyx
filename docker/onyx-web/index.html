@@ -298,7 +298,7 @@
       <h2>Activity</h2>
       <div class="events" id="events">
         <div class="event"><span class="dot ok" style="margin-top:5px"></span><div><div>System status endpoint connected</div><time id="ev-time">now</time></div></div>
-        <div class="event"><span class="dot" style="margin-top:5px"></span><div><div>Snapshot, backup and app events stream here in v0.3</div><time>planned</time></div></div>
+        <div class="event"><span class="dot ok" style="margin-top:5px"></span><div><div>Snapshot and backup safety APIs connected</div><time>live</time></div></div>
       </div>
     </aside>
   </div>
@@ -384,7 +384,7 @@
         '<div class="card"><h3>Version</h3><div class="stat" id="stat-version">—</div><div class="sub">onyx-api</div></div>' +
         '</div>' +
         '<div class="grid" style="margin-top:16px">' +
-        card('Next milestone', stat('v0.2 “Flint”', 'file explorer · SMB/NFS shares · users &amp; permissions')) +
+        card('Safety plane', stat('Obsidian', 'snapshots · backups · scrub scheduling · device health')) +
         '</div>';
     }
 
@@ -597,9 +597,12 @@
       fetch(API + '/system/status', { headers: { accept: 'application/json' }, credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
         .then(function (s) {
-          var healthy = (s.status || s.health || 'ok') + '';
-          setStatus(/ok|healthy|degraded/i.test(healthy) ? 'ok' : 'warn', 'Operational');
+          var services = Array.isArray(s.services) ? s.services : [];
+          var serving = services.filter(function (service) { return service.status === 'SERVING'; }).length;
+          var healthy = services.length > 0 && serving === services.length;
+          setStatus(healthy ? 'ok' : 'warn', services.length ? serving + '/' + services.length + ' services' : 'Checking services');
           window.__onyxStatus = s;
+          window.__onyxServiceHealth = { serving: serving, total: services.length };
           loadStatusStats();
         })
         .catch(function () { setStatus('err', 'API unreachable'); });
@@ -610,8 +613,9 @@
       var set = function (id, val) { var el = document.getElementById(id); if (el && val != null) el.textContent = val; };
       set('stat-pools', s.pools != null ? s.pools : (s.poolCount != null ? s.poolCount : '—'));
       set('stat-capacity', s.capacity || s.used || '—');
-      set('stat-health', s.status || s.health || '—');
-      set('stat-version', s.version || '—');
+      var health = window.__onyxServiceHealth || { serving: 0, total: 0 };
+      set('stat-health', health.total ? health.serving + '/' + health.total : '—');
+      set('stat-version', s.coreVersion || s.version || '—');
     }
 
     /* ── command palette ──────────────────────────────────────────────── */
