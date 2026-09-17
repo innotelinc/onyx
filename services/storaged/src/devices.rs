@@ -37,17 +37,18 @@ const EXCLUDED_FS: &[&str] = &[
 
 const ATTACHABLE_TYPES: &[&str] = &["part", "disk"];
 
-/// Is this (type, filesystem) pair something onyx will ever attach?
-/// Everything else (loop, dm, swapped, unformatted, ...) is ignored.
-pub fn attachable(device_type: &str, fs_type: &str) -> bool {
+/// Is this (type, filesystem) pair safe to keep in the device registry?
+/// Unformatted disks are tracked for the UI but are never auto-attached.
+pub fn trackable(device_type: &str, fs_type: &str) -> bool {
     if !ATTACHABLE_TYPES.contains(&device_type) {
         return false;
     }
     let fs = fs_type.to_ascii_lowercase();
-    if fs.is_empty() || EXCLUDED_FS.contains(&fs.as_str()) {
-        return false;
-    }
-    true
+    !EXCLUDED_FS.contains(&fs.as_str())
+}
+
+pub fn attachable(device_type: &str, fs_type: &str) -> bool {
+    trackable(device_type, fs_type) && !fs_type.is_empty()
 }
 
 /// One parsed `lsblk -n -P -b -o KNAME,TYPE,FSTYPE,LABEL,UUID,SIZE,MOUNTPOINT`
@@ -500,6 +501,9 @@ impl DeviceManager {
         if dev.state == "detached" {
             return Err(format!("device {} is detached", dev.name));
         }
+        if !attachable(&dev.r#type, &dev.fs_type) {
+            return Err(format!("device {} has no supported filesystem; format it before attaching", dev.name));
+        }
         // A manual attach reverses a previous `device detach`: clear the
         // opt-out and restore the fresh auto-attach policy so a future replug
         // mounts the drive again.
@@ -615,7 +619,7 @@ impl DeviceManager {
                 let mut seen = HashSet::new();
                 for info in parse_lsblk(&out) {
                     seen.insert(info.kname.clone());
-                    if !attachable(&info.device_type, &info.fs_type) {
+                    if !trackable(&info.device_type, &info.fs_type) {
                         continue;
                     }
                     let removable = is_removable(&snapshot, &info.kname);
@@ -637,7 +641,7 @@ impl DeviceManager {
                         make_unique_name(&used, &device_name(&info.label, &info.uuid, &info.kname))
                     };
                     let auto = self.auto_reason(removable);
-                    let auto_attach_eligible = auto != "manual";
+                    let auto_attach_eligible = auto != "manual" && attachable(&info.device_type, &info.fs_type);
                     let dev = Device {
                         name,
                         kname: info.kname.clone(),
@@ -770,6 +774,8 @@ mod tests {
 
     #[test]
     fn attachability_policy() {
+        assert!(trackable("part", ""));
+        assert!(trackable("disk", ""));
         assert!(attachable("part", "vfat"));
         assert!(attachable("disk", "ext4"));
         assert!(attachable("part", "exfat"));
