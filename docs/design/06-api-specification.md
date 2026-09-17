@@ -90,7 +90,7 @@ reconnect.
 ### Files
 | Method | Path | Notes |
 |--------|------|-------|
-| GET | `/files?path=` | List dir (metadata incl. checksum, owner, ACL, tags) |
+| GET | `/files?path=&limit=&cursor=&q=` | Read-only directory listing rooted at the configured storage root; metadata includes size, mode, and modified time |
 | GET | `/files/meta?path=` | Single entry |
 | PUT | `/files/content?path=` | Upload (see §6, tus resumable) |
 | GET | `/files/content?path=` | Download (range requests) |

@@ -389,9 +389,25 @@
     }
 
     function viewFiles() {
-      return '<div class="page-head"><div><h1>Files</h1><p>Browse pools, upload and share.</p></div>' +
-        '<button class="btn primary" disabled title="Lands with the file explorer slice">Upload</button></div>' +
-        '<div class="empty"><b>No pools mounted yet</b>Create a pool, then the file tree and explorer appear here.</div>';
+      return '<div class="page-head"><div><h1>Files</h1><p id="file-breadcrumb">Storage root</p></div>' +
+        '<button class="btn primary" disabled title="Upload is the next file-pipeline slice">Upload</button></div>' +
+        '<div class="card" id="file-list"><div class="empty"><b>Loading files…</b>Reading the storage root.</div></div>';
+    }
+
+    function loadFiles(path) {
+      var list = document.getElementById('file-list');
+      if (!list) return;
+      var query = path ? '?path=' + encodeURIComponent(path) : '';
+      apiJSON('/files' + query).then(function (data) {
+        var crumb = document.getElementById('file-breadcrumb');
+        if (crumb) crumb.textContent = data.path ? 'Storage root / ' + data.path : 'Storage root';
+        var rows = data.entries || [];
+        list.innerHTML = rows.length ? '<div style="display:grid;gap:8px">' + rows.map(function (entry) {
+          var action = entry.type === 'directory' ? ' data-file-dir="' + esc(entry.path) + '"' : '';
+          return '<div class="event"' + action + ' style="align-items:center;border-bottom:1px solid var(--onyx-border);padding:8px;cursor:' + (entry.type === 'directory' ? 'pointer' : 'default') + '"><span class="tag">' + (entry.type === 'directory' ? 'DIR' : 'FILE') + '</span><div style="flex:1"><b>' + esc(entry.name) + '</b><div class="sub">' + esc(entry.type === 'file' ? String(entry.size) + ' bytes · ' + entry.modified_at : entry.path) + '</div></div></div>';
+        }).join('') + '</div>' : '<div class="empty"><b>This folder is empty</b>There are no visible entries here.</div>';
+        Array.prototype.forEach.call(list.querySelectorAll('[data-file-dir]'), function (row) { row.addEventListener('click', function () { loadFiles(row.dataset.fileDir); }); });
+      }).catch(showError);
     }
 
     function viewSimple(title, blurb, action) {
@@ -511,6 +527,7 @@
       else body = viewSimple('Settings', 'Theme, density and system preferences.', 'Preferences persist per user in v0.2.');
       document.getElementById('content').innerHTML = body;
       if (v.id === 'dashboard') loadStatusStats();
+      if (v.id === 'files') loadFiles('');
       if (v.id === 'snapshots') {
         document.getElementById('snapshot-create').addEventListener('click', function () {
           var pool = prompt('Pool name');

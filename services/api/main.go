@@ -45,6 +45,7 @@ func main() {
 		snapdSock   = flag.String("snapd-socket", "", "onyx-snapd socket (default: <socket-dir>/onyx-snapd.sock)")
 		backupdSock = flag.String("backupd-socket", "", "onyx-backupd socket (default: <socket-dir>/onyx-backupd.sock)")
 		stateDir    = flag.String("state-dir", "/var/lib/onyx/api", "API metadata state directory")
+		filesRoot   = flag.String("files-root", "/mnt/onyx", "root directory exposed by the read-only file explorer")
 	)
 	flag.Parse()
 
@@ -103,7 +104,7 @@ func main() {
 		core: core, coreShares: coreShares,
 		snapd:   onyxv1.NewSnapdClient(snapdConn),
 		backupd: onyxv1.NewBackupdClient(backupdConn),
-		users:   users, scrub: scrub,
+		users:   users, scrub: scrub, filesRoot: *filesRoot,
 		deviceTrust: loadDeviceTrustConfig(), version: version,
 	}
 	srv.registerRoutes()
@@ -158,6 +159,7 @@ type server struct {
 	backupd     onyxv1.BackupdClient
 	users       *userStore
 	scrub       *scrubStore
+	filesRoot   string
 	deviceTrust *deviceTrustConfig
 	version     string
 	mux         *http.ServeMux
@@ -169,6 +171,7 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /api/v1/system/version", s.handleVersion)
 	mux.HandleFunc("GET /api/v1/system/status", s.handleStatus)
+	mux.HandleFunc("GET /api/v1/files", s.handleFiles)
 	mux.HandleFunc("GET /api/v1/pools", s.handlePools)
 	mux.HandleFunc("GET /api/v1/pools/{name}", s.handlePool)
 	mux.HandleFunc("GET /api/v1/shares", s.handleShares)
