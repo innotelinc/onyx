@@ -16,9 +16,10 @@ import (
 	"google.golang.org/grpc"
 
 	onyxv1 "github.com/innotelinc/onyx/proto/gen/go/onyx/v1"
+	releaseversion "github.com/innotelinc/onyx/services/version"
 )
 
-const version = "0.1.0-dev"
+var version = releaseversion.Version
 
 func main() {
 	var (

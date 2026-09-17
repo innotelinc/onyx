@@ -24,6 +24,7 @@ SELF="$(cd "$(dirname "$0")" && pwd)"
 MANIFEST="$SELF/manifest.json"
 OUT="$SELF"
 FIRMWARE=1
+VERSION="${VERSION:-0.3.0-dev}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --output-dir) OUT="$2"; shift 2 ;;
@@ -171,7 +172,7 @@ mkdir -p "$ROOTFS/etc"
 # not a link, because the bootloader reads it for the BLS entry title — so drop
 # whatever was moved and write a fresh one.
 rm -f "$ROOTFS/usr/etc/os-release"
-printf 'ID=onyx\nNAME="Onyx"\nVERSION_ID=0.1\nPRETTY_NAME="Onyx 0.1 (Cinder)"\nHOME_URL="https://github.com/innotelinc/onyx"\n' >"$ROOTFS/usr/etc/os-release"
+printf 'ID=onyx\nNAME="Onyx"\nVERSION_ID=%s\nPRETTY_NAME="Onyx %s (Cinder)"\nHOME_URL="https://github.com/innotelinc/onyx"\n' "$VERSION" "$VERSION" >"$ROOTFS/usr/etc/os-release"
 
 echo "== cleaning runtime pseudo-filesystems before commit =="
 # debootstrap's second stage leaves device nodes in /dev (and may create /proc,
