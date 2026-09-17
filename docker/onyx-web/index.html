@@ -452,7 +452,8 @@
         }).join('') + '</div>' : '<div class="empty"><b>No storage pools mounted</b>Attach a formatted device below or connect a pool on the host.</div>';
         devices.innerHTML = '<h3>Devices</h3>' + (deviceRows.length ? '<div style="display:grid;gap:10px">' + deviceRows.map(function (device) {
           var attached = device.state === 'mounted' || !!device.mountpoint;
-          var action = attached ? '<button class="btn" data-device-detach="' + esc(device.name) + '">Detach</button>' : '<button class="btn primary" data-device-attach="' + esc(device.name) + '">Attach</button>';
+          var attachable = !!device.fsType;
+          var action = attached ? '<button class="btn" data-device-detach="' + esc(device.name) + '">Detach</button>' : (attachable ? '<button class="btn primary" data-device-attach="' + esc(device.name) + '">Attach</button>' : '<button class="btn" disabled title="Format the device before attaching">Format required</button>');
           return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(device.label || device.name) + '</b><div class="sub">' + esc(device.path || device.kname) + ' · ' + esc(device.fsType || 'unformatted') + ' · ' + formatBytes(device.sizeBytes) + (device.mountpoint ? ' · ' + esc(device.mountpoint) : '') + '</div></div><div style="display:flex;align-items:center;gap:8px"><span class="tag">' + esc(device.state || 'unknown') + '</span>' + action + '</div></div>';
         }).join('') + '</div>' : '<div class="empty"><b>No devices detected</b>Connect a disk or partition to make it available to Onyx.</div>');
         Array.prototype.forEach.call(devices.querySelectorAll('[data-device-attach]'), function (button) {
