@@ -123,6 +123,24 @@ func (s *server) handleBackupHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, protoMessage(resp))
 }
 
+type restoreBackupBody struct {
+	Destination string `json:"destination"`
+}
+
+func (s *server) handleRestoreBackup(w http.ResponseWriter, r *http.Request) {
+	var body restoreBackupBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "invalid JSON body: " + err.Error()})
+		return
+	}
+	resp, err := s.backupd.RestoreBackup(r.Context(), &onyxv1.RestoreBackupRequest{RunId: r.PathValue("id"), Destination: body.Destination})
+	if err != nil {
+		s.writeGRPCError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, protoMessage(resp))
+}
+
 func (s *server) handleBackupReport(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.backupd.GetBackupReport(r.Context(), &onyxv1.GetBackupReportRequest{JobId: r.URL.Query().Get("job_id")})
 	if err != nil {

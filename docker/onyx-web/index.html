@@ -396,7 +396,7 @@
 
     function viewFiles() {
       return '<div class="page-head"><div><h1>Files</h1><div id="file-breadcrumb" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="btn" type="button" data-file-nav="">Storage root</button></div></div>' +
-        '<div><button class="btn" id="folder-create">New folder</button> <button class="btn" id="trash-empty">Empty trash</button> <button class="btn primary" disabled title="Upload is the next file-pipeline slice">Upload</button></div></div>' +
+        '<div><button class="btn" id="folder-create">New folder</button> <button class="btn" id="trash-empty">Empty trash</button> <button class="btn" id="backup-drive">Backup drive</button> <button class="btn primary" disabled title="Upload is the next file-pipeline slice">Upload</button></div></div>' +
         '<div class="grid" id="file-storage-summary" style="margin-bottom:16px"><div class="card"><h3>Storage</h3><div class="stat">—</div><div class="sub">Loading disk capacity…</div></div><div class="card"><h3>Trash</h3><div class="stat">—</div><div class="sub">Loading trash usage…</div></div></div>' +
         '<div class="card" id="file-list"><div class="empty"><b>Loading files…</b>Reading the storage root.</div></div>';
     }
@@ -415,6 +415,17 @@
           apiJSON('/files/trash', { method: 'DELETE' }).then(loadTrash).catch(showError);
         }).catch(showError);
       });
+    }
+
+    function createBackup(path) {
+      var source = '/mnt/onyx/' + path;
+      var target = prompt('Backup destination path (use a separate disk or network mount)', '/mnt/onyx-backups');
+      if (!target) return;
+      var name = prompt('Backup name', path ? 'Backup ' + path : 'Full Onyx storage backup');
+      if (!name) return;
+      apiJSON('/backup-jobs', { method: 'POST', body: JSON.stringify({ name: name, source: source, target_kind: 'local', target: target, retention: 5, snapshot_before: false }) }).then(function (job) {
+        return apiJSON('/backup-jobs/' + encodeURIComponent(job.id) + '/run', { method: 'POST' });
+      }).then(function (run) { alert('Backup started: ' + (run.status || 'running')); }).catch(showError);
     }
 
     function loadFiles(path) {
@@ -438,10 +449,11 @@
         var rows = data.entries || [];
         list.innerHTML = rows.length ? '<div style="display:grid;gap:8px">' + rows.map(function (entry) {
           var action = entry.type === 'directory' ? ' data-file-dir="' + esc(entry.path) + '"' : ' data-file-content="' + esc(entry.path) + '"';
-          return '<div class="event"' + action + ' style="align-items:center;border-bottom:1px solid var(--onyx-border);padding:8px;cursor:pointer"><span class="tag">' + (entry.type === 'directory' ? 'DIR' : 'FILE') + '</span><div style="flex:1"><b>' + esc(entry.name) + '</b><div class="sub">' + esc(entry.type === 'file' ? formatBytes(entry.size) + ' · ' + entry.modified_at : entry.path) + '</div></div><button class="btn" data-file-rename="' + esc(entry.path) + '">Rename</button><button class="btn" data-file-delete="' + esc(entry.path) + '">Trash</button></div>';
+          return '<div class="event"' + action + ' style="align-items:center;border-bottom:1px solid var(--onyx-border);padding:8px;cursor:pointer"><span class="tag">' + (entry.type === 'directory' ? 'DIR' : 'FILE') + '</span><div style="flex:1"><b>' + esc(entry.name) + '</b><div class="sub">' + esc(entry.type === 'file' ? formatBytes(entry.size) + ' · ' + entry.modified_at : entry.path) + '</div></div><button class="btn" data-file-backup="' + esc(entry.path) + '">Backup</button><button class="btn" data-file-rename="' + esc(entry.path) + '">Rename</button><button class="btn" data-file-delete="' + esc(entry.path) + '">Trash</button></div>';
         }).join('') + '</div>' : '<div class="empty"><b>No storage is mounted</b>There are no visible files under /mnt/onyx. Attach an Onyx storage pool or device to browse files.</div>';
         Array.prototype.forEach.call(list.querySelectorAll('[data-file-dir]'), function (row) { row.addEventListener('click', function (event) { if (event.target.closest('button')) return; loadFiles(row.dataset.fileDir); }); });
         Array.prototype.forEach.call(list.querySelectorAll('[data-file-content]'), function (row) { row.addEventListener('click', function () { window.open(API + '/files/content?path=' + encodeURIComponent(row.dataset.fileContent), '_blank', 'noopener'); }); });
+        Array.prototype.forEach.call(list.querySelectorAll('[data-file-backup]'), function (button) { button.addEventListener('click', function (event) { event.stopPropagation(); createBackup(button.dataset.fileBackup); }); });
         Array.prototype.forEach.call(list.querySelectorAll('[data-file-rename]'), function (button) { button.addEventListener('click', function (event) { event.stopPropagation(); var next = prompt('New relative path', button.dataset.fileRename); if (!next) return; apiJSON('/files/rename', { method: 'POST', body: JSON.stringify({ path: button.dataset.fileRename, new_path: next }) }).then(function () { loadFiles(path); }).catch(showError); }); });
         Array.prototype.forEach.call(list.querySelectorAll('[data-file-delete]'), function (button) { button.addEventListener('click', function (event) { event.stopPropagation(); if (!confirm('Move this entry to trash?')) return; apiJSON('/files/delete', { method: 'POST', body: JSON.stringify({ path: button.dataset.fileDelete }) }).then(function () { loadFiles(path); }).catch(showError); }); });
       }).catch(showError);
@@ -552,10 +564,21 @@
         var summary = document.getElementById('backup-summary');
         if (summary) summary.innerHTML = '<div class="card"><h3>Recovery health</h3><div class="stat">' + health + '%</div><div class="sub">across ' + (report.jobs || []).length + ' configured jobs</div></div>';
         list.innerHTML = jobs.length ? '<div style="display:grid;gap:10px">' + jobs.map(function (j) {
-          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(j.name) + '</b><div class="sub">' + esc(j.source + ' → ' + j.target + ' · ' + (j.schedule || 'manual')) + '</div></div><button class="btn" data-run="' + esc(j.id) + '">Run now</button></div>';
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(j.name) + '</b><div class="sub">' + esc(j.source + ' → ' + j.target + ' · ' + (j.schedule || 'manual')) + '</div></div><div style="display:flex;gap:8px"><button class="btn" data-restore-job="' + esc(j.id) + '">Restore</button><button class="btn" data-run="' + esc(j.id) + '">Run now</button></div></div>';
         }).join('') + '</div>' : '<div class="empty"><b>No backup jobs yet</b>Create a job to protect a share or snapshot.</div>';
         Array.prototype.forEach.call(list.querySelectorAll('[data-run]'), function (button) {
           button.addEventListener('click', function () { apiJSON('/backup-jobs/' + encodeURIComponent(button.dataset.run) + '/run', { method: 'POST' }).then(loadBackups).catch(showError); });
+        });
+        Array.prototype.forEach.call(list.querySelectorAll('[data-restore-job]'), function (button) {
+          button.addEventListener('click', function () {
+            apiJSON('/backup-jobs/' + encodeURIComponent(button.dataset.restoreJob) + '/history').then(function (data) {
+              var runs = (data.runs || []).filter(function (run) { return run.status === 'succeeded'; });
+              if (!runs.length) throw { error: { message: 'No successful backup run is available to restore.' } };
+              var destination = prompt('Restore destination (future pool path)', '/mnt/onyx/restore');
+              if (!destination) return;
+              return apiJSON('/backups/' + encodeURIComponent(runs[runs.length - 1].id) + '/restore', { method: 'POST', body: JSON.stringify({ destination: destination }) });
+            }).then(function (result) { if (result) alert('Restore started.'); }).catch(showError);
+          });
         });
       }).catch(showError);
     }
@@ -659,6 +682,7 @@
       }
       if (v.id === 'files') {
         document.getElementById('folder-create').addEventListener('click', function () { var name = prompt('New folder name'); if (!name) return; var parent = window.__onyxFilePath || ''; var next = parent ? parent + '/' + name : name; apiJSON('/files/mkdir', { method: 'POST', body: JSON.stringify({ path: next }) }).then(function () { loadFiles(parent); }).catch(showError); });
+        document.getElementById('backup-drive').addEventListener('click', function () { createBackup(window.__onyxFilePath || ''); });
         loadFiles('');
         loadTrash();
       }
