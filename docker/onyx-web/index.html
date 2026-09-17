@@ -594,10 +594,16 @@
         var summary = document.getElementById('backup-summary');
         if (summary) summary.innerHTML = '<div class="card"><h3>Recovery health</h3><div class="stat">' + health + '%</div><div class="sub">across ' + (report.jobs || []).length + ' configured jobs</div></div>';
         list.innerHTML = jobs.length ? '<div style="display:grid;gap:10px">' + jobs.map(function (j) {
-          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(j.name) + '</b><div class="sub">' + esc(j.source + ' → ' + j.target + ' · ' + (j.schedule || 'manual')) + '</div></div><div style="display:flex;gap:8px"><button class="btn" data-restore-job="' + esc(j.id) + '">Restore</button><button class="btn" data-run="' + esc(j.id) + '">Run now</button></div></div>';
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(j.name) + '</b><div class="sub">' + esc(j.source + ' → ' + j.target + ' · ' + (j.schedule || 'manual')) + '</div></div><div style="display:flex;gap:8px"><button class="btn" data-restore-job="' + esc(j.id) + '">Restore</button><button class="btn" data-run="' + esc(j.id) + '">Run now</button><button class="btn" data-delete-job="' + esc(j.id) + '">Remove</button></div></div>';
         }).join('') + '</div>' : '<div class="empty"><b>No backup jobs yet</b>Create a job to protect a share or snapshot.</div>';
         Array.prototype.forEach.call(list.querySelectorAll('[data-run]'), function (button) {
           button.addEventListener('click', function () { apiJSON('/backup-jobs/' + encodeURIComponent(button.dataset.run) + '/run', { method: 'POST' }).then(loadBackups).catch(showError); });
+        });
+        Array.prototype.forEach.call(list.querySelectorAll('[data-delete-job]'), function (button) {
+          button.addEventListener('click', function () {
+            if (!confirm('Remove this backup job and its recorded history? Existing backup files are not deleted.')) return;
+            apiJSON('/backup-jobs/' + encodeURIComponent(button.dataset.deleteJob), { method: 'DELETE' }).then(loadBackups).catch(showError);
+          });
         });
         Array.prototype.forEach.call(list.querySelectorAll('[data-restore-job]'), function (button) {
           button.addEventListener('click', function () {
