@@ -418,14 +418,34 @@
     }
 
     function createBackup(path) {
-      var source = '/mnt/onyx/' + path;
-      var target = prompt('Backup destination path (use a separate disk or network mount)', '/mnt/onyx-backups');
-      if (!target) return;
-      var name = prompt('Backup name', path ? 'Backup ' + path : 'Full Onyx storage backup');
-      if (!name) return;
-      apiJSON('/backup-jobs', { method: 'POST', body: JSON.stringify({ name: name, source: source, target_kind: 'local', target: target, retention: 5, snapshot_before: false }) }).then(function (job) {
-        return apiJSON('/backup-jobs/' + encodeURIComponent(job.id) + '/run', { method: 'POST' });
-      }).then(function (run) { alert('Backup started: ' + (run.status || 'running')); }).catch(showError);
+      try { localStorage.setItem('onyx.backupSource', '/mnt/onyx/' + path); } catch (e) {}
+      location.hash = '#/backups';
+    }
+
+    function loadBackupLocations() {
+      var select = document.getElementById('backup-target');
+      var download = document.getElementById('backup-download-option');
+      if (!select) return;
+      var source = '';
+      try { source = localStorage.getItem('onyx.backupSource') || ''; } catch (e) {}
+      apiJSON('/devices').then(function (data) {
+        var options = (data.devices || []).filter(function (device) {
+          return device.mountpoint && device.state === 'mounted' && (!source || source.indexOf(device.mountpoint) !== 0);
+        }).map(function (device) {
+          return '<option value="' + esc(device.mountpoint + '/backups') + '">' + esc((device.label || device.name) + ' — ' + device.mountpoint + ' (available location)') + '</option>';
+        });
+        if (options.length) {
+          select.innerHTML = '<option value="">Choose a location…</option>' + options.join('');
+          if (download) download.style.display = 'none';
+        } else {
+          select.innerHTML = '<option value="">No separate backup disk detected</option>';
+          if (download) download.style.display = 'block';
+        }
+      }).catch(function () { select.innerHTML = '<option value="">Locations unavailable</option>'; if (download) download.style.display = 'block'; });
+      if (download) download.addEventListener('click', function () {
+        if (!source || source.indexOf('/mnt/onyx/') !== 0) { showError({ error: { message: 'Choose a file or folder from Files first.' } }); return; }
+        window.open(API + '/files/archive?path=' + encodeURIComponent(source.slice('/mnt/onyx/'.length)), '_blank', 'noopener');
+      });
     }
 
     function loadFiles(path) {
@@ -449,12 +469,14 @@
         var rows = data.entries || [];
         list.innerHTML = rows.length ? '<div style="display:grid;gap:8px">' + rows.map(function (entry) {
           var action = entry.type === 'directory' ? ' data-file-dir="' + esc(entry.path) + '"' : ' data-file-content="' + esc(entry.path) + '"';
-          return '<div class="event"' + action + ' style="align-items:center;border-bottom:1px solid var(--onyx-border);padding:8px;cursor:pointer"><span class="tag">' + (entry.type === 'directory' ? 'DIR' : 'FILE') + '</span><div style="flex:1"><b>' + esc(entry.name) + '</b><div class="sub">' + esc(entry.type === 'file' ? formatBytes(entry.size) + ' · ' + entry.modified_at : entry.path) + '</div></div>' + (entry.type === 'file' ? '<button class="btn" data-file-download="' + esc(entry.path) + '">Download</button>' : '') + '<button class="btn" data-file-backup="' + esc(entry.path) + '">Backup</button><button class="btn" data-file-rename="' + esc(entry.path) + '">Rename</button><button class="btn" data-file-delete="' + esc(entry.path) + '">Trash</button></div>';
+          return '<div class="event"' + action + ' style="align-items:center;border-bottom:1px solid var(--onyx-border);padding:8px;cursor:pointer"><span class="tag">' + (entry.type === 'directory' ? 'DIR' : 'FILE') + '</span><div style="flex:1"><b>' + esc(entry.name) + '</b><div class="sub">' + (entry.type === 'file' ? formatBytes(entry.size) + ' · ' + entry.modified_at : '<span data-file-size="' + esc(entry.path) + '">Calculating folder size…</span> · ' + entry.path) + '</div></div>' + (entry.type === 'directory' ? '<button class="btn" data-folder-download="' + esc(entry.path) + '">Download ZIP</button>' : '<button class="btn" data-file-download="' + esc(entry.path) + '">Download</button>') + '<button class="btn" data-file-backup="' + esc(entry.path) + '">Backup</button><button class="btn" data-file-rename="' + esc(entry.path) + '">Rename</button><button class="btn" data-file-delete="' + esc(entry.path) + '">Trash</button></div>';
         }).join('') + '</div>' : '<div class="empty"><b>No storage is mounted</b>There are no visible files under /mnt/onyx. Attach an Onyx storage pool or device to browse files.</div>';
         Array.prototype.forEach.call(list.querySelectorAll('[data-file-dir]'), function (row) { row.addEventListener('click', function (event) { if (event.target.closest('button')) return; loadFiles(row.dataset.fileDir); }); });
         Array.prototype.forEach.call(list.querySelectorAll('[data-file-content]'), function (row) { row.addEventListener('click', function () { window.open(API + '/files/content?path=' + encodeURIComponent(row.dataset.fileContent), '_blank', 'noopener'); }); });
         Array.prototype.forEach.call(list.querySelectorAll('[data-file-backup]'), function (button) { button.addEventListener('click', function (event) { event.stopPropagation(); createBackup(button.dataset.fileBackup); }); });
         Array.prototype.forEach.call(list.querySelectorAll('[data-file-download]'), function (button) { button.addEventListener('click', function (event) { event.stopPropagation(); window.open(API + '/files/content?download=1&path=' + encodeURIComponent(button.dataset.fileDownload), '_blank', 'noopener'); }); });
+        Array.prototype.forEach.call(list.querySelectorAll('[data-folder-download]'), function (button) { button.addEventListener('click', function (event) { event.stopPropagation(); window.open(API + '/files/archive?path=' + encodeURIComponent(button.dataset.folderDownload), '_blank', 'noopener'); }); });
+        Array.prototype.forEach.call(list.querySelectorAll('[data-file-size]'), function (label) { apiJSON('/files/size?path=' + encodeURIComponent(label.dataset.fileSize)).then(function (data) { label.textContent = formatBytes(data.size_bytes) + ' · ' + data.items + ' file(s)'; }).catch(function () { label.textContent = 'Size unavailable'; }); });
         Array.prototype.forEach.call(list.querySelectorAll('[data-file-rename]'), function (button) { button.addEventListener('click', function (event) { event.stopPropagation(); var next = prompt('New relative path', button.dataset.fileRename); if (!next) return; apiJSON('/files/rename', { method: 'POST', body: JSON.stringify({ path: button.dataset.fileRename, new_path: next }) }).then(function () { loadFiles(path); }).catch(showError); }); });
         Array.prototype.forEach.call(list.querySelectorAll('[data-file-delete]'), function (button) { button.addEventListener('click', function (event) { event.stopPropagation(); if (!confirm('Move this entry to trash?')) return; apiJSON('/files/delete', { method: 'POST', body: JSON.stringify({ path: button.dataset.fileDelete }) }).then(function () { loadFiles(path); }).catch(showError); }); });
       }).catch(showError);
@@ -532,8 +554,8 @@
         '<div class="card" style="margin-bottom:16px"><h3>Create a backup</h3><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));align-items:end">' +
         '<label>Name<input id="backup-name" class="search" style="width:100%;max-width:none" placeholder="USB drive backup"></label>' +
         '<label>Source path<input id="backup-source" class="search" style="width:100%;max-width:none" placeholder="/mnt/onyx/2a0ed918/Docs"></label>' +
-        '<label>Backup destination<input id="backup-target" class="search" style="width:100%;max-width:none" placeholder="/mnt/backup-disk/onyx"></label>' +
-        '</div><div style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap"><button class="btn" id="backup-source-files">Choose source in Files</button><label>Retention<input id="backup-retention" class="search" style="width:80px" type="number" min="1" value="7"></label><label><input id="backup-snapshot" type="checkbox"> Snapshot before backup</label><button class="btn primary" id="backup-create">Create and run backup</button></div><p class="sub" style="margin-bottom:0">Choose a destination on a separate disk or network mount. Onyx rejects backup targets inside the source storage root.</p></div>' +
+        '<label>Backup destination<select id="backup-target" class="search" style="width:100%;max-width:none"><option value="">Loading available locations…</option></select></label>' +
+        '</div><div style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap"><button class="btn" id="backup-source-files">Choose source in Files</button><label>Retention<input id="backup-retention" class="search" style="width:80px" type="number" min="1" value="7"></label><label><input id="backup-snapshot" type="checkbox"> Snapshot before backup</label><button class="btn primary" id="backup-create">Create and run backup</button></div><div id="backup-download-option" style="margin-top:12px;display:none"><button class="btn" id="backup-download-source">Download selected source as a ZIP</button></div><p class="sub" style="margin-bottom:0">Available mounted locations are selectable above. If none are available, download the source as a ZIP and import it after the new pool is ready.</p></div>' +
         '<div class="grid" id="backup-summary"><div class="card"><h3>Recovery health</h3><div class="stat">—</div><div class="sub">Loading report…</div></div></div>' +
         '<div class="card" style="margin-top:16px" id="backup-list"><div class="empty"><b>Loading backup jobs…</b>Reading configured jobs.</div></div>';
     }
@@ -742,6 +764,8 @@
       }
       if (v.id === 'backups') {
         document.getElementById('backup-source-files').addEventListener('click', function () { location.hash = '#/files'; });
+        try { var selectedSource = localStorage.getItem('onyx.backupSource'); if (selectedSource) document.getElementById('backup-source').value = selectedSource; } catch (e) {}
+        loadBackupLocations();
         document.getElementById('backup-create').addEventListener('click', function () {
           var name = document.getElementById('backup-name').value.trim();
           var source = document.getElementById('backup-source').value.trim();
