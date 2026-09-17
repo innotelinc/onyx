@@ -13,7 +13,7 @@ SOCK_DIR="$(cd "${ONYX_SOCKET_DIR:-$RUN/onyx}" 2>/dev/null && pwd || realpath -m
 STATE_DIR="$(realpath -m "${ONYX_STATE_DIR:-$RUN/state}")"
 API_LISTEN="${ONYX_API_LISTEN:-127.0.0.1:8080}"
 
-SERVICES=(onyx-privd onyx-storaged onyx-shared onyx-core onyx-api)
+SERVICES=(onyx-privd onyx-storaged onyx-shared onyx-snapd onyx-backupd onyx-core onyx-api)
 
 mkdir -p "$SOCK_DIR" "$STATE_DIR"
 
@@ -66,15 +66,47 @@ start() {
     sleep 0.25
   done
 
+  # onyx-snapd (snapshot service)
+  "$BIN/onyx-snapd" --socket-dir "$SOCK_DIR" --state-dir "$STATE_DIR/onyx-snapd" \
+    >"$RUN/onyx-snapd.log" 2>&1 &
+  echo $! >"$RUN/onyx-snapd.pid"
+
+  # onyx-backupd (backup service)
+  "$BIN/onyx-backupd" --socket-dir "$SOCK_DIR" --state-dir "$STATE_DIR/onyx-backupd" \
+    >"$RUN/onyx-backupd.log" 2>&1 &
+  echo $! >"$RUN/onyx-backupd.pid"
+
+  # wait for the Obsidian safety services before starting the API
+  for sock in onyx-snapd.sock onyx-backupd.sock; do
+    for _ in $(seq 1 40); do
+      [ -S "$SOCK_DIR/$sock" ] && break
+      sleep 0.25
+    done
+    [ -S "$SOCK_DIR/$sock" ] || { echo "failed to start ${sock%.sock}" >&2; stop; exit 1; }
+  done
+
   # onyx-core (Go control plane)
   "$BIN/onyx-core" --socket-dir "$SOCK_DIR" --state-dir "$STATE_DIR/onyx-core" \
     >"$RUN/onyx-core.log" 2>&1 &
   echo $! >"$RUN/onyx-core.pid"
 
+  # wait for core before starting the HTTP gateway
+  for _ in $(seq 1 40); do
+    [ -S "$SOCK_DIR/onyx-core.sock" ] && break
+    sleep 0.25
+  done
+  [ -S "$SOCK_DIR/onyx-core.sock" ] || { echo "failed to start onyx-core" >&2; stop; exit 1; }
+
   # onyx-api (Go HTTP gateway)
   "$BIN/onyx-api" --listen "$API_LISTEN" --socket-dir "$SOCK_DIR" \
     >"$RUN/onyx-api.log" 2>&1 &
   echo $! >"$RUN/onyx-api.pid"
+
+  for _ in $(seq 1 40); do
+    kill -0 "$(cat "$RUN/onyx-api.pid")" 2>/dev/null && curl -fsS "http://$API_LISTEN/healthz" >/dev/null 2>&1 && break
+    sleep 0.25
+  done
+  kill -0 "$(cat "$RUN/onyx-api.pid")" 2>/dev/null || { echo "failed to start onyx-api" >&2; stop; exit 1; }
 
   echo "started: sockets in $SOCK_DIR, API at http://$API_LISTEN"
   echo "  logs:  tail -f $RUN/onyx-*.log"
