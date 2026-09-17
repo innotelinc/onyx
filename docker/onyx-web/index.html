@@ -421,7 +421,7 @@
         var rows = data.entries || [];
         list.innerHTML = rows.length ? '<div style="display:grid;gap:8px">' + rows.map(function (entry) {
           var action = entry.type === 'directory' ? ' data-file-dir="' + esc(entry.path) + '"' : ' data-file-content="' + esc(entry.path) + '"';
-          return '<div class="event"' + action + ' style="align-items:center;border-bottom:1px solid var(--onyx-border);padding:8px;cursor:pointer"><span class="tag">' + (entry.type === 'directory' ? 'DIR' : 'FILE') + '</span><div style="flex:1"><b>' + esc(entry.name) + '</b><div class="sub">' + esc(entry.type === 'file' ? String(entry.size) + ' bytes · ' + entry.modified_at : entry.path) + '</div></div><button class="btn" data-file-rename="' + esc(entry.path) + '">Rename</button><button class="btn" data-file-delete="' + esc(entry.path) + '">Trash</button></div>';
+          return '<div class="event"' + action + ' style="align-items:center;border-bottom:1px solid var(--onyx-border);padding:8px;cursor:pointer"><span class="tag">' + (entry.type === 'directory' ? 'DIR' : 'FILE') + '</span><div style="flex:1"><b>' + esc(entry.name) + '</b><div class="sub">' + esc(entry.type === 'file' ? formatBytes(entry.size) + ' · ' + entry.modified_at : entry.path) + '</div></div><button class="btn" data-file-rename="' + esc(entry.path) + '">Rename</button><button class="btn" data-file-delete="' + esc(entry.path) + '">Trash</button></div>';
         }).join('') + '</div>' : '<div class="empty"><b>No storage is mounted</b>There are no visible files under /mnt/onyx. Attach an Onyx storage pool or device to browse files.</div>';
         Array.prototype.forEach.call(list.querySelectorAll('[data-file-dir]'), function (row) { row.addEventListener('click', function (event) { if (event.target.closest('button')) return; loadFiles(row.dataset.fileDir); }); });
         Array.prototype.forEach.call(list.querySelectorAll('[data-file-content]'), function (row) { row.addEventListener('click', function () { window.open(API + '/files/content?path=' + encodeURIComponent(row.dataset.fileContent), '_blank', 'noopener'); }); });
@@ -444,11 +444,11 @@
 
     function formatBytes(value) {
       var n = Number(value || 0);
-      if (!n) return '—';
-      var units = ['B', 'KB', 'MB', 'GB', 'TB'];
-      var i = 0;
-      while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
-      return n.toFixed(i ? 1 : 0) + ' ' + units[i];
+      if (!n) return '0 MB';
+      if (n >= 1024 * 1024 * 1024) return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+      if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(2) + ' MB';
+      if (n >= 1024) return (n / 1024).toFixed(2) + ' KB';
+      return n + ' B';
     }
 
     function deviceRole(device) {
