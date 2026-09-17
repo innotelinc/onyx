@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -14,22 +17,60 @@ import (
 )
 
 // server implements Health and Backupd (proto/onyx/v1/backupd.proto).
-// Jobs and runs live in memory at v0.1; the execution engine + persistence
-// land with v0.3 (docs/design/11 §6.2).
+// Jobs and runs are persisted atomically in the service state directory;
+// execution remains explicitly simulated until the target-specific copy
+// engines are enabled (docs/design/11 §6.2).
 type server struct {
 	onyxv1.UnimplementedHealthServer
 	onyxv1.UnimplementedBackupdServer
 
-	mu   sync.Mutex
-	jobs map[string]*onyxv1.BackupJob
-	runs map[string][]*onyxv1.BackupRun // job_id → history (newest last)
+	mu        sync.Mutex
+	jobs      map[string]*onyxv1.BackupJob
+	runs      map[string][]*onyxv1.BackupRun // job_id → history (newest last)
+	statePath string
 }
 
 var _ onyxv1.HealthServer = (*server)(nil)
 var _ onyxv1.BackupdServer = (*server)(nil)
 
-func newServer() *server {
-	return &server{jobs: map[string]*onyxv1.BackupJob{}, runs: map[string][]*onyxv1.BackupRun{}}
+func newServer(stateDir string) *server {
+	s := &server{
+		jobs: map[string]*onyxv1.BackupJob{}, runs: map[string][]*onyxv1.BackupRun{},
+		statePath: filepath.Join(stateDir, "backup.json"),
+	}
+	if b, err := os.ReadFile(s.statePath); err == nil {
+		var saved struct {
+			Jobs map[string]*onyxv1.BackupJob   `json:"jobs"`
+			Runs map[string][]*onyxv1.BackupRun `json:"runs"`
+		}
+		if json.Unmarshal(b, &saved) == nil {
+			if saved.Jobs != nil {
+				s.jobs = saved.Jobs
+			}
+			if saved.Runs != nil {
+				s.runs = saved.Runs
+			}
+		}
+	}
+	return s
+}
+
+func (s *server) persistLocked() error {
+	if err := os.MkdirAll(filepath.Dir(s.statePath), 0o750); err != nil {
+		return err
+	}
+	b, err := json.Marshal(struct {
+		Jobs map[string]*onyxv1.BackupJob   `json:"jobs"`
+		Runs map[string][]*onyxv1.BackupRun `json:"runs"`
+	}{s.jobs, s.runs})
+	if err != nil {
+		return err
+	}
+	tmp := s.statePath + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o640); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.statePath)
 }
 
 func (s *server) Check(_ context.Context, _ *onyxv1.HealthCheckRequest) (*onyxv1.HealthCheckResponse, error) {
@@ -57,6 +98,10 @@ func (s *server) CreateBackupJob(_ context.Context, req *onyxv1.CreateBackupJobR
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.jobs[job.Id] = job
+	if err := s.persistLocked(); err != nil {
+		delete(s.jobs, job.Id)
+		return nil, status.Errorf(codes.Internal, "persist backup job: %v", err)
+	}
 	return job, nil
 }
 
@@ -81,14 +126,16 @@ func (s *server) DeleteBackupJob(_ context.Context, req *onyxv1.DeleteBackupJobR
 	if ok {
 		delete(s.jobs, req.GetId())
 		delete(s.runs, req.GetId())
+		if err := s.persistLocked(); err != nil {
+			return nil, status.Errorf(codes.Internal, "persist backup job deletion: %v", err)
+		}
 	}
 	return &onyxv1.DeleteBackupJobResponse{Deleted: ok}, nil
 }
 
-// RunBackup executes a job. At v0.1 the engine simulates the run so the
-// contract, history, retention and report pipeline are exercisable end to end;
-// the real copy engine (snapshot → target via onyx-snapd/onyx-objectstore)
-// lands with v0.3.
+// RunBackup executes a job. The v0.3 safety surface records a durable run,
+// applies retention, and feeds recovery reporting; target-specific copy engines
+// remain isolated behind this contract for the next implementation slice.
 func (s *server) RunBackup(_ context.Context, req *onyxv1.RunBackupRequest) (*onyxv1.BackupRun, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -108,6 +155,9 @@ func (s *server) RunBackup(_ context.Context, req *onyxv1.RunBackupRequest) (*on
 	}
 	s.runs[job.Id] = append(s.runs[job.Id], run)
 	s.applyRetention(job)
+	if err := s.persistLocked(); err != nil {
+		return nil, status.Errorf(codes.Internal, "persist backup run: %v", err)
+	}
 	return run, nil
 }
 

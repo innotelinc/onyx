@@ -30,25 +30,43 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/innotelinc/onyx/services/vault"
+	releaseversion "github.com/innotelinc/onyx/services/version"
 
 	onyxv1 "github.com/innotelinc/onyx/proto/gen/go/onyx/v1"
 )
 
-const version = "0.1.0-dev"
+var version = releaseversion.Version
 
 func main() {
 	var (
-		listen    = flag.String("listen", "127.0.0.1:8080", "HTTP listen address")
-		socketDir = flag.String("socket-dir", "/run/onyx", "directory for onyx unix sockets")
-		coreSock  = flag.String("core-socket", "", "onyx-core socket (default: <socket-dir>/onyx-core.sock)")
+		listen      = flag.String("listen", "127.0.0.1:8080", "HTTP listen address")
+		socketDir   = flag.String("socket-dir", "/run/onyx", "directory for onyx unix sockets")
+		coreSock    = flag.String("core-socket", "", "onyx-core socket (default: <socket-dir>/onyx-core.sock)")
+		snapdSock   = flag.String("snapd-socket", "", "onyx-snapd socket (default: <socket-dir>/onyx-snapd.sock)")
+		backupdSock = flag.String("backupd-socket", "", "onyx-backupd socket (default: <socket-dir>/onyx-backupd.sock)")
+		stateDir    = flag.String("state-dir", "/var/lib/onyx/api", "API metadata state directory")
 	)
 	flag.Parse()
 
 	if *coreSock == "" {
 		*coreSock = absSocketPath(*socketDir, "onyx-core.sock")
 	}
+	if *snapdSock == "" {
+		*snapdSock = absSocketPath(*socketDir, "onyx-snapd.sock")
+	}
+	if *backupdSock == "" {
+		*backupdSock = absSocketPath(*socketDir, "onyx-backupd.sock")
+	}
 	if err := os.MkdirAll(*socketDir, 0o750); err != nil {
 		fatal("create socket dir", err)
+	}
+	users, err := newUserStore(*stateDir)
+	if err != nil {
+		fatal("load user metadata", err)
+	}
+	scrub, err := newScrubStore(*stateDir)
+	if err != nil {
+		fatal("load scrub schedules", err)
 	}
 
 	coreConn, err := grpc.NewClient(
@@ -60,10 +78,34 @@ func main() {
 	}
 	defer coreConn.Close()
 
+	snapdConn, err := grpc.NewClient(
+		"unix://"+*snapdSock,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		fatal("dial snapd", err)
+	}
+	defer snapdConn.Close()
+
+	backupdConn, err := grpc.NewClient(
+		"unix://"+*backupdSock,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		fatal("dial backupd", err)
+	}
+	defer backupdConn.Close()
+
 	core := onyxv1.NewCoreClient(coreConn)
 	coreShares := onyxv1.NewCoreSharesClient(coreConn)
 
-	srv := &server{core: core, coreShares: coreShares, deviceTrust: loadDeviceTrustConfig(), version: version}
+	srv := &server{
+		core: core, coreShares: coreShares,
+		snapd:   onyxv1.NewSnapdClient(snapdConn),
+		backupd: onyxv1.NewBackupdClient(backupdConn),
+		users:   users, scrub: scrub,
+		deviceTrust: loadDeviceTrustConfig(), version: version,
+	}
 	srv.registerRoutes()
 
 	httpSrv := &http.Server{
@@ -112,6 +154,10 @@ func fatal(what string, err error) {
 type server struct {
 	core        onyxv1.CoreClient
 	coreShares  onyxv1.CoreSharesClient
+	snapd       onyxv1.SnapdClient
+	backupd     onyxv1.BackupdClient
+	users       *userStore
+	scrub       *scrubStore
 	deviceTrust *deviceTrustConfig
 	version     string
 	mux         *http.ServeMux
@@ -138,6 +184,29 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("POST /api/v1/devices/{name}/detach", s.handleDeviceDetach)
 	mux.HandleFunc("GET /api/v1/events", s.handleEvents)
 	mux.HandleFunc("GET /api/v1/events/stream", s.handleEventsStream)
+	// v0.3 Obsidian safety surfaces: snapshot lifecycle and backup jobs.
+	mux.HandleFunc("GET /api/v1/snapshots", s.handleSnapshots)
+	mux.HandleFunc("POST /api/v1/snapshots", s.handleCreateSnapshot)
+	mux.HandleFunc("DELETE /api/v1/snapshots/{id}", s.handleDeleteSnapshot)
+	mux.HandleFunc("POST /api/v1/snapshots/{id}/rollback", s.handleRollbackSnapshot)
+	mux.HandleFunc("GET /api/v1/backup-jobs", s.handleBackupJobs)
+	mux.HandleFunc("POST /api/v1/backup-jobs", s.handleCreateBackupJob)
+	mux.HandleFunc("DELETE /api/v1/backup-jobs/{id}", s.handleDeleteBackupJob)
+	mux.HandleFunc("POST /api/v1/backup-jobs/{id}/run", s.handleRunBackup)
+	mux.HandleFunc("GET /api/v1/backup-jobs/{id}/history", s.handleBackupHistory)
+	mux.HandleFunc("GET /api/v1/backup-report", s.handleBackupReport)
+	// v0.2 Flint access metadata. Authentication remains delegated to Authentik;
+	// this store contains ONYX roles and share grants only, never passwords.
+	mux.HandleFunc("GET /api/v1/users", s.handleUsers)
+	mux.HandleFunc("POST /api/v1/users", s.handleCreateUser)
+	mux.HandleFunc("GET /api/v1/users/{id}", s.handleUser)
+	mux.HandleFunc("PATCH /api/v1/users/{id}", s.handleUpdateUser)
+	mux.HandleFunc("DELETE /api/v1/users/{id}", s.handleDeleteUser)
+	mux.HandleFunc("GET /api/v1/users/{id}/permissions", s.handleUserPermissions)
+	mux.HandleFunc("PUT /api/v1/users/{id}/permissions", s.handleSetUserPermissions)
+	mux.HandleFunc("GET /api/v1/pools/{name}/scrub-schedule", s.handleScrubSchedule)
+	mux.HandleFunc("PUT /api/v1/pools/{name}/scrub-schedule", s.handleSetScrubSchedule)
+	mux.HandleFunc("POST /api/v1/pools/{name}/scrub", s.handleRunScrub)
 	s.mux = mux
 }
 
@@ -157,7 +226,9 @@ func (s *server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version":     resp.CoreVersion,
-		"api_version": "v1",
+		"api_version": releaseversion.APIVersion,
+		"codename":    releaseversion.Codename,
+		"commit":      releaseversion.Commit,
 	})
 }
 

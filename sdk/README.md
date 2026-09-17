@@ -16,7 +16,7 @@ License: **Apache-2.0** (SDK stays open even though the core is AGPL-3.0).
 exit codes with structured errors (docs/design/04#10-cli).
 
 ```bash
-bin/onyx version            # onyx 0.1.0-dev (api v1)
+bin/onyx version            # release version + API namespace + build metadata
 bin/onyx status [--json]    # aggregate service health
 bin/onyx pool list [--json] # storage pools
 bin/onyx device list        # hotplug/USB/SATA drives (show/attach/detach)

@@ -4,12 +4,12 @@
 package client
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"bufio"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -66,6 +66,8 @@ func (e *Error) Unwrap() error { return e.Err }
 type Version struct {
 	Version    string `json:"version"`
 	APIVersion string `json:"api_version"`
+	Codename   string `json:"codename"`
+	Commit     string `json:"commit,omitempty"`
 }
 
 // ServiceStatus mirrors onyx.v1.ServiceStatus (protojson camelCase).

@@ -23,9 +23,10 @@ import (
 	"github.com/innotelinc/onyx/services/vault"
 
 	onyxv1 "github.com/innotelinc/onyx/proto/gen/go/onyx/v1"
+	releaseversion "github.com/innotelinc/onyx/services/version"
 )
 
-const version = "0.1.0-dev"
+var version = releaseversion.Version
 
 // resolveS3Credentials resolves the S3_ACCESS_KEY/S3_SECRET_KEY env values,
 // preserving plain values. A value may be a `vault://<mount>/<path>#<key>`

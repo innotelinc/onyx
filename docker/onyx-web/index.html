@@ -398,6 +398,64 @@
         '<div class="empty"><b>' + esc(title) + '</b>' + esc(action) + '</div>';
     }
 
+    function viewSnapshots() {
+      return '<div class="page-head"><div><h1>Snapshots</h1><p>Point-in-time copies with safe rollback.</p></div>' +
+        '<button class="btn primary" id="snapshot-create">Create snapshot</button></div>' +
+        '<div class="card" id="snapshot-list"><div class="empty"><b>Loading snapshots…</b>Reading the snapshot catalog.</div></div>';
+    }
+
+    function viewBackups() {
+      return '<div class="page-head"><div><h1>Backups</h1><p>Scheduled jobs, restore points and recovery health.</p></div>' +
+        '<button class="btn primary" id="backup-create">Create backup job</button></div>' +
+        '<div class="grid" id="backup-summary"><div class="card"><h3>Recovery health</h3><div class="stat">—</div><div class="sub">Loading report…</div></div></div>' +
+        '<div class="card" style="margin-top:16px" id="backup-list"><div class="empty"><b>Loading backup jobs…</b>Reading configured jobs.</div></div>';
+    }
+
+    function apiJSON(path, options) {
+      return fetch(API + path, Object.assign({ headers: { accept: 'application/json', 'content-type': 'application/json' }, credentials: 'same-origin' }, options || {}))
+        .then(function (r) { return r.ok ? r.json() : r.json().then(function (e) { return Promise.reject(e); }); });
+    }
+
+    function loadSnapshots() {
+      var list = document.getElementById('snapshot-list');
+      if (!list) return;
+      apiJSON('/snapshots').then(function (data) {
+        var rows = data.snapshots || [];
+        list.innerHTML = rows.length ? '<div style="display:grid;gap:10px">' + rows.map(function (s) {
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(s.name) + '</b><div class="sub">' + esc(s.pool + ' · ' + s.subvolume + ' · ' + s.createdAt) + '</div></div><button class="btn" data-rollback="' + esc(s.id) + '">Rollback</button></div>';
+        }).join('') + '</div>' : '<div class="empty"><b>No snapshots yet</b>Create the first restore point before making a risky change.</div>';
+        Array.prototype.forEach.call(list.querySelectorAll('[data-rollback]'), function (button) {
+          button.addEventListener('click', function () {
+            if (!confirm('Rollback this snapshot? The source subvolume must not be mounted.')) return;
+            apiJSON('/snapshots/' + encodeURIComponent(button.dataset.rollback) + '/rollback', { method: 'POST' }).then(loadSnapshots).catch(showError);
+          });
+        });
+      }).catch(showError);
+    }
+
+    function loadBackups() {
+      var list = document.getElementById('backup-list');
+      if (!list) return;
+      Promise.all([apiJSON('/backup-jobs'), apiJSON('/backup-report')]).then(function (parts) {
+        var jobs = parts[0].jobs || [], report = parts[1];
+        var health = Math.round((report.overallHealth || 0) * 100);
+        var summary = document.getElementById('backup-summary');
+        if (summary) summary.innerHTML = '<div class="card"><h3>Recovery health</h3><div class="stat">' + health + '%</div><div class="sub">across ' + (report.jobs || []).length + ' configured jobs</div></div>';
+        list.innerHTML = jobs.length ? '<div style="display:grid;gap:10px">' + jobs.map(function (j) {
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(j.name) + '</b><div class="sub">' + esc(j.source + ' → ' + j.target + ' · ' + (j.schedule || 'manual')) + '</div></div><button class="btn" data-run="' + esc(j.id) + '">Run now</button></div>';
+        }).join('') + '</div>' : '<div class="empty"><b>No backup jobs yet</b>Create a job to protect a share or snapshot.</div>';
+        Array.prototype.forEach.call(list.querySelectorAll('[data-run]'), function (button) {
+          button.addEventListener('click', function () { apiJSON('/backup-jobs/' + encodeURIComponent(button.dataset.run) + '/run', { method: 'POST' }).then(loadBackups).catch(showError); });
+        });
+      }).catch(showError);
+    }
+
+    function showError(err) {
+      var message = err && err.error && err.error.message ? err.error.message : 'The API request failed.';
+      var target = document.getElementById('content');
+      if (target) target.insertAdjacentHTML('afterbegin', '<div class="card" style="border-color:var(--onyx-danger);color:var(--onyx-danger)">' + esc(message) + '</div>');
+    }
+
     function render(route) {
       var v = VIEWS.filter(function (x) { return x.id === route; })[0] || VIEWS[0];
       renderNav(v.id);
@@ -406,14 +464,33 @@
       var body;
       if (v.id === 'dashboard') body = viewDashboard();
       else if (v.id === 'files') body = viewFiles();
-      else if (v.id === 'snapshots') body = viewSimple('Snapshots', 'Point-in-time copies with rollback.', 'Snapshot timeline and rollback land in v0.3 “Obsidian”.');
-      else if (v.id === 'backups') body = viewSimple('Backups', 'Scheduled jobs to other stores.', 'Backup jobs and restore points land in v0.3 “Obsidian”.');
+      else if (v.id === 'snapshots') body = viewSnapshots();
+      else if (v.id === 'backups') body = viewBackups();
       else if (v.id === 'apps') body = viewSimple('Apps', 'Self-hosted apps on this host.', 'The app store and sandboxing land in v0.4 “Jade”.');
       else if (v.id === 'shares') body = viewSimple('Shares', 'SMB, NFS, WebDAV and SFTP shares.', 'Share management is part of the v0.2 “Flint” milestone.');
       else if (v.id === 'users') body = viewSimple('Users', 'Accounts and permissions.', 'User and permission management lands with v0.2 “Flint”.');
       else body = viewSimple('Settings', 'Theme, density and system preferences.', 'Preferences persist per user in v0.2.');
       document.getElementById('content').innerHTML = body;
       if (v.id === 'dashboard') loadStatusStats();
+      if (v.id === 'snapshots') {
+        document.getElementById('snapshot-create').addEventListener('click', function () {
+          var pool = prompt('Pool name');
+          var subvolume = prompt('Source subvolume (for example @data/media)');
+          if (!pool || !subvolume) return;
+          apiJSON('/snapshots', { method: 'POST', body: JSON.stringify({ pool: pool, subvolume: subvolume }) }).then(loadSnapshots).catch(showError);
+        });
+        loadSnapshots();
+      }
+      if (v.id === 'backups') {
+        document.getElementById('backup-create').addEventListener('click', function () {
+          var name = prompt('Job name');
+          var source = prompt('Source share or snapshot');
+          var target = prompt('Target path or endpoint');
+          if (!name || !source || !target) return;
+          apiJSON('/backup-jobs', { method: 'POST', body: JSON.stringify({ name: name, source: source, target_kind: 'local', target: target, snapshot_before: true, retention: 7 }) }).then(loadBackups).catch(showError);
+        });
+        loadBackups();
+      }
       document.title = 'ONYX — ' + v.label;
     }
 

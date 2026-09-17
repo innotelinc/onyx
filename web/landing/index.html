@@ -362,7 +362,7 @@
     <!-- Hero -->
     <div class="hero">
       <div class="wrap hero-inner">
-        <p class="kicker"><span class="pulse" aria-hidden="true"></span> v0.1 "Cinder" · skeleton shipped</p>
+        <p class="kicker"><span class="pulse" aria-hidden="true"></span> v0.3 "Obsidian" · safety surfaces shipped</p>
         <h1>The self-hosted platform<br>your storage deserves<span class="accent">.</span></h1>
         <p class="lede">
           ONYX — the <em>Online Storage System</em> — is an open-source NAS and infrastructure
@@ -514,10 +514,11 @@ $ <span class="p">bin/onyx</span> <span class="o">share create media /mnt/onyx/p
           <div class="card">
             <h3>Where it stands today</h3>
             <ul>
-              <li><b>v0.1 "Cinder"</b> — the control/data plane (onyx-core, storaged, privd,
-                shared, the API gateway and the CLI) and the full platform layer ship and run</li>
-              <li><b>v0.2 "Flint"</b> — the Prism web UI, file explorer, shares UX, users and
-                permissions (the Admin surface is reserved for it)</li>
+              <li><b>v0.1 "Cinder"</b> — the control/data plane and platform layer ship and run</li>
+              <li><b>v0.2 "Flint"</b> — Prism admin shell, versioned API views, user roles and
+                share permissions</li>
+              <li><b>v0.3 "Obsidian"</b> — persistent snapshots, rollback, backup jobs,
+                recovery reports and SMART-backed health</li>
               <li>Boots in under a minute, idles under 512 MB RAM; 12 containerized services</li>
             </ul>
           </div>
@@ -559,12 +560,12 @@ $ <span class="p">bin/onyx</span> <span class="o">share create media /mnt/onyx/p
           <div class="mile">
             <span class="tag">v0.2 <em>"Flint"</em></span>
             <p>Files: Prism web UI, file explorer, SMB/NFS shares UX, users &amp; permissions.</p>
-            <span class="state next">next</span>
+            <span class="state done">shipped</span>
           </div>
           <div class="mile">
             <span class="tag">v0.3 <em>"Obsidian"</em></span>
-            <p>Safety: snapshots + rollback UI, scrub scheduling, backup jobs, SMART monitoring.</p>
-            <span class="state later">later</span>
+            <p>Safety: snapshots + rollback UI, persistent backup jobs, recovery reports, SMART monitoring.</p>
+            <span class="state done">shipped</span>
           </div>
           <div class="mile">
             <span class="tag">v0.4 <em>"Jade"</em></span>

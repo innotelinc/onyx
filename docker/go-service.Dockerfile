@@ -6,6 +6,8 @@ ARG SERVICE
 
 FROM golang:1.27-bookworm AS build
 ARG SERVICE
+ARG VERSION=0.3.0-dev
+ARG COMMIT=unknown
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -26,7 +28,7 @@ RUN case "${SERVICE}" in \
       onyx-objectstore) DIR=objectstore ;; \
       *) echo "unknown SERVICE: ${SERVICE}" >&2; exit 1 ;; \
     esac \
-    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/onyx ./services/${DIR}
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/innotelinc/onyx/services/version.Version=${VERSION} -X github.com/innotelinc/onyx/services/version.Commit=${COMMIT}" -o /out/onyx ./services/${DIR}
 
 # Runtime: alpine (has /bin/sh for the socket-perm wrapper; the binary is
 # static). The wrapper runs with umask 000 so unix sockets in the shared

@@ -33,7 +33,7 @@ use onyx::health_check_response::ServingStatus as StatusValue;
 use onyx::privd_server::{Privd, PrivdServer};
 use onyx::{HealthCheckRequest, HealthCheckResponse, PrivOp, PrivRequest, PrivResponse};
 
-const VERSION: &str = "0.1.0-dev";
+const VERSION: &str = "0.3.0-dev";
 const CMD_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn main() -> ExitCode {

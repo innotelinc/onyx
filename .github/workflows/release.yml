@@ -82,7 +82,7 @@ jobs:
           if [ "${{ github.ref_type }}" = "tag" ]; then
             echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
           else
-            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "version=0.3.0-dev" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Compute image tags
@@ -90,7 +90,7 @@ jobs:
         run: |
           IMG="${{ env.REGISTRY }}/${{ matrix.service }}"
           echo "tags=${IMG}:latest" >> "$GITHUB_OUTPUT"
-          if [ -n "${{ steps.ver.outputs.version }}" ]; then
+          if [ "${{ github.ref_type }}" = "tag" ]; then
             echo "tags=${IMG}:latest,${IMG}:${{ steps.ver.outputs.version }}" >> "$GITHUB_OUTPUT"
           fi
 
@@ -99,7 +99,10 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
-          build-args: SERVICE=${{ matrix.service }}
+          build-args: |
+            SERVICE=${{ matrix.service }}
+            VERSION=${{ steps.ver.outputs.version }}
+            COMMIT=${{ github.sha }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.tags.outputs.tags }}
