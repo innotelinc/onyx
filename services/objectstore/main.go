@@ -57,6 +57,11 @@ func main() {
 		// deployment that only wants local buckets.
 		rcloneBin    = flag.String("rclone-bin", "rclone", "rclone binary backing CLOUD/TIERED buckets (empty disables cloud tiers)")
 		rcloneConfig = flag.String("rclone-config", "/etc/rclone/rclone.conf", "shared rclone remote catalog")
+		// Anonymous access is off by default: without S3 credentials every
+		// request is refused rather than served, so an unconfigured endpoint is
+		// closed instead of open. Only a development run on loopback should
+		// turn this on.
+		allowAnonymous = flag.Bool("s3-allow-anonymous", false, "serve the S3 endpoint without credentials (development only)")
 	)
 	flag.Parse()
 
@@ -104,9 +109,14 @@ func main() {
 
 	var httpSrv *http.Server
 	if *httpAddr != "" {
-		httpSrv = &http.Server{Addr: *httpAddr, Handler: newS3Handler(srv)}
+		if os.Getenv("S3_ACCESS_KEY") == "" && !*allowAnonymous {
+			slog.Warn("no S3 credentials configured: the object endpoint will refuse every request",
+				"hint", "set S3_ACCESS_KEY and S3_SECRET_KEY, or pass --s3-allow-anonymous for a development run")
+		}
+		httpSrv = &http.Server{Addr: *httpAddr, Handler: newS3Handler(srv, *allowAnonymous)}
 		go func() {
-			slog.Info("onyx-objectstore s3 endpoint", "addr", *httpAddr)
+			slog.Info("onyx-objectstore s3 endpoint", "addr", *httpAddr,
+				"anonymous", *allowAnonymous, "credentials", os.Getenv("S3_ACCESS_KEY") != "")
 			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				slog.Error("s3 endpoint", "error", err)
 			}

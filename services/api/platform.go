@@ -21,6 +21,13 @@ import (
 // touches the filesystem, and every list route degrades to a 503 when the
 // owning daemon is not deployed — never a fabricated empty result.
 
+// installTimeout bounds an app install or uninstall at the gateway. It is
+// deliberately longer than onyx-appd's own three-minute engine bound: a
+// gateway deadline that fires first turns a slow image pull into a failed
+// request whose work carries on, leaving a running project the platform has no
+// record of (and so no uninstall for).
+const installTimeout = 5 * time.Minute
+
 // queryBool reads an optional boolean query parameter, applying def when the
 // parameter is absent. An unparsable value is reported as an error so a typo
 // such as ?force=yes is not silently treated as false.
@@ -87,7 +94,11 @@ func (s *server) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "app_id is required"})
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	// An install pulls images and starts containers, and onyx-appd bounds its own
+	// engine calls at three minutes: the gateway's deadline has to be longer than
+	// the daemon's, or the caller is told the install failed while the daemon is
+	// still working — and the app is neither recorded nor visible.
+	ctx, cancel := context.WithTimeout(r.Context(), installTimeout)
 	defer cancel()
 	app, err := s.appd.InstallApp(ctx, &onyxv1.InstallAppRequest{AppId: body.AppID, Version: body.Version, Config: body.Config})
 	if err != nil {
@@ -108,7 +119,7 @@ func (s *server) handleUninstallApp(w http.ResponseWriter, r *http.Request) {
 		badQueryBool(w, "force")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), installTimeout)
 	defer cancel()
 	resp, err := s.appd.UninstallApp(ctx, &onyxv1.UninstallAppRequest{AppId: r.PathValue("id"), PurgeData: purge, Force: force})
 	if err != nil {

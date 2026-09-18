@@ -93,6 +93,9 @@ struct Args {
     state_dir: PathBuf,
     privd_socket: PathBuf,
     mount_root: PathBuf,
+    /// Where block device nodes live here (usually /dev). Distinct from
+    /// sysfs_root: the kernel's device list is not the same as the namespace's.
+    dev_root: PathBuf,
     sysfs_root: PathBuf,
     auto_attach: String,
     watch_interval: Duration,
@@ -108,6 +111,7 @@ fn parse_args() -> Args {
     let mut state_dir = PathBuf::from("/var/lib/onyx/onyx-storaged");
     let mut privd_socket = PathBuf::from("/run/onyx/onyx-privd.sock");
     let mut mount_root = PathBuf::from("/mnt/onyx");
+    let mut dev_root = PathBuf::from("/dev");
     let mut sysfs_root = PathBuf::from(SYSFS_BLOCK);
     let mut auto_attach = "removable".to_string();
     let mut watch_interval = DEFAULT_DEVICE_WATCH_INTERVAL;
@@ -135,6 +139,9 @@ fn parse_args() -> Args {
             }
             "--sysfs-root" => {
                 sysfs_root = PathBuf::from(it.next().expect("--sysfs-root requires a value"));
+            }
+            "--dev-root" => {
+                dev_root = PathBuf::from(it.next().expect("--dev-root requires a value"));
             }
             "--auto-attach" => {
                 auto_attach = it.next().expect("--auto-attach requires a value");
@@ -199,6 +206,7 @@ fn parse_args() -> Args {
         state_dir,
         privd_socket,
         mount_root,
+        dev_root,
         sysfs_root,
         auto_attach,
         watch_interval,
@@ -243,6 +251,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         registry.clone(),
         privd.clone(),
         args.mount_root.clone(),
+        args.dev_root.clone(),
         &args.auto_attach,
         args.detached_ttl_minutes,
         args.mount_uid,
@@ -538,10 +547,17 @@ impl Storaged for RegistryBackend {
         // Live, but throttled: reading the device list is the UI's refresh, so
         // it has to reflect reality rather than the last watcher tick.
         self.rescan_if_due().await;
-        let devices = self
+        let mut devices = self
             .registry
             .list_devices()
             .map_err(|e| Status::internal(format!("registry read failed: {e}")))?;
+        // `node_present` is answered now rather than persisted: the same disk is
+        // usable in one container and not in another, so the field describes
+        // this process's view of /dev at the moment it is asked (and the UI
+        // uses it to keep unusable disks out of the pool dialog).
+        for d in &mut devices {
+            d.node_present = Some(devices::dev_node_present(&self.manager.dev_root, &d.kname));
+        }
         Ok(Response::new(ListDevicesResponse { devices }))
     }
 
@@ -550,12 +566,14 @@ impl Storaged for RegistryBackend {
         request: Request<GetDeviceRequest>,
     ) -> Result<Response<Device>, Status> {
         let name = request.into_inner().name;
-        self.manager
+        let mut dev = self
+            .manager
             .registry
             .get_device(&name)
             .map_err(|e| Status::internal(format!("registry read failed: {e}")))?
-            .map(Response::new)
-            .ok_or_else(|| Status::not_found(format!("device '{name}' not found")))
+            .ok_or_else(|| Status::not_found(format!("device '{name}' not found")))?;
+        dev.node_present = Some(devices::dev_node_present(&self.manager.dev_root, &dev.kname));
+        Ok(Response::new(dev))
     }
 
     async fn mount_device(

@@ -27,6 +27,10 @@ data/vault/token/
 # Dev-mode Vault storage + init material (compose.vault.yml, VAULT_INIT_FILE)
 data/vault/file/
 data/vault/init/
+# The shared rclone catalog (RCLONE_CONFIG_DIR, default ./data/rclone). setup.sh
+# creates rclone.conf with 0666 so every service container can read it; it holds
+# the credentials of whatever remotes the operator configured.
+data/rclone/
 
 # Device-trust PKI (scripts/provision-device-trust.sh) — private keys, never commit
 issued/

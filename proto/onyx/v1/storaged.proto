@@ -98,6 +98,17 @@ message Device {
   string health_status = 13;
   // SMART temperature in °C; 0 when unknown.
   uint32 temperature_c = 14;
+  // Whether the data plane can actually open this device: the kernel view
+  // (lsblk reads /sys) can list a disk whose `/dev/<kname>` node is absent from
+  // the daemon's mount namespace — a nested or locked-down container sees the
+  // disk and cannot format or mount it. False means "listed, but not usable
+  // from here"; the UI must not offer it as a pool target.
+  //
+  // Explicitly optional so the JSON carries the false: protojson omits a
+  // non-optional bool that is false, which is indistinguishable from "this
+  // response came from a daemon that does not answer the question" — and those
+  // two cases must not be treated the same way by a client.
+  optional bool node_present = 15;
 }
 
 // One entry of the device audit trail (docs/design/04#8-observability).

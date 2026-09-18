@@ -25,7 +25,7 @@ VERSION ?= 0.3.0-dev
 COMMIT ?= unknown
 GO_LDFLAGS := -X github.com/innotelinc/onyx/services/version.Version=$(VERSION) -X github.com/innotelinc/onyx/services/version.Commit=$(COMMIT)
 
-.PHONY: bootstrap gen gen-check build check vet test dev install clean
+.PHONY: bootstrap gen gen-check build check vet test e2e dev install clean
 
 ## bootstrap — download repo-local Go + protoc toolchains and codegen plugins
 bootstrap:
@@ -77,6 +77,12 @@ check: vet test
 	@cd services/privd && cargo test --quiet
 	@if command -v node >/dev/null 2>&1; then node scripts/web-ui-check.js; \
 	else echo "node not found — skipping scripts/web-ui-check.js"; fi
+
+## e2e — drive a *running* compose stack (app install, tiered bucket sync/evict)
+## through the gateway; POOL_DEVICE=/dev/sdX adds the destructive pool flow.
+## See scripts/e2e-stack.sh.
+e2e:
+	@bash scripts/e2e-stack.sh
 
 vet:
 	$(GO) vet ./...

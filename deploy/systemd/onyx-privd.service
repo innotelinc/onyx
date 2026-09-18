@@ -6,6 +6,11 @@
 # root; every other onyx service is unprivileged. The /run/onyx directory is
 # 2770 root:onyx (see deploy/tmpfiles.d) so sockets land group-owned and only
 # onyx members can reach them.
+#
+# Pool creation is its most destructive op: before formatting, privd releases
+# the mounts, the active swap area and the dm/md/loop stacks holding the disk
+# (docs/design/05 §2.3), then opens the new pool root up to --pool-mode
+# (default 0777, §2.4) so the unprivileged daemons can write into it.
 [Unit]
 Description=Onyx privilege helper (root)
 # See docs/design/04#7-privilege-helper.

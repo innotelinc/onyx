@@ -347,6 +347,12 @@ fn row_to_device(row: &rusqlite::Row) -> rusqlite::Result<Device> {
         auto: row.get(11)?,
         health_status: row.get(12)?,
         temperature_c: row.get::<_, i64>(13)? as u32,
+        // Not persisted: whether the node is openable is a property of the
+        // process's mount namespace, not of the record, so it is recomputed
+        // whenever a device is served (see StoragedService::list_devices).
+        // Asked for eagerly so the answer reaches the JSON even when it is
+        // false; the serializer drops a false it was not told to include.
+        node_present: Some(true),
     })
 }
 
@@ -442,6 +448,7 @@ mod tests {
             auto: "removable".to_string(),
             health_status: String::new(),
             temperature_c: 0,
+            node_present: Some(true),
         }
     }
 

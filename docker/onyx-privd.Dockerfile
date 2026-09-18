@@ -29,6 +29,11 @@ FROM alpine:3.20
 # Device discovery and pool inspection run through this root boundary. Keep
 # the helpers in the runtime image; the host's binaries are not visible inside
 # the container namespace.
-RUN apk add --no-cache util-linux btrfs-progs e2fsprogs smartmontools
+# util-linux = wipefs/swapoff/losetup/lsblk/mount, e2fsprogs = mkfs.ext4,
+# btrfs-progs = mkfs.btrfs, smartmontools = health, mdadm/device-mapper =
+# stopping the md and dm stacks that hold a disk an operator is erasing
+# (docs/design/05 §2.3). `device-mapper` is the Alpine package that actually
+# ships dmsetup — lvm2 depends on its libs but not on the tool.
+RUN apk add --no-cache util-linux btrfs-progs e2fsprogs smartmontools mdadm device-mapper
 COPY --from=build /out/onyx-privd /usr/local/bin/onyx-privd
 ENTRYPOINT ["/bin/sh", "-c", "umask 000; mkdir -p /run/onyx; chmod 0777 /run/onyx 2>/dev/null; exec /usr/local/bin/onyx-privd \"$@\"", "--"]

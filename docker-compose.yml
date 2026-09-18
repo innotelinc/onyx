@@ -254,6 +254,10 @@ services:
       # provider on the Shares page is all it takes to tier a bucket to it.
       # Read-only here — this service only ever reads a remote.
       - ${RCLONE_CONFIG_DIR:-./data/rclone}:/etc/rclone:ro
+      # A tier target may also be an absolute directory, which is how tiering
+      # is used without a cloud account (and how it is tested). rclone reaches
+      # it only if this container sees the pool at the same path the host uses.
+      - /mnt/onyx:/mnt/onyx:rshared
       - ${ONYX_VAULT_TOKEN_DIR:-./data/vault/token}:/vault/token:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"

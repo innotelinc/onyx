@@ -77,6 +77,96 @@ checks and fixes the host half, and `GET /storage/overview` reports the
 mismatch (per-entry `visible` flag plus an operator-actionable warning) instead
 of pretending there is nothing there.
 
+### 2.2 Which devices can become a pool
+
+Any **whole device** — a whole disk, or a loop device (a file-backed scratch
+disk) — and never a partition: a pool owns the device it is created on. There is
+no requirement that the device be *removable*: on most machines the only disks
+present are internal SATA/NVMe/SCSI/virtio devices, and gating creation on the
+hotplug flag would leave an operator with nothing to create a pool on.
+
+What protects the running system is not the hardware flag but what is
+**mounted**, which is checked twice:
+
+- `onyx-storaged` refuses a device whose filesystem (or whose partition's, or a
+  swap/LVM/RAID holder of it) is mounted anywhere outside the storage root, and
+  reports the mountpoint so the operator can decide — except under the forced
+  "erase this disk" path, where the holders are released instead (§2.3);
+- `onyx-privd` independently refuses to release a mount outside the storage root
+  before formatting.
+
+So an OS disk fails with a plain-language reason, and a disk with nothing
+mounted on it has nothing to release and formats. Re-creating a pool in place is
+the same path with `force`: Onyx's own mount is released, the device is wiped and
+re-mounted under the (possibly new) mount name.
+
+The UI labels each offered device — *mounted by Onyx* (will be re-created),
+*internal disk*, *loop device* — so the destructive step is a deliberate one, and
+never offers a device the host has mounted outside `/mnt/onyx`.
+
+A third check is about the device node rather than the device: `lsblk` reads
+`/sys`, so a disk can be listed while `/dev/<kname>` does not exist in the data
+plane's mount namespace. That happens in a nested or locked-down container (and
+in any deployment that does not pass block devices through), and without a check
+the operator picks a disk and the failure arrives *after* the destructive
+confirmation, in mkfs's words: `The file /dev/sda does not exist and no size was
+specified`. Both layers therefore require the node: `onyx-storaged` refuses the
+device before releasing anything and reports it as `node_present = false` in the
+device list (so the pool dialog hides it and says why), and `onyx-privd` checks
+again before running `wipefs`/`mkfs`/`mount`.
+
+### 2.3 Re-creating a pool on a used disk ("force erase")
+
+Pool creation is destructive, and the disk was almost always used for something
+before. `POST /pools` therefore defaults to `force` + `auto_mount`: the operator
+picked the disk in the UI, the UI states that its contents are erased, and the
+rest is Onyx's job rather than a scavenger hunt through `lsblk` output. A format
+that arrives at `mke2fs`/`mkfs.btrfs` still busy fails in the tools' words —
+`/dev/sdc is apparently in use by the system; will not make a filesystem here!`
+and `ERROR: unable to open /dev/sdc: Resource busy` — which say nothing about
+what is holding the disk or where to go next.
+
+`onyx-privd` releases the disk itself, in order, before it wipes anything:
+
+1. **Kernel stacks** — an active swap area on the disk or any of its partitions
+   (`swapoff`), a device-mapper mapping stacked on it (`dmsetup remove`), an md
+   array (`mdadm --stop`), a loop device (`losetup -d`). This is the step an
+   unmount sweep cannot cover: swap and dm/md holders survive every `umount`,
+   and they are the usual reason `mke2fs` calls a disk "in use by the system".
+2. **Mounts** — every mount of the disk *and of its partitions*, swept twice
+   (a nested mount only appears once its outer one is gone), with `umount`
+   escalating to `-f` then `-l` for a lingering handle. A mount outside the
+   storage root is never touched: it is reported and the operation stops.
+3. **Signatures** — `wipefs -a`, then the format itself, retried while the
+   kernel finishes releasing the device.
+
+Every release is named in the response (`released dm-0`, `deactivated swap on
+/dev/sdc1`), and anything that is still holding the disk afterwards is reported
+by name. `onyx-storaged` applies the same policy one layer up: with `force` a
+`[SWAP]` partition is released by privd rather than refusing the whole
+operation, because a disk that came out of an old NAS with a swap partition is
+the normal case, not an error. Any *other* bracketed holder (`[RAID]` and the
+like) is still refused with the reason.
+
+### 2.4 Pool root permissions
+
+A freshly formatted ext4/btrfs root is `root:root 0755`. That makes a new pool
+**read-only for everything that is supposed to use it**: `onyx-davd` and the
+SFTP/FTP/rsync daemons run as ordinary uids, containerised apps write as their
+image's user, the object-store tier target writes as `onyx-objectstore`, and
+SFTP/FTP share users are deliberately *not* in the `onyx` group. So after a
+successful pool mount, `onyx-privd` sets the root of that filesystem to
+`--pool-mode` (default `0777`). Per-user and per-share access control belongs to
+the protocol layer (SMB/NFS authentication, share ACLs, share ownership), not to
+the mode of the volume root.
+
+A deployment that serves a narrower protocol surface can tighten it —
+`--pool-mode 2770` with group `onyx`, matching the systemd install's own
+`/mnt/onyx` (`2770 root:onyx`, `deploy/tmpfiles.d/onyx.conf`) — at the cost of
+SFTP/FTP/WebDAV and app writes, which then have no write access. The failure is
+reported, not silent: privd logs the mode it applied and returns a note when it
+cannot apply it.
+
 ## 5. Quotas and capacity
 
 - **Quotas:** `btrfs qgroup` per user and per share; enforced soft (warn) + hard (block)
@@ -103,7 +193,7 @@ options) and translate it to per-daemon config. Shares are created once, exposed
 | **NFS** | Linux NFS | NFSv4 with Kerberos optional; `fsid` per share; squash settings; only exposed on demand (never by default) |
 | **FTP** | vsftpd | Explicit FTPS (TLS) required by default; chroot to share root; virtual users mapped to Onyx users |
 | **SFTP** | Dedicated `sshd` instance | Scoped config (`Subsystem sftp`, `ForceCommand internal-sftp`, chroot) on its own port (2222, so the host's admin SSH is untouched); keys live in `/etc/onyx/conf.d/sftp/authorized_keys/%u` because a chrooted user's `%h` is inside the share, where the share owner could replace them |
-| **WebDAV** | Go WebDAV server (`onyx-davd`, `services/davd`) | HTTPS only, integrates with the API auth layer (session or app token); ideal for cloud-sync clients (Nextcloud desktop, RaiDrive). Serves `/webdav/<share>` on loopback, renders no TLS itself and authenticates nobody itself — it requires the gateway's identity header (`X-Onyx-User`), so a request that bypassed the gateway is rejected rather than trusted. NPM provisions the matching location (`WEBDAV_SUBDOMAIN`, default the console host) and maps Authentik's forward-auth username onto that header, which is what makes the connection string the Shares page copies out a URL that works |
+| **WebDAV** | Go WebDAV server (`onyx-davd`, `services/davd`) | HTTPS only, integrates with the API auth layer (session or app token); ideal for cloud-sync clients (Nextcloud desktop, RaiDrive). Serves `/webdav/<share>` on loopback, renders no TLS itself and authenticates nobody itself — it requires the gateway's identity header (`X-Onyx-User`), so a request that bypassed the gateway is rejected rather than trusted. NPM provisions the matching location (`WEBDAV_SUBDOMAIN`, default the console host) and maps Authentik's forward-auth username onto that header, which is what makes the connection string the Shares page copies out a URL that works. Before any share enables WebDAV the rendered `davd.conf` does not exist yet, which the systemd unit gates on (`ConditionPathExists`); the daemon itself serves an empty share table and picks the file up when it appears, so a containerized deployment does not restart-loop waiting for a config it cannot condition on |
 | **Rsync** | `rsyncd` via systemd socket | Read/write modules per share, restricted to configured users, chroot-style path containment |
 
 **Exposure policy:** every protocol is **off by default**; enabling it is an explicit,

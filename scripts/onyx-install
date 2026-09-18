@@ -34,7 +34,8 @@
 #   --prefix PATH   install prefix (default /usr/local)
 #   --destdir DIR   stage all file writes under DIR (packaging/tests)
 #   --install-deps  apt-get install optional packages (samba, nfs-kernel-server,
-#                   vsftpd, openssh-server, rsync, smartmontools, btrfs-progs)
+#                   vsftpd, openssh-server, rsync, smartmontools, btrfs-progs,
+#                   util-linux, e2fsprogs, mdadm, dmsetup)
 #                   so onyx can actually serve every sharing protocol
 #   --enable-pool   enable + start onyx-pool.service (btrfs data pool auto-mount)
 #   --enable-firstboot  enable + start onyx-firstboot.service (console wizard)
@@ -205,8 +206,10 @@ if [ "$INSTALL_DEPS" = 1 ] && [ -z "$DESTDIR" ]; then
   say "installing optional daemon packages (samba, nfs, vsftpd, ssh, rsync, smartmontools, btrfs-progs)"
   run apt-get update
   # vsftpd = FTP(S), openssh-server = the dedicated onyx-sftp instance,
-  # rsync = rsyncd modules (docs/design/05#6).
-  run apt-get install -y samba nfs-kernel-server vsftpd openssh-server rsync smartmontools btrfs-progs
+  # rsync = rsyncd modules (docs/design/05#6). util-linux = wipefs/swapoff/
+  # losetup, e2fsprogs = mkfs.ext4, mdadm/dmsetup = stopping the md and dm
+  # stacks that hold a disk an operator erases (docs/design/05#2.3).
+  run apt-get install -y samba nfs-kernel-server vsftpd openssh-server rsync smartmontools btrfs-progs util-linux e2fsprogs mdadm dmsetup
 fi
 
 # --- 6. enable + start --------------------------------------------------------
@@ -234,7 +237,8 @@ if [ -z "$DESTDIR" ] && [ "$DRY_RUN" = 0 ]; then
   echo "  $BINCLI/onyx status"
   echo
   echo "Optional daemon packages were not installed (samba, nfs-kernel-server,"
-  echo "vsftpd, openssh-server, rsync, smartmontools, btrfs-progs). Shares save"
+  echo "vsftpd, openssh-server, rsync, smartmontools, btrfs-progs, util-linux,"
+  echo "e2fsprogs, mdadm, dmsetup). Shares save"
   echo "to /etc/onyx/conf.d and reload"
   echo "is attempted through privd; those daemons need to exist for serving."
   echo "Re-run: sudo scripts/onyx-install --install-deps"

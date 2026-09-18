@@ -118,6 +118,15 @@ propagation_of() {
 }
 if [ "$(id -u)" = "0" ]; then
   mkdir -p "$STORAGE_ROOT"
+  # The containers run as their own `onyx` user (uid 100) with no counterpart on
+  # the host, so a root:root 0755 storage root is writable by nobody in the
+  # stack: uploads, mkdir, apps and a bucket's tier target all fail with
+  # "permission denied". The systemd install expresses the same intent as
+  # `2770 root:onyx` in deploy/tmpfiles.d/onyx.conf — a group the host actually
+  # has. Compose has no such group, so the root is opened up instead; on a
+  # dedicated appliance host that is the same trust level as the pool roots
+  # onyx-privd now creates (--pool-mode, default 0777).
+  chmod 0777 "$STORAGE_ROOT" 2>/dev/null || true
   if [ "$(propagation_of "$STORAGE_ROOT")" = "shared" ]; then
     log "storage root ${STORAGE_ROOT} is shared — pool mounts propagate to every container"
   elif mount --make-shared "$STORAGE_ROOT" 2>/dev/null; then
