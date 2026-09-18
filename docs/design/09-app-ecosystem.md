@@ -109,6 +109,12 @@ store:
 - Apps cannot see: the host unix sockets, other apps' subvolumes, the API token, or the
   keyring. Apps reach the API only via an injected, scoped app token with their declared
   `integrations`.
+- **Enforced, not just documented:** `onyx-appd` refuses a catalog manifest at startup
+  when any of its services is privileged, shares a host namespace, adds a dangerous
+  capability back, omits `no-new-privileges`/`cap_drop`/`pids_limit`/`mem_limit`, or
+  bind-mounts a path that is not a named volume or a location under the storage root.
+  Install-time path settings are confined to the storage root the same way, so an
+  operator's input cannot widen an app's reach.
 
 ## 7. SDK
 

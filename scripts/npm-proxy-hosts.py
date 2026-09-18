@@ -81,6 +81,36 @@ def with_device_trust(existing: str, subdomain: str) -> str:
     return (block + text).strip() + "\n" if text.strip() else block
 
 
+# WebDAV ingress (docs/design/05 §5). onyx-davd serves /webdav/<share>, but it
+# authenticates nobody itself: it requires the identity header its gateway
+# asserts and refuses a request that has none. So the gateway has to assert it,
+# and the username comes from the Authentik forward-auth header — which is what
+# makes the WebDAV connection string the Shares page copies out a URL that works
+# instead of one that answers 401.
+WEBDAV_SUBDOMAIN = os.environ.get("WEBDAV_SUBDOMAIN", "app").strip() or "app"
+WEBDAV_TARGET = os.environ.get("WEBDAV_TARGET", "onyx-davd:8081").strip()
+WEBDAV_IDENTITY_HEADER = "X-Onyx-User"
+WEBDAV_IDENTITY_SOURCE = "$http_x_authentik_username"
+
+
+def webdav_location() -> dict:
+    """The /webdav location added to the WebDAV subdomain's proxy host."""
+    host, _, port = WEBDAV_TARGET.partition(":")
+    return {
+        "path": "/webdav",
+        "forward_scheme": "http",
+        "forward_host": host,
+        "forward_port": int(port or 8081),
+        # The path is preserved: davd routes on /webdav/<share>, so a rewrite
+        # would send every request to a share named nothing.
+        "forward_path": "/webdav",
+        "advanced_config": (
+            "# managed by npm-proxy-hosts.py (webdav identity, docs/design/05 §5)\n"
+            f"proxy_set_header {WEBDAV_IDENTITY_HEADER} {WEBDAV_IDENTITY_SOURCE};\n"
+        ),
+    }
+
+
 def die(msg: str) -> None:
     print(f"[npm-proxy-hosts] error: {msg}", file=sys.stderr)
     sys.exit(1)
@@ -203,7 +233,9 @@ def ensure_proxy_hosts(token: str, cert_id: int) -> list[dict]:
             "allow_websocket_upgrade": sub in ("app", "api", "admin"),
             "access_list_id": "0",
             "advanced_config": with_device_trust(existing.get("advanced_config") if existing else "", sub),
-            "locations": [],
+            # The WebDAV surface lives under /webdav on one subdomain (default
+            # the console host, so the URL the Shares page advertises resolves).
+            "locations": [webdav_location()] if sub == WEBDAV_SUBDOMAIN else [],
             "hsts_enabled": False,
             "hsts_subdomains": False,
             "http2_support": True,
@@ -230,6 +262,12 @@ def main() -> None:
     width = max(len(r["fqdn"]) for r in results)
     for r in results:
         print(f"  https://{r['fqdn']:<{width}}  ->  {r['target']}  ({r['action']}, {r['gate']})")
+    print(
+        "\nWebDAV: https://{fqdn}/webdav/<share> -> {target} (identity header "
+        "{header}, from Authentik forward-auth)".format(
+            fqdn=f"{WEBDAV_SUBDOMAIN}.{DOMAIN}", target=WEBDAV_TARGET, header=WEBDAV_IDENTITY_HEADER
+        )
+    )
     if DEVICE_TRUST_SUBDOMAINS:
         print(
             "\nDevice trust: {subs} require a client certificate from the ONYX device CA.\n"
