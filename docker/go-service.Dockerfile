@@ -26,6 +26,7 @@ RUN case "${SERVICE}" in \
       onyx-appd) DIR=appd ;; \
       onyx-ai) DIR=ai ;; \
       onyx-objectstore) DIR=objectstore ;; \
+      onyx-davd) DIR=davd ;; \
       *) echo "unknown SERVICE: ${SERVICE}" >&2; exit 1 ;; \
     esac \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/innotelinc/onyx/services/version.Version=${VERSION} -X github.com/innotelinc/onyx/services/version.Commit=${COMMIT}" -o /out/onyx ./services/${DIR}
@@ -36,7 +37,8 @@ RUN case "${SERVICE}" in \
 # root; the rest run as the unprivileged "onyx" user).
 FROM alpine:3.20
 ARG SERVICE
-RUN if [ "${SERVICE}" = "onyx-api" ] || [ "${SERVICE}" = "onyx-backupd" ]; then apk add --no-cache rclone; fi \
+RUN if [ "${SERVICE}" = "onyx-api" ] || [ "${SERVICE}" = "onyx-backupd" ] || [ "${SERVICE}" = "onyx-objectstore" ]; then apk add --no-cache rclone; fi \
+    && if [ "${SERVICE}" = "onyx-appd" ]; then apk add --no-cache docker-cli docker-cli-compose; fi \
     && addgroup -S onyx && adduser -S -G onyx onyx \
     && mkdir -p /run/onyx \
     && for d in api core shared snapd backupd vmm appd ai objectstore; do mkdir -p "/var/lib/onyx/$d"; done \

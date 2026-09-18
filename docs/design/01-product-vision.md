@@ -86,16 +86,20 @@ Kubernetes, tape backup, S3 *serving* (outbound only), AD domain *controller* (j
 | **v0.1 "Cinder"** | Skeleton | Bootable image, OSTree base, `onyx-core`, storage service, API, minimal CLI |
 | **v0.2 "Flint"** | Files | Web UI shell + design system, file explorer, SMB/NFS shares, users & permissions |
 | **v0.3 "Obsidian"** | Safety | Snapshots + rollback UI, scrub scheduling, backup jobs, SMART monitoring, notifications |
-| **v0.4 "Jade"** | Apps | App store + sandboxing, Docker integration, SFTP/FTP/WebDAV/Rsync protocol surface |
+| **v0.4 "Jade"** | Apps | App store + sandboxing, Docker integration, VMs, object storage + hybrid cloud, SFTP/FTP/WebDAV/Rsync protocol surface |
 | **v0.5 "Quartz"** | Intelligence | AI admin assistant, audit reporting, advanced search, mobile app |
 | **v1.0** | Release | Security audit, docs, hardening, LTS update channel |
 
-> **Status (September 2026).** v0.3 "Obsidian" is the active release line. The
-> v0.2 Flint Prism shell now has versioned API-backed snapshot, backup, user-role,
-> and share-permission views. Obsidian adds persistent snapshot catalogs and backup
-> histories, rollback and recovery-report endpoints, plus SMART-backed device health
-> from `onyx-storaged`; v0.4 "Jade" is next for the app store and full protocol
-> surface.
+> **Status (September 2026).** v0.4 "Jade" is the active release line. The v0.2
+> Flint Prism shell has versioned API-backed snapshot, backup, user-role and
+> share-permission views; Obsidian added persistent snapshot catalogs and backup
+> histories, rollback and recovery-report endpoints, plus SMART-backed device
+> health from `onyx-storaged`. Jade adds the platform surfaces: apps from the
+> store running as containers (`onyx-appd`), virtual machines on libvirt/KVM with
+> their disk images on the pool (`onyx-vmm`), shares speaking SMB, NFS, FTP, SFTP,
+> WebDAV and rsync, and S3-compatible object storage whose buckets are local,
+> cloud-primary or tiered to a remote (`onyx-objectstore`). v0.5 "Quartz" is next
+> for the intelligence surfaces.
 
 ## 8. Open-source governance and licensing
 

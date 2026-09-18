@@ -38,9 +38,11 @@ minute and idles under 512 MB RAM.
 > virtualization, S3-compatible object storage, backup management, cloud synchronization
 > and application hosting in one self-hosted stack — SSO everywhere via Cerulean
 > Authentik, safe by default with Btrfs snapshots and atomic A/B rollback, and no cloud
-> account required. Currently at **v0.3 "Obsidian"**: the control/data plane, Prism admin surface,
-> user/share permission metadata, snapshots, backup jobs, and SMART-backed device
-> health are shipped; the v0.4 app milestone is next.
+> account required. Currently at **v0.4 "Jade"**: the control/data plane, Prism admin surface,
+> user/share permission metadata, snapshots, backup jobs and SMART-backed device health are
+> shipped, together with the app store and container runtime, virtual machines on
+> libvirt/KVM, the full share-protocol surface (SMB, NFS, FTP, SFTP, WebDAV, rsync) and
+> S3-compatible object storage with hybrid-cloud tiering. The v0.5 intelligence milestone is next.
 >
 > **Landing page:** [innotelinc.github.io/onyx](https://innotelinc.github.io/onyx) ·
 > **Design docs:** [innotelinc.github.io/onyx/docs](https://innotelinc.github.io/onyx/docs)
@@ -53,10 +55,10 @@ Primary domain: `onyx.innotel.us`
 
 | Service | URL | Backed by |
 |---------|-----|-----------|
-| App (web UI) | `https://app.onyx.innotel.us` | `onyx-web` (placeholder, Prism SPA in v0.2) |
+| App (web UI) | `https://app.onyx.innotel.us` | `onyx-web` — the Prism console (files, storage, snapshots, backups, apps, VMs, shares, objects, users) |
 | API gateway | `https://api.onyx.innotel.us` | `onyx-api` — health at `/healthz`, status at `/api/v1/system/status` |
 | Identity / SSO | `https://auth.onyx.innotel.us` | Cerulean Authentik (shared; also served as `auth.cerulean.innotel.us`) |
-| Storage (S3-compatible) | `https://storage.onyx.innotel.us` | `onyx-objectstore` (S3 endpoint — every request needs credentials) |
+| Storage (S3-compatible) | `https://storage.onyx.innotel.us` | `onyx-objectstore` (S3 endpoint — every request needs credentials; buckets are local, cloud-primary or tiered to a remote) |
 | Backup | `https://backup.onyx.innotel.us` | `onyx-backupd` — health at `/healthz`, jobs at `/api/v1/backups` |
 | Admin | `https://admin.onyx.innotel.us` | **reserved** — no admin surface yet; the host exists so its certificate and edge wiring are ready |
 
@@ -152,15 +154,20 @@ On top of that, the **platform layer** is in place:
   idempotent proxy-host create/update for every subdomain.
 - `.github/workflows/` — CI (bootstrap → vet → test → build) and release
   (tagged builds publish GHCR images and attach tarball + checksum artifacts).
-- New platform daemons (`onyx-snapd`, `onyx-backupd`, `onyx-vmm`, `onyx-appd`,
-  `onyx-ai`, `onyx-objectstore`) as compilable gRPC service skeletons with
-  proto contracts — see [`services/README.md`](services/README.md).
+- Platform daemons (`onyx-snapd`, `onyx-backupd`, `onyx-vmm`, `onyx-appd`,
+  `onyx-davd`, `onyx-ai`, `onyx-objectstore`) with proto contracts — see
+  [`services/README.md`](services/README.md).
 
-The v0.2 Flint and v0.3 Obsidian foundations are now integrated: the Prism shell
-reads the versioned API, user roles and share grants persist without storing
-credentials, snapshots survive restarts, backup jobs retain history, and the API
-exposes rollback, recovery reports, and SMART-backed device health. v0.4 Jade is
-next for the app store and full protocol surface.
+The v0.2 Flint and v0.3 Obsidian foundations are integrated: the Prism shell reads
+the versioned API, user roles and share grants persist without storing credentials,
+snapshots survive restarts, backup jobs retain history, and the API exposes rollback,
+recovery reports, and SMART-backed device health.
+
+**v0.4 Jade** adds the platform surfaces: apps from the store run as containers
+(`onyx-appd`), virtual machines run on libvirt/KVM with their disks on the pool
+(`onyx-vmm`), shares speak SMB, NFS, FTP, SFTP, WebDAV and rsync, and
+`onyx-objectstore` serves S3 buckets that are local, cloud-primary or tiered to a
+remote — see [docs/design/11](docs/design/11-platform-and-cloud.md).
 
 ## Quick start (Docker platform)
 

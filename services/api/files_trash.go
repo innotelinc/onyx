@@ -1,17 +1,22 @@
 package main
 
 import (
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
 type trashStatus struct {
-	SizeBytes    int64  `json:"size_bytes"`
-	Items        int    `json:"items"`
-	StorageTotal int64  `json:"storage_total_bytes"`
-	StorageFree  int64  `json:"storage_free_bytes"`
+	SizeBytes int64 `json:"size_bytes"`
+	Items     int   `json:"items"`
+	// Deprecated: the storage totals used to describe whatever filesystem the
+	// storage root happened to sit on — on a normal install the host's system
+	// disk, not the pool. They now report mounted pool capacity only, and
+	// GET /api/v1/storage/overview is the endpoint to use: it carries the
+	// per-pool detail and the reason when nothing is visible.
+	StorageTotal int64 `json:"storage_total_bytes"`
+	StorageFree  int64 `json:"storage_free_bytes"`
 }
 
 func (s *server) handleTrash(w http.ResponseWriter, r *http.Request) {
@@ -19,6 +24,14 @@ func (s *server) handleTrash(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeEnvelope(w, http.StatusInternalServerError, apiError{Code: "internal", Message: err.Error()})
 		return
+	}
+	// Capacity comes from the pool-aware overview, never from an unqualified
+	// statfs of the storage root. A missing data plane leaves the totals at
+	// zero rather than substituting the wrong filesystem's numbers.
+	if overview, err := s.storageOverview(r.Context()); err == nil {
+		status.StorageTotal, status.StorageFree = overview.TotalBytes, overview.FreeBytes
+	} else {
+		slog.Warn("trash status: storage overview unavailable", "error", err)
 	}
 	writeJSON(w, http.StatusOK, status)
 }
@@ -80,11 +93,6 @@ func (s *server) trashStatus() (trashStatus, error) {
 				out.SizeBytes += info.Size()
 			}
 		}
-	}
-	var fs syscall.Statfs_t
-	if err := syscall.Statfs(s.filesRoot, &fs); err == nil {
-		out.StorageTotal = int64(fs.Blocks) * int64(fs.Bsize)
-		out.StorageFree = int64(fs.Bavail) * int64(fs.Bsize)
 	}
 	return out, nil
 }

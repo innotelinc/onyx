@@ -31,8 +31,11 @@ services:
       - onyx-sockets:/run/onyx
       - onyx-config:/etc/onyx/conf.d
       - /dev:/dev
-      # shared propagation so mounts made inside privd reach storaged and the host
-      - /mnt/onyx:/mnt/onyx:shared
+      # rshared propagation so the pool mounts privd creates reach storaged, the
+      # API and the host — the host path must be a shared mount too, which
+      # setup.sh ensures (`mount --make-shared /mnt/onyx`). Without both halves
+      # privd sees the pool and the API does not.
+      - /mnt/onyx:/mnt/onyx:rshared
     restart: unless-stopped
 
   onyx-storaged:
@@ -45,7 +48,7 @@ services:
     volumes:
       - onyx-sockets:/run/onyx
       - /dev:/dev
-      - /mnt/onyx:/mnt/onyx:shared
+      - /mnt/onyx:/mnt/onyx:rshared
     command: ["--mount-root", "/mnt/onyx"]
     restart: unless-stopped
 
@@ -94,8 +97,9 @@ services:
       - ${RCLONE_CONFIG_DIR:-./data/rclone}:/etc/rclone
       # The file explorer and safe mutations operate on the same host storage
       # root as storaged; without this bind mount /mnt/onyx is absent in the API
-      # container even while the data plane can see it.
-      - /mnt/onyx:/mnt/onyx:shared
+      # container even while the data plane can see it. rshared so pool mounts
+      # created by privd appear here as well (see the onyx-privd comment).
+      - /mnt/onyx:/mnt/onyx:rshared
       # This product's Vault token, read-only. Cerulean's Vault bootstrap mints
       # it (VAULT_PRODUCT_TOKENS=onyx there) and renews it in place; the stack
       # only ever reads it. See data/vault/token/ (gitignored).
@@ -178,6 +182,20 @@ services:
     volumes:
       - onyx-sockets:/run/onyx
       - onyx-appd-state:/var/lib/onyx/appd
+      # onyx-appd drives the host's engine (`docker compose`) to run app
+      # containers, so it needs the daemon socket. Socket access is
+      # root-equivalent, which is why the image's unprivileged user is granted
+      # exactly that one group (DOCKER_GID) rather than the whole of root.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # App data lives on the pool, mounted at the same path the host uses, so a
+      # manifest's bind mount resolves to real pool storage on both sides and is
+      # snapshotted with everything else.
+      - /mnt/onyx:/mnt/onyx:rshared
+    group_add:
+      # The host's docker group id: DOCKER_GID=$(getent group docker | cut -d: -f3)
+      - "${DOCKER_GID:-999}"
+    # --host is the public name apps use in the URLs the UI shows an operator.
+    command: ["--compose-bin", "docker", "--host", "${DOMAIN:-onyx.innotel.us}"]
     restart: unless-stopped
 
   onyx-ai:
@@ -231,6 +249,11 @@ services:
     volumes:
       - onyx-sockets:/run/onyx
       - onyx-objectstore-state:/var/lib/onyx/objectstore
+      # The same remote catalog onyx-api writes and onyx-backupd reads: a
+      # CLOUD/TIERED bucket targets one of these remotes, so configuring a
+      # provider on the Shares page is all it takes to tier a bucket to it.
+      # Read-only here — this service only ever reads a remote.
+      - ${RCLONE_CONFIG_DIR:-./data/rclone}:/etc/rclone:ro
       - ${ONYX_VAULT_TOKEN_DIR:-./data/vault/token}:/vault/token:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -251,7 +274,9 @@ services:
       VAULT_NAMESPACE: ${VAULT_NAMESPACE:-}
       VAULT_SKIP_VERIFY: ${VAULT_SKIP_VERIFY:-}
       VAULT_CACERT: ${VAULT_CACERT:-}
-    command: ["--http-listen", "0.0.0.0:9000"]
+    # --rclone-config points at the shared catalog bind-mounted above; an empty
+    # --rclone-bin would disable cloud tiers entirely.
+    command: ["--http-listen", "0.0.0.0:9000", "--rclone-config", "/etc/rclone/rclone.conf"]
     # Memory posture: object store buffers uploads; cap moderately.
     mem_limit: 1g
     memswap_limit: 1g
@@ -259,6 +284,34 @@ services:
     # host — 9000 belongs to prefect there).
     ports:
       - "${ONYX_OBJECTSTORE_PORT:-2090}:9000"
+    restart: unless-stopped
+
+  onyx-davd:
+    build:
+      context: .
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-davd }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-davd:${IMAGE_TAG:-latest}
+    <<: *onyx-sockets
+    volumes:
+      - onyx-sockets:/run/onyx
+      # The share table onyx-core renders (SIGHUP reloads it). Read-only: davd
+      # never writes config, only privd does.
+      - onyx-config:/etc/onyx/conf.d:ro
+      # The same host storage root storaged mounts pools under, so a WebDAV
+      # share is the real directory rather than a copy.
+      - /mnt/onyx:/mnt/onyx:rshared
+    # LAN ingress for the shared NPM: the WebDAV surface, at the /webdav/<share>
+    # path the Shares page advertises (map an NPM location for /webdav here).
+    # davd authenticates nobody itself: it requires the identity header the
+    # gateway sets (X-Onyx-User, e.g. from an Authentik-gated proxy host), so a
+    # request that reaches this port directly is refused with 401.
+    ports:
+      - "${ONYX_WEBDAV_PORT:-2082}:8081"
+    command: ["--listen", "0.0.0.0:8081"]
+    # Memory posture: davd streams file bodies through; it holds no state.
+    mem_limit: 512m
+    memswap_limit: 512m
     restart: unless-stopped
 
   onyx-web:

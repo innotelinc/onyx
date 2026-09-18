@@ -331,6 +331,10 @@ func sftpGlobalSkeleton() string {
 		"UsePAM no\n" +
 		"PasswordAuthentication no\n" +
 		"PermitRootLogin no\n" +
+		// Every share is a chroot, so the per-user key file has to live outside
+		// it: %h would resolve inside the chroot, where a share owner could
+		// replace the keys. Onyx users' keys are managed in this one directory.
+		"AuthorizedKeysFile /etc/onyx/conf.d/sftp/authorized_keys/%u\n" +
 		"Subsystem sftp internal-sftp\n" +
 		"AllowGroups onyx-sftp\n" +
 		"\n" +

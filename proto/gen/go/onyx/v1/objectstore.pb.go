@@ -80,9 +80,23 @@ type Bucket struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Tier  BucketTier             `protobuf:"varint,2,opt,name=tier,proto3,enum=onyx.v1.BucketTier" json:"tier,omitempty"`
-	// External endpoint/prefix when tier is CLOUD or TIERED.
-	CloudTarget   string `protobuf:"bytes,3,opt,name=cloud_target,json=cloudTarget,proto3" json:"cloud_target,omitempty"`
-	CreatedAt     string `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// External target when tier is CLOUD or TIERED: a configured rclone remote
+	// name, optionally with a path (`b2-archive` or `b2-archive:offsite`). Each
+	// bucket is stored under `onyx-objectstore/<bucket>` inside that target.
+	CloudTarget string `protobuf:"bytes,3,opt,name=cloud_target,json=cloudTarget,proto3" json:"cloud_target,omitempty"`
+	CreatedAt   string `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// Hybrid-cloud state, refreshed by SyncBucket. cloud_objects is what the
+	// last verified sync saw in the cloud target — it is a recorded observation,
+	// not a live count, because counting the cloud side means a network round
+	// trip and ListBuckets must stay cheap.
+	LocalObjects int64  `protobuf:"varint,5,opt,name=local_objects,json=localObjects,proto3" json:"local_objects,omitempty"`
+	CloudObjects int64  `protobuf:"varint,6,opt,name=cloud_objects,json=cloudObjects,proto3" json:"cloud_objects,omitempty"`
+	LastSyncAt   string `protobuf:"bytes,7,opt,name=last_sync_at,json=lastSyncAt,proto3" json:"last_sync_at,omitempty"`
+	// evict_after_days is the TIERED age past which a locally cached object may
+	// be released once its cloud copy is verified (0 = never evict).
+	EvictAfterDays int32 `protobuf:"varint,8,opt,name=evict_after_days,json=evictAfterDays,proto3" json:"evict_after_days,omitempty"`
+	// sync_error is the last sync failure for this bucket, empty when healthy.
+	SyncError     string `protobuf:"bytes,9,opt,name=sync_error,json=syncError,proto3" json:"sync_error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -141,6 +155,41 @@ func (x *Bucket) GetCloudTarget() string {
 func (x *Bucket) GetCreatedAt() string {
 	if x != nil {
 		return x.CreatedAt
+	}
+	return ""
+}
+
+func (x *Bucket) GetLocalObjects() int64 {
+	if x != nil {
+		return x.LocalObjects
+	}
+	return 0
+}
+
+func (x *Bucket) GetCloudObjects() int64 {
+	if x != nil {
+		return x.CloudObjects
+	}
+	return 0
+}
+
+func (x *Bucket) GetLastSyncAt() string {
+	if x != nil {
+		return x.LastSyncAt
+	}
+	return ""
+}
+
+func (x *Bucket) GetEvictAfterDays() int32 {
+	if x != nil {
+		return x.EvictAfterDays
+	}
+	return 0
+}
+
+func (x *Bucket) GetSyncError() string {
+	if x != nil {
+		return x.SyncError
 	}
 	return ""
 }
@@ -226,12 +275,14 @@ func (x *ListBucketsResponse) GetBuckets() []*Bucket {
 }
 
 type CreateBucketRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Tier          BucketTier             `protobuf:"varint,2,opt,name=tier,proto3,enum=onyx.v1.BucketTier" json:"tier,omitempty"`
-	CloudTarget   string                 `protobuf:"bytes,3,opt,name=cloud_target,json=cloudTarget,proto3" json:"cloud_target,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Name        string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Tier        BucketTier             `protobuf:"varint,2,opt,name=tier,proto3,enum=onyx.v1.BucketTier" json:"tier,omitempty"`
+	CloudTarget string                 `protobuf:"bytes,3,opt,name=cloud_target,json=cloudTarget,proto3" json:"cloud_target,omitempty"`
+	// evict_after_days applies to TIERED buckets (0 = keep every local copy).
+	EvictAfterDays int32 `protobuf:"varint,4,opt,name=evict_after_days,json=evictAfterDays,proto3" json:"evict_after_days,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *CreateBucketRequest) Reset() {
@@ -283,6 +334,13 @@ func (x *CreateBucketRequest) GetCloudTarget() string {
 		return x.CloudTarget
 	}
 	return ""
+}
+
+func (x *CreateBucketRequest) GetEvictAfterDays() int32 {
+	if x != nil {
+		return x.EvictAfterDays
+	}
+	return 0
 }
 
 type DeleteBucketRequest struct {
@@ -734,24 +792,166 @@ func (x *DeleteObjectResponse) GetDeleted() bool {
 	return false
 }
 
+type SyncBucketRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// evict releases local copies that are older than evict_after_days and
+	// verified present in the cloud target. Off by default so a sync is never
+	// destructive unless the caller asked for it.
+	Evict         bool `protobuf:"varint,2,opt,name=evict,proto3" json:"evict,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SyncBucketRequest) Reset() {
+	*x = SyncBucketRequest{}
+	mi := &file_onyx_v1_objectstore_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SyncBucketRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SyncBucketRequest) ProtoMessage() {}
+
+func (x *SyncBucketRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_objectstore_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SyncBucketRequest.ProtoReflect.Descriptor instead.
+func (*SyncBucketRequest) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_objectstore_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *SyncBucketRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SyncBucketRequest) GetEvict() bool {
+	if x != nil {
+		return x.Evict
+	}
+	return false
+}
+
+type SyncBucketResponse struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Bucket *Bucket                `protobuf:"bytes,1,opt,name=bucket,proto3" json:"bucket,omitempty"`
+	// uploaded is how many local objects the cloud target gained;
+	// evicted is how many local copies were released after verification.
+	Uploaded int64 `protobuf:"varint,2,opt,name=uploaded,proto3" json:"uploaded,omitempty"`
+	Evicted  int64 `protobuf:"varint,3,opt,name=evicted,proto3" json:"evicted,omitempty"`
+	// detail is the transport's own summary line, for the operator.
+	Detail        string   `protobuf:"bytes,4,opt,name=detail,proto3" json:"detail,omitempty"`
+	Warnings      []string `protobuf:"bytes,5,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SyncBucketResponse) Reset() {
+	*x = SyncBucketResponse{}
+	mi := &file_onyx_v1_objectstore_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SyncBucketResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SyncBucketResponse) ProtoMessage() {}
+
+func (x *SyncBucketResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_objectstore_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SyncBucketResponse.ProtoReflect.Descriptor instead.
+func (*SyncBucketResponse) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_objectstore_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *SyncBucketResponse) GetBucket() *Bucket {
+	if x != nil {
+		return x.Bucket
+	}
+	return nil
+}
+
+func (x *SyncBucketResponse) GetUploaded() int64 {
+	if x != nil {
+		return x.Uploaded
+	}
+	return 0
+}
+
+func (x *SyncBucketResponse) GetEvicted() int64 {
+	if x != nil {
+		return x.Evicted
+	}
+	return 0
+}
+
+func (x *SyncBucketResponse) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+func (x *SyncBucketResponse) GetWarnings() []string {
+	if x != nil {
+		return x.Warnings
+	}
+	return nil
+}
+
 var File_onyx_v1_objectstore_proto protoreflect.FileDescriptor
 
 const file_onyx_v1_objectstore_proto_rawDesc = "" +
 	"\n" +
-	"\x19onyx/v1/objectstore.proto\x12\aonyx.v1\"\x87\x01\n" +
+	"\x19onyx/v1/objectstore.proto\x12\aonyx.v1\"\xbc\x02\n" +
 	"\x06Bucket\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
 	"\x04tier\x18\x02 \x01(\x0e2\x13.onyx.v1.BucketTierR\x04tier\x12!\n" +
 	"\fcloud_target\x18\x03 \x01(\tR\vcloudTarget\x12\x1d\n" +
 	"\n" +
-	"created_at\x18\x04 \x01(\tR\tcreatedAt\"\x14\n" +
+	"created_at\x18\x04 \x01(\tR\tcreatedAt\x12#\n" +
+	"\rlocal_objects\x18\x05 \x01(\x03R\flocalObjects\x12#\n" +
+	"\rcloud_objects\x18\x06 \x01(\x03R\fcloudObjects\x12 \n" +
+	"\flast_sync_at\x18\a \x01(\tR\n" +
+	"lastSyncAt\x12(\n" +
+	"\x10evict_after_days\x18\b \x01(\x05R\x0eevictAfterDays\x12\x1d\n" +
+	"\n" +
+	"sync_error\x18\t \x01(\tR\tsyncError\"\x14\n" +
 	"\x12ListBucketsRequest\"@\n" +
 	"\x13ListBucketsResponse\x12)\n" +
-	"\abuckets\x18\x01 \x03(\v2\x0f.onyx.v1.BucketR\abuckets\"u\n" +
+	"\abuckets\x18\x01 \x03(\v2\x0f.onyx.v1.BucketR\abuckets\"\x9f\x01\n" +
 	"\x13CreateBucketRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
 	"\x04tier\x18\x02 \x01(\x0e2\x13.onyx.v1.BucketTierR\x04tier\x12!\n" +
-	"\fcloud_target\x18\x03 \x01(\tR\vcloudTarget\"?\n" +
+	"\fcloud_target\x18\x03 \x01(\tR\vcloudTarget\x12(\n" +
+	"\x10evict_after_days\x18\x04 \x01(\x05R\x0eevictAfterDays\"?\n" +
 	"\x13DeleteBucketRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05force\x18\x02 \x01(\bR\x05force\"0\n" +
@@ -781,21 +981,32 @@ const file_onyx_v1_objectstore_proto_rawDesc = "" +
 	"\x06bucket\x18\x01 \x01(\tR\x06bucket\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\"0\n" +
 	"\x14DeleteObjectResponse\x12\x18\n" +
-	"\adeleted\x18\x01 \x01(\bR\adeleted*K\n" +
+	"\adeleted\x18\x01 \x01(\bR\adeleted\"=\n" +
+	"\x11SyncBucketRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
+	"\x05evict\x18\x02 \x01(\bR\x05evict\"\xa7\x01\n" +
+	"\x12SyncBucketResponse\x12'\n" +
+	"\x06bucket\x18\x01 \x01(\v2\x0f.onyx.v1.BucketR\x06bucket\x12\x1a\n" +
+	"\buploaded\x18\x02 \x01(\x03R\buploaded\x12\x18\n" +
+	"\aevicted\x18\x03 \x01(\x03R\aevicted\x12\x16\n" +
+	"\x06detail\x18\x04 \x01(\tR\x06detail\x12\x1a\n" +
+	"\bwarnings\x18\x05 \x03(\tR\bwarnings*K\n" +
 	"\n" +
 	"BucketTier\x12\x1b\n" +
 	"\x17BUCKET_TIER_UNSPECIFIED\x10\x00\x12\t\n" +
 	"\x05LOCAL\x10\x01\x12\t\n" +
 	"\x05CLOUD\x10\x02\x12\n" +
 	"\n" +
-	"\x06TIERED\x10\x032\xb1\x03\n" +
+	"\x06TIERED\x10\x032\xf8\x03\n" +
 	"\vObjectStore\x12H\n" +
 	"\vListBuckets\x12\x1b.onyx.v1.ListBucketsRequest\x1a\x1c.onyx.v1.ListBucketsResponse\x12=\n" +
 	"\fCreateBucket\x12\x1c.onyx.v1.CreateBucketRequest\x1a\x0f.onyx.v1.Bucket\x12K\n" +
 	"\fDeleteBucket\x12\x1c.onyx.v1.DeleteBucketRequest\x1a\x1d.onyx.v1.DeleteBucketResponse\x12;\n" +
 	"\tPutObject\x12\x19.onyx.v1.PutObjectRequest\x1a\x13.onyx.v1.ObjectMeta\x12B\n" +
 	"\tGetObject\x12\x19.onyx.v1.GetObjectRequest\x1a\x1a.onyx.v1.GetObjectResponse\x12K\n" +
-	"\fDeleteObject\x12\x1c.onyx.v1.DeleteObjectRequest\x1a\x1d.onyx.v1.DeleteObjectResponseB8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
+	"\fDeleteObject\x12\x1c.onyx.v1.DeleteObjectRequest\x1a\x1d.onyx.v1.DeleteObjectResponse\x12E\n" +
+	"\n" +
+	"SyncBucket\x12\x1a.onyx.v1.SyncBucketRequest\x1a\x1b.onyx.v1.SyncBucketResponseB8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 
 var (
 	file_onyx_v1_objectstore_proto_rawDescOnce sync.Once
@@ -810,7 +1021,7 @@ func file_onyx_v1_objectstore_proto_rawDescGZIP() []byte {
 }
 
 var file_onyx_v1_objectstore_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_onyx_v1_objectstore_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_onyx_v1_objectstore_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_onyx_v1_objectstore_proto_goTypes = []any{
 	(BucketTier)(0),              // 0: onyx.v1.BucketTier
 	(*Bucket)(nil),               // 1: onyx.v1.Bucket
@@ -825,29 +1036,34 @@ var file_onyx_v1_objectstore_proto_goTypes = []any{
 	(*GetObjectResponse)(nil),    // 10: onyx.v1.GetObjectResponse
 	(*DeleteObjectRequest)(nil),  // 11: onyx.v1.DeleteObjectRequest
 	(*DeleteObjectResponse)(nil), // 12: onyx.v1.DeleteObjectResponse
+	(*SyncBucketRequest)(nil),    // 13: onyx.v1.SyncBucketRequest
+	(*SyncBucketResponse)(nil),   // 14: onyx.v1.SyncBucketResponse
 }
 var file_onyx_v1_objectstore_proto_depIdxs = []int32{
 	0,  // 0: onyx.v1.Bucket.tier:type_name -> onyx.v1.BucketTier
 	1,  // 1: onyx.v1.ListBucketsResponse.buckets:type_name -> onyx.v1.Bucket
 	0,  // 2: onyx.v1.CreateBucketRequest.tier:type_name -> onyx.v1.BucketTier
 	7,  // 3: onyx.v1.GetObjectResponse.meta:type_name -> onyx.v1.ObjectMeta
-	2,  // 4: onyx.v1.ObjectStore.ListBuckets:input_type -> onyx.v1.ListBucketsRequest
-	4,  // 5: onyx.v1.ObjectStore.CreateBucket:input_type -> onyx.v1.CreateBucketRequest
-	5,  // 6: onyx.v1.ObjectStore.DeleteBucket:input_type -> onyx.v1.DeleteBucketRequest
-	8,  // 7: onyx.v1.ObjectStore.PutObject:input_type -> onyx.v1.PutObjectRequest
-	9,  // 8: onyx.v1.ObjectStore.GetObject:input_type -> onyx.v1.GetObjectRequest
-	11, // 9: onyx.v1.ObjectStore.DeleteObject:input_type -> onyx.v1.DeleteObjectRequest
-	3,  // 10: onyx.v1.ObjectStore.ListBuckets:output_type -> onyx.v1.ListBucketsResponse
-	1,  // 11: onyx.v1.ObjectStore.CreateBucket:output_type -> onyx.v1.Bucket
-	6,  // 12: onyx.v1.ObjectStore.DeleteBucket:output_type -> onyx.v1.DeleteBucketResponse
-	7,  // 13: onyx.v1.ObjectStore.PutObject:output_type -> onyx.v1.ObjectMeta
-	10, // 14: onyx.v1.ObjectStore.GetObject:output_type -> onyx.v1.GetObjectResponse
-	12, // 15: onyx.v1.ObjectStore.DeleteObject:output_type -> onyx.v1.DeleteObjectResponse
-	10, // [10:16] is the sub-list for method output_type
-	4,  // [4:10] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	1,  // 4: onyx.v1.SyncBucketResponse.bucket:type_name -> onyx.v1.Bucket
+	2,  // 5: onyx.v1.ObjectStore.ListBuckets:input_type -> onyx.v1.ListBucketsRequest
+	4,  // 6: onyx.v1.ObjectStore.CreateBucket:input_type -> onyx.v1.CreateBucketRequest
+	5,  // 7: onyx.v1.ObjectStore.DeleteBucket:input_type -> onyx.v1.DeleteBucketRequest
+	8,  // 8: onyx.v1.ObjectStore.PutObject:input_type -> onyx.v1.PutObjectRequest
+	9,  // 9: onyx.v1.ObjectStore.GetObject:input_type -> onyx.v1.GetObjectRequest
+	11, // 10: onyx.v1.ObjectStore.DeleteObject:input_type -> onyx.v1.DeleteObjectRequest
+	13, // 11: onyx.v1.ObjectStore.SyncBucket:input_type -> onyx.v1.SyncBucketRequest
+	3,  // 12: onyx.v1.ObjectStore.ListBuckets:output_type -> onyx.v1.ListBucketsResponse
+	1,  // 13: onyx.v1.ObjectStore.CreateBucket:output_type -> onyx.v1.Bucket
+	6,  // 14: onyx.v1.ObjectStore.DeleteBucket:output_type -> onyx.v1.DeleteBucketResponse
+	7,  // 15: onyx.v1.ObjectStore.PutObject:output_type -> onyx.v1.ObjectMeta
+	10, // 16: onyx.v1.ObjectStore.GetObject:output_type -> onyx.v1.GetObjectResponse
+	12, // 17: onyx.v1.ObjectStore.DeleteObject:output_type -> onyx.v1.DeleteObjectResponse
+	14, // 18: onyx.v1.ObjectStore.SyncBucket:output_type -> onyx.v1.SyncBucketResponse
+	12, // [12:19] is the sub-list for method output_type
+	5,  // [5:12] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_onyx_v1_objectstore_proto_init() }
@@ -861,7 +1077,7 @@ func file_onyx_v1_objectstore_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_onyx_v1_objectstore_proto_rawDesc), len(file_onyx_v1_objectstore_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

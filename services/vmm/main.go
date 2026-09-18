@@ -1,6 +1,8 @@
 // Command onyx-vmm is the virtualization service (docs/design/11 §6.3): VM
-// inventory and lifecycle. v0.1 ships the contract + in-memory skeleton; the
-// libvirt/QEMU backend lands with v0.4.
+// inventory, disk images and lifecycle on a libvirt/QEMU backend. Definitions
+// persist in SQLite; the domains themselves are defined and driven through
+// `virsh` (never CGo bindings), so the service runs as its own unprivileged
+// user in the libvirt group.
 package main
 
 import (
@@ -26,6 +28,14 @@ func main() {
 		socketDir = flag.String("socket-dir", "/run/onyx", "directory for onyx unix sockets")
 		tcpListen = flag.String("tcp-listen", "", "optional TCP listen address (e.g. 0.0.0.0:9095) for containerized deployments")
 		stateDir  = flag.String("state-dir", "/var/lib/onyx/vmm", "service state directory")
+		// The disk root is inside a pool subvolume (docs/design/05#2): VM images
+		// are ordinary pool files, so they are snapshotted and backed up with
+		// everything else.
+		diskRoot = flag.String("disk-root", "/mnt/onyx/main-pool/@apps/vms", "directory holding VM qcow2 images")
+		xmlRoot  = flag.String("domain-dir", "", "where domain XML is written (default: <state-dir>/domains)")
+		virshBin = flag.String("virsh", "virsh", "libvirt CLI")
+		qemuImg  = flag.String("qemu-img", "qemu-img", "qemu-img binary")
+		network  = flag.String("network", "default", "libvirt network attached to VM interfaces")
 	)
 	flag.Parse()
 
@@ -35,11 +45,21 @@ func main() {
 	if err := os.MkdirAll(*stateDir, 0o750); err != nil {
 		fatal("create state dir", err)
 	}
+	if *xmlRoot == "" {
+		*xmlRoot = filepath.Join(*stateDir, "domains")
+	}
+
+	st, err := openStore(*stateDir)
+	if err != nil {
+		fatal("open store", err)
+	}
+	defer st.Close()
 
 	gs := grpc.NewServer()
-	srv := newServer()
+	srv := newServer(st, newLibvirtHypervisor(*virshBin, *qemuImg, *diskRoot, *xmlRoot, *network), *diskRoot)
 	onyxv1.RegisterHealthServer(gs, srv)
 	onyxv1.RegisterVmmServer(gs, srv)
+	slog.Info("onyx-vmm ready", "disk_root", *diskRoot, "domains", *xmlRoot, "virsh", *virshBin)
 
 	lis, err := listen(*socketDir, "onyx-vmm.sock", *tcpListen)
 	if err != nil {

@@ -63,17 +63,20 @@ build: gen
 	$(GO) build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(BIN)/onyx-appd ./services/appd
 	$(GO) build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(BIN)/onyx-ai ./services/ai
 	$(GO) build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(BIN)/onyx-objectstore ./services/objectstore
+	$(GO) build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(BIN)/onyx-davd ./services/davd
 	$(GO) build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(BIN)/onyx ./sdk/go/cmd/onyx
 	@cd services/storaged && cargo build --quiet
 	@cp services/storaged/target/debug/onyx-storaged $(BIN)/onyx-storaged
 	@cd services/privd && cargo build --quiet
 	@cp services/privd/target/debug/onyx-privd $(BIN)/onyx-privd
-	@echo "built: onyx-core onyx-api onyx-shared onyx-snapd onyx-backupd onyx-vmm onyx-appd onyx-ai onyx-objectstore onyx-storaged onyx-privd onyx (in bin/)"
+	@echo "built: onyx-core onyx-api onyx-shared onyx-snapd onyx-backupd onyx-vmm onyx-appd onyx-ai onyx-objectstore onyx-davd onyx-storaged onyx-privd onyx (in bin/)"
 
-## check — vet + test all Go and Rust code
+## check — vet + test all Go and Rust code (+ the Prism UI script when node is present)
 check: vet test
 	@cd services/storaged && cargo test --quiet
 	@cd services/privd && cargo test --quiet
+	@if command -v node >/dev/null 2>&1; then node scripts/web-ui-check.js; \
+	else echo "node not found — skipping scripts/web-ui-check.js"; fi
 
 vet:
 	$(GO) vet ./...

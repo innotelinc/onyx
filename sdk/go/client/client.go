@@ -127,6 +127,23 @@ func parseUint64(raw json.RawMessage) (uint64, error) {
 	return strconv.ParseUint(s, 10, 64)
 }
 
+// parseInt64 is parseUint64 for signed 64-bit fields, accepting both the JSON
+// number form and the protojson string form. An absent field reads as 0, so a
+// response that omits a counter is not an error.
+func parseInt64(raw json.RawMessage) (int64, error) {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		return 0, nil
+	}
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		s = s[1 : len(s)-1]
+	}
+	if s == "" {
+		return 0, nil
+	}
+	return strconv.ParseInt(s, 10, 64)
+}
+
 // Pools is the response of GET /api/v1/pools.
 type Pools struct {
 	Pools []Pool `json:"pools"`
@@ -397,6 +414,346 @@ func (c *Client) CheckRemote(ctx context.Context, name string) (*RemoteCheck, er
 func (c *Client) CloneToRemote(ctx context.Context, req *CloneToRemoteRequest) (*CloneResult, error) {
 	var result CloneResult
 	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/storage/clone", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// --- Platform surfaces (v0.4 "Jade", docs/design/11 §6.3-§6.6) ---
+
+// App mirrors onyx.v1.App (protojson camelCase). Status is one of
+// not_installed | installed | updating | error: the app store and the installed
+// list are the same catalog filtered by status.
+type App struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Version     string            `json:"version"`
+	Description string            `json:"description"`
+	Status      string            `json:"status"`
+	InstalledAt string            `json:"installedAt"`
+	Config      map[string]string `json:"config"`
+}
+
+// Apps is the response of GET /api/v1/apps and /api/v1/app-store.
+type Apps struct {
+	Apps []App `json:"apps"`
+}
+
+// Container is one container of an installed app.
+type Container struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Image   string `json:"image"`
+	Status  string `json:"status"`
+	AppID   string `json:"appId"`
+	Service string `json:"service"`
+}
+
+// Containers is the response of GET /api/v1/containers.
+type Containers struct {
+	Containers []Container `json:"containers"`
+}
+
+// InstallAppRequest is the body of POST /api/v1/apps.
+type InstallAppRequest struct {
+	AppID   string            `json:"app_id"`
+	Version string            `json:"version,omitempty"`
+	Config  map[string]string `json:"config,omitempty"`
+}
+
+// ListApps returns the app catalog (GET /api/v1/apps). status filters it:
+// "installed", "not_installed", "updating", or empty for the whole store.
+func (c *Client) ListApps(ctx context.Context, status string) (*Apps, error) {
+	path := "/api/v1/apps"
+	if status != "" {
+		path += "?status=" + url.QueryEscape(status)
+	}
+	var apps Apps
+	if err := c.getJSON(ctx, path, &apps); err != nil {
+		return nil, err
+	}
+	if apps.Apps == nil {
+		apps.Apps = []App{}
+	}
+	return &apps, nil
+}
+
+// InstallApp installs an app from the catalog (POST /api/v1/apps).
+func (c *Client) InstallApp(ctx context.Context, req *InstallAppRequest) (*App, error) {
+	var app App
+	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/apps", req, &app); err != nil {
+		return nil, err
+	}
+	return &app, nil
+}
+
+// UninstallApp removes an app (DELETE /api/v1/apps/{id}). purgeData deletes the
+// app's volumes; force stops running containers instead of refusing.
+func (c *Client) UninstallApp(ctx context.Context, id string, purgeData, force bool) error {
+	path := "/api/v1/apps/" + url.PathEscape(id) + fmt.Sprintf("?purge_data=%t&force=%t", purgeData, force)
+	return c.delete(ctx, path)
+}
+
+// ListContainers returns containers, optionally filtered by app
+// (GET /api/v1/containers).
+func (c *Client) ListContainers(ctx context.Context, appID string) (*Containers, error) {
+	path := "/api/v1/containers"
+	if appID != "" {
+		path += "?app_id=" + url.QueryEscape(appID)
+	}
+	var containers Containers
+	if err := c.getJSON(ctx, path, &containers); err != nil {
+		return nil, err
+	}
+	if containers.Containers == nil {
+		containers.Containers = []Container{}
+	}
+	return &containers, nil
+}
+
+// ContainerAction starts, stops or restarts one container
+// (POST /api/v1/containers/{id}/{action}).
+func (c *Client) ContainerAction(ctx context.Context, id, action string) (*Container, error) {
+	var container Container
+	path := "/api/v1/containers/" + url.PathEscape(id) + "/" + action
+	if err := c.doJSON(ctx, http.MethodPost, path, nil, &container); err != nil {
+		return nil, err
+	}
+	return &container, nil
+}
+
+// VM mirrors onyx.v1.VM. Status is stopped | running | paused | error.
+type VM struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	VCPUs     int32  `json:"vcpus"`
+	MemoryMB  int64  `json:"memoryMb"`
+	Disk      string `json:"disk"`
+	OS        string `json:"os"`
+	CreatedAt string `json:"createdAt"`
+}
+
+// UnmarshalJSON accepts the proto3 JSON string form of the int64 memory size.
+func (v *VM) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		ID        string          `json:"id"`
+		Name      string          `json:"name"`
+		Status    string          `json:"status"`
+		VCPUs     int32           `json:"vcpus"`
+		MemoryMB  json.RawMessage `json:"memoryMb"`
+		Disk      string          `json:"disk"`
+		OS        string          `json:"os"`
+		CreatedAt string          `json:"createdAt"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	memory, err := parseInt64(raw.MemoryMB)
+	if err != nil {
+		return fmt.Errorf("memoryMb: %w", err)
+	}
+	*v = VM{
+		ID: raw.ID, Name: raw.Name, Status: raw.Status, VCPUs: raw.VCPUs,
+		MemoryMB: memory, Disk: raw.Disk, OS: raw.OS, CreatedAt: raw.CreatedAt,
+	}
+	return nil
+}
+
+// VMs is the response of GET /api/v1/vms.
+type VMs struct {
+	VMs []VM `json:"vms"`
+}
+
+// CreateVMRequest is the body of POST /api/v1/vms. DiskMB of 0 takes the
+// service default; ISO attaches install media.
+type CreateVMRequest struct {
+	Name     string `json:"name"`
+	VCPUs    int32  `json:"vcpus"`
+	MemoryMB int64  `json:"memory_mb"`
+	DiskMB   int64  `json:"disk_mb,omitempty"`
+	OS       string `json:"os,omitempty"`
+	ISO      string `json:"iso,omitempty"`
+}
+
+// ListVMs returns the VM inventory (GET /api/v1/vms), reading each machine's
+// live state from the hypervisor.
+func (c *Client) ListVMs(ctx context.Context) (*VMs, error) {
+	var vms VMs
+	if err := c.getJSON(ctx, "/api/v1/vms", &vms); err != nil {
+		return nil, err
+	}
+	if vms.VMs == nil {
+		vms.VMs = []VM{}
+	}
+	return &vms, nil
+}
+
+// CreateVM defines a machine without booting it (POST /api/v1/vms).
+func (c *Client) CreateVM(ctx context.Context, req *CreateVMRequest) (*VM, error) {
+	var vm VM
+	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/vms", req, &vm); err != nil {
+		return nil, err
+	}
+	return &vm, nil
+}
+
+// StartVM boots a machine (POST /api/v1/vms/{id}/start).
+func (c *Client) StartVM(ctx context.Context, id string) (*VM, error) {
+	var vm VM
+	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/vms/"+url.PathEscape(id)+"/start", nil, &vm); err != nil {
+		return nil, err
+	}
+	return &vm, nil
+}
+
+// StopVM shuts a machine down (POST /api/v1/vms/{id}/stop); graceful asks the
+// guest to shut down, otherwise the power is cut.
+func (c *Client) StopVM(ctx context.Context, id string, graceful bool) (*VM, error) {
+	var vm VM
+	body := map[string]bool{"graceful": graceful}
+	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/vms/"+url.PathEscape(id)+"/stop", body, &vm); err != nil {
+		return nil, err
+	}
+	return &vm, nil
+}
+
+// DeleteVM removes a machine (DELETE /api/v1/vms/{id}). deleteDisk also deletes
+// the disk image, which is irreversible.
+func (c *Client) DeleteVM(ctx context.Context, id string, deleteDisk bool) error {
+	return c.delete(ctx, "/api/v1/vms/"+url.PathEscape(id)+fmt.Sprintf("?delete_disk=%t", deleteDisk))
+}
+
+// Bucket mirrors onyx.v1.Bucket. Tier is local | cloud | tiered; CloudTarget is
+// an rclone remote (`name:` or `name:path`) for the cloud tiers. LocalObjects is
+// a live count; CloudObjects is what the last verified sync recorded, empty
+// until the bucket has been synced.
+type Bucket struct {
+	Name           string `json:"name"`
+	Tier           string `json:"tier"`
+	CloudTarget    string `json:"cloudTarget"`
+	CreatedAt      string `json:"createdAt"`
+	LocalObjects   int64  `json:"localObjects"`
+	CloudObjects   int64  `json:"cloudObjects"`
+	LastSyncAt     string `json:"lastSyncAt"`
+	EvictAfterDays int32  `json:"evictAfterDays"`
+	SyncError      string `json:"syncError"`
+}
+
+// UnmarshalJSON accepts the proto3 JSON string form of the int64 counters.
+func (b *Bucket) UnmarshalJSON(raw []byte) error {
+	var wire struct {
+		Name           string          `json:"name"`
+		Tier           string          `json:"tier"`
+		CloudTarget    string          `json:"cloudTarget"`
+		CreatedAt      string          `json:"createdAt"`
+		LocalObjects   json.RawMessage `json:"localObjects"`
+		CloudObjects   json.RawMessage `json:"cloudObjects"`
+		LastSyncAt     string          `json:"lastSyncAt"`
+		EvictAfterDays int32           `json:"evictAfterDays"`
+		SyncError      string          `json:"syncError"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return err
+	}
+	local, err := parseInt64(wire.LocalObjects)
+	if err != nil {
+		return fmt.Errorf("localObjects: %w", err)
+	}
+	cloud, err := parseInt64(wire.CloudObjects)
+	if err != nil {
+		return fmt.Errorf("cloudObjects: %w", err)
+	}
+	*b = Bucket{
+		Name: wire.Name, Tier: wire.Tier, CloudTarget: wire.CloudTarget,
+		CreatedAt: wire.CreatedAt, LocalObjects: local, CloudObjects: cloud,
+		LastSyncAt: wire.LastSyncAt, EvictAfterDays: wire.EvictAfterDays, SyncError: wire.SyncError,
+	}
+	return nil
+}
+
+// Buckets is the response of GET /api/v1/buckets.
+type Buckets struct {
+	Buckets []Bucket `json:"buckets"`
+}
+
+// CreateBucketRequest is the body of POST /api/v1/buckets.
+type CreateBucketRequest struct {
+	Name           string `json:"name"`
+	Tier           string `json:"tier,omitempty"`
+	CloudTarget    string `json:"cloud_target,omitempty"`
+	EvictAfterDays int32  `json:"evict_after_days,omitempty"`
+}
+
+// SyncBucketResult reports a hybrid-cloud sync: how many objects the target
+// gained, how many local copies were released, and any warning that explains
+// why a step was skipped.
+type SyncBucketResult struct {
+	Bucket   Bucket   `json:"bucket"`
+	Uploaded int64    `json:"uploaded"`
+	Evicted  int64    `json:"evicted"`
+	Detail   string   `json:"detail"`
+	Warnings []string `json:"warnings"`
+}
+
+// UnmarshalJSON accepts the proto3 JSON string form of the int64 counters.
+func (s *SyncBucketResult) UnmarshalJSON(raw []byte) error {
+	var wire struct {
+		Bucket   Bucket          `json:"bucket"`
+		Uploaded json.RawMessage `json:"uploaded"`
+		Evicted  json.RawMessage `json:"evicted"`
+		Detail   string          `json:"detail"`
+		Warnings []string        `json:"warnings"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return err
+	}
+	uploaded, err := parseInt64(wire.Uploaded)
+	if err != nil {
+		return fmt.Errorf("uploaded: %w", err)
+	}
+	evicted, err := parseInt64(wire.Evicted)
+	if err != nil {
+		return fmt.Errorf("evicted: %w", err)
+	}
+	*s = SyncBucketResult{Bucket: wire.Bucket, Uploaded: uploaded, Evicted: evicted, Detail: wire.Detail, Warnings: wire.Warnings}
+	return nil
+}
+
+// ListBuckets returns the object-storage buckets (GET /api/v1/buckets).
+func (c *Client) ListBuckets(ctx context.Context) (*Buckets, error) {
+	var buckets Buckets
+	if err := c.getJSON(ctx, "/api/v1/buckets", &buckets); err != nil {
+		return nil, err
+	}
+	if buckets.Buckets == nil {
+		buckets.Buckets = []Bucket{}
+	}
+	return &buckets, nil
+}
+
+// CreateBucket creates a bucket (POST /api/v1/buckets).
+func (c *Client) CreateBucket(ctx context.Context, req *CreateBucketRequest) (*Bucket, error) {
+	var bucket Bucket
+	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/buckets", req, &bucket); err != nil {
+		return nil, err
+	}
+	return &bucket, nil
+}
+
+// DeleteBucket removes a bucket (DELETE /api/v1/buckets/{name}). force purges a
+// non-empty bucket, local objects and the cloud target alike.
+func (c *Client) DeleteBucket(ctx context.Context, name string, force bool) error {
+	return c.delete(ctx, "/api/v1/buckets/"+url.PathEscape(name)+fmt.Sprintf("?force=%t", force))
+}
+
+// SyncBucket mirrors a cloud/tiered bucket into its target
+// (POST /api/v1/buckets/{name}/sync). evict releases local copies the cloud has
+// been verified to hold.
+func (c *Client) SyncBucket(ctx context.Context, name string, evict bool) (*SyncBucketResult, error) {
+	var result SyncBucketResult
+	path := "/api/v1/buckets/" + url.PathEscape(name) + "/sync" + fmt.Sprintf("?evict=%t", evict)
+	if err := c.doJSON(ctx, http.MethodPost, path, nil, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
