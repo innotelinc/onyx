@@ -33,6 +33,7 @@ Commands:
   status      show aggregate service health
   pool list   list storage pools
   pool show   show one storage pool (<name>)
+  pool create format a disk into a pool and mount it (<device> <name>)
   device list   list detected drives (hotplug, USB, SATA)
   device show   show one device (<name>)
   device attach mount a device and expose it as a share (<name>)
@@ -143,7 +144,7 @@ func cmdStatus(ctx context.Context, c *client.Client, jsonOut bool) error {
 
 func cmdPool(ctx context.Context, c *client.Client, jsonOut bool, args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: onyx pool list|show [--json]")
+		return fmt.Errorf("usage: onyx pool list|show|create [--json]")
 	}
 	switch args[0] {
 	case "list":
@@ -156,8 +157,10 @@ func cmdPool(ctx context.Context, c *client.Client, jsonOut bool, args []string)
 			return fmt.Errorf("usage: onyx pool show <name> [--json]")
 		}
 		return cmdPoolShow(ctx, c, jsonOut, args[1])
+	case "create":
+		return cmdPoolCreate(ctx, c, jsonOut, args[1:])
 	default:
-		return fmt.Errorf("unknown pool command %q (usage: onyx pool list|show)", args[0])
+		return fmt.Errorf("unknown pool command %q (usage: onyx pool list|show|create)", args[0])
 	}
 }
 
@@ -191,6 +194,51 @@ func cmdPoolShow(ctx context.Context, c *client.Client, jsonOut bool, name strin
 	fmt.Printf("State:  %s\n", pool.State)
 	fmt.Printf("Total:  %d bytes\n", pool.TotalBytes)
 	fmt.Printf("Used:   %d bytes\n", pool.UsedBytes)
+	return nil
+}
+
+// cmdPoolCreate formats a removable whole disk into a pool. The data plane
+// unmounts whatever is currently on the disk (forcing a busy mount), erases
+// it, and mounts the fresh filesystem under /mnt/onyx unless --no-mount.
+func cmdPoolCreate(ctx context.Context, c *client.Client, jsonOut bool, args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("usage: onyx pool create <device> <name> [--fs btrfs|ext4] [--mount-name NAME] [--no-mount] [--force] [--json]")
+	}
+	req := &client.CreatePoolRequest{Device: args[0], Name: args[1]}
+	for i := 2; i < len(args); i++ {
+		switch args[i] {
+		case "--fs":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--fs requires btrfs or ext4")
+			}
+			i++
+			req.FSType = strings.ToLower(args[i])
+			if req.FSType != "btrfs" && req.FSType != "ext4" {
+				return fmt.Errorf("--fs must be btrfs or ext4")
+			}
+		case "--mount-name":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--mount-name requires a value")
+			}
+			i++
+			req.MountName = args[i]
+		case "--no-mount":
+			no := false
+			req.AutoMount = &no
+		case "--force":
+			req.Force = true
+		default:
+			return fmt.Errorf("unknown flag %q", args[i])
+		}
+	}
+	pool, err := c.CreatePool(ctx, req)
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		return printJSON(pool)
+	}
+	fmt.Printf("created pool %q (%s, %s)\n", pool.Name, pool.FSType, pool.State)
 	return nil
 }
 

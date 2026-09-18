@@ -271,6 +271,30 @@ func (c *Client) GetPool(ctx context.Context, name string) (*Pool, error) {
 	return &p, nil
 }
 
+// CreatePoolRequest is the body of POST /api/v1/pools. Device is a device
+// name or kernel name; Name becomes the filesystem label and pool name.
+// AutoMount nil means the server default (true).
+type CreatePoolRequest struct {
+	Device    string `json:"device"`
+	Name      string `json:"name"`
+	FSType    string `json:"fs_type,omitempty"`
+	Force     bool   `json:"force,omitempty"`
+	AutoMount *bool  `json:"auto_mount,omitempty"`
+	MountName string `json:"mount_name,omitempty"`
+}
+
+// CreatePool formats a verified removable whole disk as btrfs or ext4 and
+// mounts the new filesystem under /mnt/onyx (POST /api/v1/pools). The data
+// plane unmounts the disk first (forcing a busy mount) so an existing pool on
+// the same disk is erased and re-mounted in one step.
+func (c *Client) CreatePool(ctx context.Context, req *CreatePoolRequest) (*Pool, error) {
+	var p Pool
+	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/pools", req, &p); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
 // ShareProtocol identifies a protocol a share is exposed over.
 type ShareProtocol string
 
