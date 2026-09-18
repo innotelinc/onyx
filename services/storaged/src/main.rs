@@ -44,8 +44,8 @@ use onyx::storaged_server::{Storaged, StoragedServer};
 use onyx::{
     Device, DeviceEvent, GetDeviceRequest, GetPoolRequest, HealthCheckRequest, HealthCheckResponse,
     ListDevicesRequest, ListDevicesResponse, ListEventsRequest, ListEventsResponse,
-    ListPoolsRequest, ListPoolsResponse, MountDeviceRequest, Pool, UnmountDeviceRequest,
-    WatchDevicesRequest,
+    CreatePoolRequest, ListPoolsRequest, ListPoolsResponse, MountDeviceRequest, Pool,
+    UnmountDeviceRequest, WatchDevicesRequest,
 };
 use registry::Registry;
 
@@ -443,6 +443,24 @@ impl Storaged for RegistryBackend {
             .list_pools()
             .map_err(|e| Status::internal(format!("registry read failed: {e}")))?;
         Ok(Response::new(ListPoolsResponse { pools }))
+    }
+
+    async fn create_pool(
+        &self,
+        request: Request<CreatePoolRequest>,
+    ) -> Result<Response<Pool>, Status> {
+        let req = request.into_inner();
+        let device = self.manager.create_pool(&req.device, &req.name).await.map_err(Status::failed_precondition)?;
+        let pools = self.registry.list_pools().map_err(|e| Status::internal(format!("registry read failed: {e}")))?;
+        let pool = pools.into_iter().find(|p| p.name == req.name).unwrap_or(Pool {
+            name: req.name,
+            uuid: device.uuid,
+            fs_type: "btrfs".into(),
+            total_bytes: device.size_bytes,
+            used_bytes: 0,
+            state: "online".into(),
+        });
+        Ok(Response::new(pool))
     }
 
     async fn get_pool(

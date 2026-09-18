@@ -22,6 +22,7 @@ const (
 	Core_SystemStatus_FullMethodName  = "/onyx.v1.Core/SystemStatus"
 	Core_ListPools_FullMethodName     = "/onyx.v1.Core/ListPools"
 	Core_GetPool_FullMethodName       = "/onyx.v1.Core/GetPool"
+	Core_CreatePool_FullMethodName    = "/onyx.v1.Core/CreatePool"
 	Core_ListDevices_FullMethodName   = "/onyx.v1.Core/ListDevices"
 	Core_GetDevice_FullMethodName     = "/onyx.v1.Core/GetDevice"
 	Core_MountDevice_FullMethodName   = "/onyx.v1.Core/MountDevice"
@@ -45,6 +46,8 @@ type CoreClient interface {
 	ListPools(ctx context.Context, in *ListPoolsRequest, opts ...grpc.CallOption) (*ListPoolsResponse, error)
 	// GetPool returns one pool by name, forwarded to onyx-storaged.
 	GetPool(ctx context.Context, in *GetPoolRequest, opts ...grpc.CallOption) (*Pool, error)
+	// CreatePool formats a verified removable whole-disk device as Btrfs.
+	CreatePool(ctx context.Context, in *CreatePoolRequest, opts ...grpc.CallOption) (*Pool, error)
 	// ListDevices returns every block device the data plane has detected
 	// (attached, mounted or recently detached), forwarded to onyx-storaged.
 	ListDevices(ctx context.Context, in *ListDevicesRequest, opts ...grpc.CallOption) (*ListDevicesResponse, error)
@@ -93,6 +96,16 @@ func (c *coreClient) GetPool(ctx context.Context, in *GetPoolRequest, opts ...gr
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Pool)
 	err := c.cc.Invoke(ctx, Core_GetPool_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coreClient) CreatePool(ctx context.Context, in *CreatePoolRequest, opts ...grpc.CallOption) (*Pool, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Pool)
+	err := c.cc.Invoke(ctx, Core_CreatePool_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -183,6 +196,8 @@ type CoreServer interface {
 	ListPools(context.Context, *ListPoolsRequest) (*ListPoolsResponse, error)
 	// GetPool returns one pool by name, forwarded to onyx-storaged.
 	GetPool(context.Context, *GetPoolRequest) (*Pool, error)
+	// CreatePool formats a verified removable whole-disk device as Btrfs.
+	CreatePool(context.Context, *CreatePoolRequest) (*Pool, error)
 	// ListDevices returns every block device the data plane has detected
 	// (attached, mounted or recently detached), forwarded to onyx-storaged.
 	ListDevices(context.Context, *ListDevicesRequest) (*ListDevicesResponse, error)
@@ -215,6 +230,9 @@ func (UnimplementedCoreServer) ListPools(context.Context, *ListPoolsRequest) (*L
 }
 func (UnimplementedCoreServer) GetPool(context.Context, *GetPoolRequest) (*Pool, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetPool not implemented")
+}
+func (UnimplementedCoreServer) CreatePool(context.Context, *CreatePoolRequest) (*Pool, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreatePool not implemented")
 }
 func (UnimplementedCoreServer) ListDevices(context.Context, *ListDevicesRequest) (*ListDevicesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListDevices not implemented")
@@ -305,6 +323,24 @@ func _Core_GetPool_Handler(srv interface{}, ctx context.Context, dec func(interf
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(CoreServer).GetPool(ctx, req.(*GetPoolRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Core_CreatePool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreatePoolRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).CreatePool(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_CreatePool_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).CreatePool(ctx, req.(*CreatePoolRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -428,6 +464,10 @@ var Core_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetPool",
 			Handler:    _Core_GetPool_Handler,
+		},
+		{
+			MethodName: "CreatePool",
+			Handler:    _Core_CreatePool_Handler,
 		},
 		{
 			MethodName: "ListDevices",
