@@ -26,8 +26,37 @@ func protoName(p onyxv1.ShareProtocol) (string, bool) {
 		return "smb", true
 	case onyxv1.ShareProtocol_SHARE_PROTOCOL_NFS:
 		return "nfs", true
+	case onyxv1.ShareProtocol_SHARE_PROTOCOL_FTP:
+		return "ftp", true
+	case onyxv1.ShareProtocol_SHARE_PROTOCOL_SFTP:
+		return "sftp", true
+	case onyxv1.ShareProtocol_SHARE_PROTOCOL_WEBDAV:
+		return "webdav", true
+	case onyxv1.ShareProtocol_SHARE_PROTOCOL_RSYNC:
+		return "rsync", true
 	default:
 		return "", false
+	}
+}
+
+// protoFromName is the inverse of protoName: the DB key back to the enum, so
+// the persisted protocol list round-trips for every protocol (docs/design/05#6).
+func protoFromName(name string) (onyxv1.ShareProtocol, bool) {
+	switch name {
+	case "smb":
+		return onyxv1.ShareProtocol_SHARE_PROTOCOL_SMB, true
+	case "nfs":
+		return onyxv1.ShareProtocol_SHARE_PROTOCOL_NFS, true
+	case "ftp":
+		return onyxv1.ShareProtocol_SHARE_PROTOCOL_FTP, true
+	case "sftp":
+		return onyxv1.ShareProtocol_SHARE_PROTOCOL_SFTP, true
+	case "webdav":
+		return onyxv1.ShareProtocol_SHARE_PROTOCOL_WEBDAV, true
+	case "rsync":
+		return onyxv1.ShareProtocol_SHARE_PROTOCOL_RSYNC, true
+	default:
+		return onyxv1.ShareProtocol_SHARE_PROTOCOL_UNSPECIFIED, false
 	}
 }
 
@@ -40,11 +69,8 @@ func scanShare(row interface{ Scan(...any) error }) (*onyxv1.Share, error) {
 	}
 	var protos []onyxv1.ShareProtocol
 	for _, p := range strings.Split(protocols, ",") {
-		switch p {
-		case "smb":
-			protos = append(protos, onyxv1.ShareProtocol_SHARE_PROTOCOL_SMB)
-		case "nfs":
-			protos = append(protos, onyxv1.ShareProtocol_SHARE_PROTOCOL_NFS)
+		if proto, ok := protoFromName(p); ok {
+			protos = append(protos, proto)
 		}
 	}
 	return &onyxv1.Share{
@@ -64,7 +90,7 @@ func (s *server) CreateShare(ctx context.Context, req *onyxv1.CreateShareRequest
 		return nil, status.Error(codes.InvalidArgument, "share path must be an absolute directory path")
 	}
 	if len(req.Protocols) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "at least one protocol must be enabled (smb, nfs)")
+		return nil, status.Error(codes.InvalidArgument, "at least one protocol must be enabled (smb, nfs, ftp, sftp, webdav, rsync)")
 	}
 
 	var keys []string

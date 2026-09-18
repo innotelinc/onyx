@@ -21,12 +21,22 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// The protocols one logical share can be exposed over (docs/design/05#6).
+// Every protocol is off by default; enabling one is an explicit, logged act.
 type ShareProtocol int32
 
 const (
 	ShareProtocol_SHARE_PROTOCOL_UNSPECIFIED ShareProtocol = 0
 	ShareProtocol_SHARE_PROTOCOL_SMB         ShareProtocol = 1
 	ShareProtocol_SHARE_PROTOCOL_NFS         ShareProtocol = 2
+	// FTP over explicit TLS (FTPS) via vsftpd, chrooted per share.
+	ShareProtocol_SHARE_PROTOCOL_FTP ShareProtocol = 3
+	// SFTP via the dedicated onyx-sftp sshd instance, chrooted per share.
+	ShareProtocol_SHARE_PROTOCOL_SFTP ShareProtocol = 4
+	// HTTPS WebDAV served by onyx-davd (API auth layer).
+	ShareProtocol_SHARE_PROTOCOL_WEBDAV ShareProtocol = 5
+	// rsync module over rsyncd, restricted to Onyx users.
+	ShareProtocol_SHARE_PROTOCOL_RSYNC ShareProtocol = 6
 )
 
 // Enum value maps for ShareProtocol.
@@ -35,11 +45,19 @@ var (
 		0: "SHARE_PROTOCOL_UNSPECIFIED",
 		1: "SHARE_PROTOCOL_SMB",
 		2: "SHARE_PROTOCOL_NFS",
+		3: "SHARE_PROTOCOL_FTP",
+		4: "SHARE_PROTOCOL_SFTP",
+		5: "SHARE_PROTOCOL_WEBDAV",
+		6: "SHARE_PROTOCOL_RSYNC",
 	}
 	ShareProtocol_value = map[string]int32{
 		"SHARE_PROTOCOL_UNSPECIFIED": 0,
 		"SHARE_PROTOCOL_SMB":         1,
 		"SHARE_PROTOCOL_NFS":         2,
+		"SHARE_PROTOCOL_FTP":         3,
+		"SHARE_PROTOCOL_SFTP":        4,
+		"SHARE_PROTOCOL_WEBDAV":      5,
+		"SHARE_PROTOCOL_RSYNC":       6,
 	}
 )
 
@@ -477,7 +495,18 @@ type RenderAllResponse struct {
 	// Complete /etc/onyx/conf.d/smb.conf content.
 	SmbConf string `protobuf:"bytes,1,opt,name=smb_conf,json=smbConf,proto3" json:"smb_conf,omitempty"`
 	// Complete /etc/onyx/conf.d/exports content.
-	NfsExports    string `protobuf:"bytes,2,opt,name=nfs_exports,json=nfsExports,proto3" json:"nfs_exports,omitempty"`
+	NfsExports string `protobuf:"bytes,2,opt,name=nfs_exports,json=nfsExports,proto3" json:"nfs_exports,omitempty"`
+	// Complete /etc/onyx/conf.d/vsftpd.conf content (empty when no share uses FTP).
+	FtpConf string `protobuf:"bytes,3,opt,name=ftp_conf,json=ftpConf,proto3" json:"ftp_conf,omitempty"`
+	// Complete /etc/onyx/conf.d/sshd_config content for the dedicated onyx-sftp
+	// sshd (empty when no share uses SFTP).
+	SftpConf string `protobuf:"bytes,4,opt,name=sftp_conf,json=sftpConf,proto3" json:"sftp_conf,omitempty"`
+	// Complete /etc/onyx/conf.d/davd.conf content for onyx-davd (empty when no
+	// share uses WebDAV).
+	WebdavConf string `protobuf:"bytes,5,opt,name=webdav_conf,json=webdavConf,proto3" json:"webdav_conf,omitempty"`
+	// Complete /etc/onyx/conf.d/rsyncd.conf content (empty when no share uses
+	// rsync).
+	RsyncConf     string `protobuf:"bytes,6,opt,name=rsync_conf,json=rsyncConf,proto3" json:"rsync_conf,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -526,6 +555,34 @@ func (x *RenderAllResponse) GetNfsExports() string {
 	return ""
 }
 
+func (x *RenderAllResponse) GetFtpConf() string {
+	if x != nil {
+		return x.FtpConf
+	}
+	return ""
+}
+
+func (x *RenderAllResponse) GetSftpConf() string {
+	if x != nil {
+		return x.SftpConf
+	}
+	return ""
+}
+
+func (x *RenderAllResponse) GetWebdavConf() string {
+	if x != nil {
+		return x.WebdavConf
+	}
+	return ""
+}
+
+func (x *RenderAllResponse) GetRsyncConf() string {
+	if x != nil {
+		return x.RsyncConf
+	}
+	return ""
+}
+
 type RenderConfigRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Share         *Share                 `protobuf:"bytes,1,opt,name=share,proto3" json:"share,omitempty"`
@@ -570,14 +627,24 @@ func (x *RenderConfigRequest) GetShare() *Share {
 	return nil
 }
 
-// Generated daemon fragments for the share. Empty string = protocol not
+// Generated daemon fragments for one share. Empty string = protocol not
 // enabled for this share.
 type RenderConfigResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// smb.conf share-section fragment (docs/design/05#6, SMB row).
 	SmbConf string `protobuf:"bytes,1,opt,name=smb_conf,json=smbConf,proto3" json:"smb_conf,omitempty"`
 	// /etc/exports fragment (docs/design/05#6, NFS row).
-	NfsExports    string `protobuf:"bytes,2,opt,name=nfs_exports,json=nfsExports,proto3" json:"nfs_exports,omitempty"`
+	NfsExports string `protobuf:"bytes,2,opt,name=nfs_exports,json=nfsExports,proto3" json:"nfs_exports,omitempty"`
+	// The share's FTP exposure fragment: its chroot root and write policy
+	// (FTP row). Per-user `vsftpd.d/` chroots are driven by Onyx users, not the
+	// share model.
+	FtpConf string `protobuf:"bytes,3,opt,name=ftp_conf,json=ftpConf,proto3" json:"ftp_conf,omitempty"`
+	// sshd_config Match block fragment for the dedicated sshd (SFTP row).
+	SftpConf string `protobuf:"bytes,4,opt,name=sftp_conf,json=sftpConf,proto3" json:"sftp_conf,omitempty"`
+	// davd.conf share-table fragment (WebDAV row).
+	WebdavConf string `protobuf:"bytes,5,opt,name=webdav_conf,json=webdavConf,proto3" json:"webdav_conf,omitempty"`
+	// rsyncd.conf module fragment (Rsync row).
+	RsyncConf     string `protobuf:"bytes,6,opt,name=rsync_conf,json=rsyncConf,proto3" json:"rsync_conf,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -626,6 +693,34 @@ func (x *RenderConfigResponse) GetNfsExports() string {
 	return ""
 }
 
+func (x *RenderConfigResponse) GetFtpConf() string {
+	if x != nil {
+		return x.FtpConf
+	}
+	return ""
+}
+
+func (x *RenderConfigResponse) GetSftpConf() string {
+	if x != nil {
+		return x.SftpConf
+	}
+	return ""
+}
+
+func (x *RenderConfigResponse) GetWebdavConf() string {
+	if x != nil {
+		return x.WebdavConf
+	}
+	return ""
+}
+
+func (x *RenderConfigResponse) GetRsyncConf() string {
+	if x != nil {
+		return x.RsyncConf
+	}
+	return ""
+}
+
 var File_onyx_v1_shares_proto protoreflect.FileDescriptor
 
 const file_onyx_v1_shares_proto_rawDesc = "" +
@@ -652,21 +747,37 @@ const file_onyx_v1_shares_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"\x15\n" +
 	"\x13DeleteShareResponse\":\n" +
 	"\x10RenderAllRequest\x12&\n" +
-	"\x06shares\x18\x01 \x03(\v2\x0e.onyx.v1.ShareR\x06shares\"O\n" +
+	"\x06shares\x18\x01 \x03(\v2\x0e.onyx.v1.ShareR\x06shares\"\xc7\x01\n" +
 	"\x11RenderAllResponse\x12\x19\n" +
 	"\bsmb_conf\x18\x01 \x01(\tR\asmbConf\x12\x1f\n" +
 	"\vnfs_exports\x18\x02 \x01(\tR\n" +
-	"nfsExports\";\n" +
+	"nfsExports\x12\x19\n" +
+	"\bftp_conf\x18\x03 \x01(\tR\aftpConf\x12\x1b\n" +
+	"\tsftp_conf\x18\x04 \x01(\tR\bsftpConf\x12\x1f\n" +
+	"\vwebdav_conf\x18\x05 \x01(\tR\n" +
+	"webdavConf\x12\x1d\n" +
+	"\n" +
+	"rsync_conf\x18\x06 \x01(\tR\trsyncConf\";\n" +
 	"\x13RenderConfigRequest\x12$\n" +
-	"\x05share\x18\x01 \x01(\v2\x0e.onyx.v1.ShareR\x05share\"R\n" +
+	"\x05share\x18\x01 \x01(\v2\x0e.onyx.v1.ShareR\x05share\"\xca\x01\n" +
 	"\x14RenderConfigResponse\x12\x19\n" +
 	"\bsmb_conf\x18\x01 \x01(\tR\asmbConf\x12\x1f\n" +
 	"\vnfs_exports\x18\x02 \x01(\tR\n" +
-	"nfsExports*_\n" +
+	"nfsExports\x12\x19\n" +
+	"\bftp_conf\x18\x03 \x01(\tR\aftpConf\x12\x1b\n" +
+	"\tsftp_conf\x18\x04 \x01(\tR\bsftpConf\x12\x1f\n" +
+	"\vwebdav_conf\x18\x05 \x01(\tR\n" +
+	"webdavConf\x12\x1d\n" +
+	"\n" +
+	"rsync_conf\x18\x06 \x01(\tR\trsyncConf*\xc5\x01\n" +
 	"\rShareProtocol\x12\x1e\n" +
 	"\x1aSHARE_PROTOCOL_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12SHARE_PROTOCOL_SMB\x10\x01\x12\x16\n" +
-	"\x12SHARE_PROTOCOL_NFS\x10\x022\x8f\x02\n" +
+	"\x12SHARE_PROTOCOL_NFS\x10\x02\x12\x16\n" +
+	"\x12SHARE_PROTOCOL_FTP\x10\x03\x12\x17\n" +
+	"\x13SHARE_PROTOCOL_SFTP\x10\x04\x12\x19\n" +
+	"\x15SHARE_PROTOCOL_WEBDAV\x10\x05\x12\x18\n" +
+	"\x14SHARE_PROTOCOL_RSYNC\x10\x062\x8f\x02\n" +
 	"\n" +
 	"CoreShares\x12:\n" +
 	"\vCreateShare\x12\x1b.onyx.v1.CreateShareRequest\x1a\x0e.onyx.v1.Share\x12E\n" +

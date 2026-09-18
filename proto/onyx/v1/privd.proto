@@ -49,15 +49,19 @@ enum PrivOp {
   SMART_INFO_RAW = 6;
 
   // `write <target> <content>` — atomically write one generated daemon
-  // config (docs/design/04#4, conf.d). target is "smb" (smb.conf) or "nfs"
-  // (exports); the full file content travels as the second argument and is
-  // size-capped. The path is fixed by the target — callers never pass a path.
+  // config (docs/design/04#4, conf.d). target is a closed set: "smb"
+  // (smb.conf), "nfs" (exports), "ftp" (vsftpd.conf), "sftp" (sshd_config),
+  // "webdav" (davd.conf), "rsync" (rsyncd.conf). The full file content travels
+  // as the second argument and is size-capped. The path is fixed by the target
+  // — callers never pass a path.
   WRITE_DAEMON_CONFIG = 7;
 
   // `reload <targets...>` — validate and reload daemons after a config write
   // (docs/design/02#6 step 4). "smb": `testparm -s <smb.conf>` first, then
-  // `systemctl reload smbd`. "nfs": `exportfs -ra`. Fails closed: no reload
-  // unless validation passes.
+  // `systemctl reload smbd`. "nfs": `exportfs -ra`. "sftp": `sshd -t -f
+  // <sshd_config>` first, then `systemctl reload onyx-sftp`. "ftp", "webdav",
+  // "rsync": `systemctl reload` of vsftpd / onyx-davd / rsyncd. Fails closed:
+  // no reload unless validation passes.
   RELOAD_DAEMONS = 8;
 
   // `mkfs.btrfs [-f] -L <label> <device>` or `mkfs.ext4 [-F] -L <label> <device>`.

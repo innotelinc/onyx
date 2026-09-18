@@ -34,7 +34,8 @@
 #   --prefix PATH   install prefix (default /usr/local)
 #   --destdir DIR   stage all file writes under DIR (packaging/tests)
 #   --install-deps  apt-get install optional packages (samba, nfs-kernel-server,
-#                   smartmontools, btrfs-progs) so onyx can actually serve
+#                   vsftpd, openssh-server, rsync, smartmontools, btrfs-progs)
+#                   so onyx can actually serve every sharing protocol
 #   --enable-pool   enable + start onyx-pool.service (btrfs data pool auto-mount)
 #   --enable-firstboot  enable + start onyx-firstboot.service (console wizard)
 #   --uninstall     remove what this script installed
@@ -184,9 +185,11 @@ fi
 
 # --- 5. optional daemon packages ---------------------------------------------
 if [ "$INSTALL_DEPS" = 1 ] && [ -z "$DESTDIR" ]; then
-  say "installing optional daemon packages (samba, nfs, smartmontools, btrfs-progs)"
+  say "installing optional daemon packages (samba, nfs, vsftpd, ssh, rsync, smartmontools, btrfs-progs)"
   run apt-get update
-  run apt-get install -y samba nfs-kernel-server smartmontools btrfs-progs
+  # vsftpd = FTP(S), openssh-server = the dedicated onyx-sftp instance,
+  # rsync = rsyncd modules (docs/design/05#6).
+  run apt-get install -y samba nfs-kernel-server vsftpd openssh-server rsync smartmontools btrfs-progs
 fi
 
 # --- 6. enable + start --------------------------------------------------------
@@ -209,7 +212,8 @@ if [ -z "$DESTDIR" ] && [ "$DRY_RUN" = 0 ]; then
   echo "  $BINCLI/onyx status"
   echo
   echo "Optional daemon packages were not installed (samba, nfs-kernel-server,"
-  echo "smartmontools, btrfs-progs). Shares save to /etc/onyx/conf.d and reload"
+  echo "vsftpd, openssh-server, rsync, smartmontools, btrfs-progs). Shares save"
+  echo "to /etc/onyx/conf.d and reload"
   echo "is attempted through privd; those daemons need to exist for serving."
   echo "Re-run: sudo scripts/onyx-install --install-deps"
 elif [ "$DRY_RUN" = 1 ]; then
