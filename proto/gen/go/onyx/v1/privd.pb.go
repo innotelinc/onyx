@@ -58,24 +58,27 @@ const (
 	// `systemctl reload smbd`. "nfs": `exportfs -ra`. Fails closed: no reload
 	// unless validation passes.
 	PrivOp_RELOAD_DAEMONS PrivOp = 8
-	// `mkfs.btrfs -f -L <label> <device>` — format a verified removable
-	// whole-disk device as an Onyx storage pool.
-	PrivOp_CREATE_BTRFS_POOL PrivOp = 9
+	// `mkfs.btrfs [-f] -L <label> <device>` or `mkfs.ext4 [-F] -L <label> <device>`.
+	// The filesystem and force flag are strictly allowlisted.
+	PrivOp_FORMAT_FILESYSTEM PrivOp = 9
+	// Backward-compatible alias for the original Btrfs-only operation.
+	PrivOp_CREATE_BTRFS_POOL PrivOp = 10
 )
 
 // Enum value maps for PrivOp.
 var (
 	PrivOp_name = map[int32]string{
-		0: "PRIV_OP_UNSPECIFIED",
-		1: "BTRFS_FILESYSTEM_SHOW_RAW",
-		2: "BTRFS_FILESYSTEM_USAGE_RAW",
-		3: "LSBLK_RAW",
-		4: "MOUNT_BLOCK",
-		5: "UNMOUNT_BLOCK",
-		6: "SMART_INFO_RAW",
-		7: "WRITE_DAEMON_CONFIG",
-		8: "RELOAD_DAEMONS",
-		9: "CREATE_BTRFS_POOL",
+		0:  "PRIV_OP_UNSPECIFIED",
+		1:  "BTRFS_FILESYSTEM_SHOW_RAW",
+		2:  "BTRFS_FILESYSTEM_USAGE_RAW",
+		3:  "LSBLK_RAW",
+		4:  "MOUNT_BLOCK",
+		5:  "UNMOUNT_BLOCK",
+		6:  "SMART_INFO_RAW",
+		7:  "WRITE_DAEMON_CONFIG",
+		8:  "RELOAD_DAEMONS",
+		9:  "FORMAT_FILESYSTEM",
+		10: "CREATE_BTRFS_POOL",
 	}
 	PrivOp_value = map[string]int32{
 		"PRIV_OP_UNSPECIFIED":        0,
@@ -87,7 +90,8 @@ var (
 		"SMART_INFO_RAW":             6,
 		"WRITE_DAEMON_CONFIG":        7,
 		"RELOAD_DAEMONS":             8,
-		"CREATE_BTRFS_POOL":          9,
+		"FORMAT_FILESYSTEM":          9,
+		"CREATE_BTRFS_POOL":          10,
 	}
 )
 
@@ -243,7 +247,7 @@ const file_onyx_v1_privd_proto_rawDesc = "" +
 	"\fPrivResponse\x12\x1b\n" +
 	"\texit_code\x18\x01 \x01(\x05R\bexitCode\x12\x16\n" +
 	"\x06stdout\x18\x02 \x01(\fR\x06stdout\x12\x16\n" +
-	"\x06stderr\x18\x03 \x01(\fR\x06stderr*\xeb\x01\n" +
+	"\x06stderr\x18\x03 \x01(\fR\x06stderr*\x82\x02\n" +
 	"\x06PrivOp\x12\x17\n" +
 	"\x13PRIV_OP_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19BTRFS_FILESYSTEM_SHOW_RAW\x10\x01\x12\x1e\n" +
@@ -254,7 +258,9 @@ const file_onyx_v1_privd_proto_rawDesc = "" +
 	"\x0eSMART_INFO_RAW\x10\x06\x12\x17\n" +
 	"\x13WRITE_DAEMON_CONFIG\x10\a\x12\x12\n" +
 	"\x0eRELOAD_DAEMONS\x10\b\x12\x15\n" +
-	"\x11CREATE_BTRFS_POOL\x10\t2;\n" +
+	"\x11FORMAT_FILESYSTEM\x10\t\x12\x15\n" +
+	"\x11CREATE_BTRFS_POOL\x10\n" +
+	"2;\n" +
 	"\x05Privd\x122\n" +
 	"\x03Run\x12\x14.onyx.v1.PrivRequest\x1a\x15.onyx.v1.PrivResponseB8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 

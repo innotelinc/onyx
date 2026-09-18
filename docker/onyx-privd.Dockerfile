@@ -29,6 +29,6 @@ FROM alpine:3.20
 # Device discovery and pool inspection run through this root boundary. Keep
 # the helpers in the runtime image; the host's binaries are not visible inside
 # the container namespace.
-RUN apk add --no-cache util-linux btrfs-progs smartmontools
+RUN apk add --no-cache util-linux btrfs-progs e2fsprogs smartmontools
 COPY --from=build /out/onyx-privd /usr/local/bin/onyx-privd
 ENTRYPOINT ["/bin/sh", "-c", "umask 000; mkdir -p /run/onyx; chmod 0777 /run/onyx 2>/dev/null; exec /usr/local/bin/onyx-privd \"$@\"", "--"]

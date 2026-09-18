@@ -435,7 +435,11 @@ impl DeviceManager {
     /// Mount one device at <mount_root>/<name> through privd and record it.
     /// The caller holds the attach-op guard.
     async fn mount_and_record(&self, dev: &Device) -> Result<(), String> {
-        let mountpoint = self.mount_root.join(&dev.name);
+        self.mount_and_record_at(dev, &dev.name).await
+    }
+
+    async fn mount_and_record_at(&self, dev: &Device, mount_name: &str) -> Result<(), String> {
+        let mountpoint = self.mount_root.join(mount_name);
         let options = self.fat_mount_options(&dev.fs_type);
         self.mount_block(&dev.path, &mountpoint.display().to_string(), &options)
             .await?;
@@ -546,12 +550,20 @@ impl DeviceManager {
         Ok(updated)
     }
 
-    /// Format a removable whole disk as a Btrfs pool and mount it under the
-    /// Onyx storage root. The privileged helper performs the destructive
-    /// filesystem operation; this layer enforces the device-selection policy.
-    pub async fn create_pool(&self, device_name: &str, pool_name: &str) -> Result<Device, String> {
+    /// Format a removable whole disk as Btrfs or ext4 and optionally mount it
+    /// under the Onyx storage root. The privileged helper performs the
+    /// destructive filesystem operation; this layer enforces device policy.
+    pub async fn create_pool(&self, device_name: &str, pool_name: &str, requested_fs: &str, force: bool, auto_mount: bool, requested_mount_name: &str) -> Result<Device, String> {
         if pool_name.is_empty() || pool_name.len() > 32 || !pool_name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')) {
             return Err("pool name must be 1-32 characters: letters, numbers, _, -, .".into());
+        }
+        let fs_type = if requested_fs.is_empty() { "btrfs" } else { requested_fs };
+        if fs_type != "btrfs" && fs_type != "ext4" {
+            return Err("filesystem must be btrfs or ext4".into());
+        }
+        let mount_name = if requested_mount_name.is_empty() { pool_name } else { requested_mount_name };
+        if mount_name.is_empty() || mount_name.len() > 64 || !mount_name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')) {
+            return Err("mount name must be 1-64 characters: letters, numbers, _, -, .".into());
         }
         let dev = self
             .registry
@@ -574,18 +586,23 @@ impl DeviceManager {
             // mount under its configured root. Never unmount an OS/external
             // mount implicitly.
             self.unmount_disk_partitions(&dev).await?;
-            let response = self.run_op(PrivOp::CreateBtrfsPool, vec![dev.path.clone(), pool_name.to_string()]).await?;
+            let response = self.run_op(
+                PrivOp::FormatFilesystem,
+                vec![dev.path.clone(), fs_type.to_string(), pool_name.to_string(), force.to_string()],
+            ).await?;
             if response.exit_code != 0 {
                 return Err(format!("format failed: {}", String::from_utf8_lossy(&response.stderr).trim()));
             }
             let mut formatted = dev.clone();
             formatted.name = pool_name.to_string();
             formatted.label = pool_name.to_string();
-            formatted.fs_type = "btrfs".to_string();
+            formatted.fs_type = fs_type.to_string();
             formatted.auto = "manual".to_string();
             formatted.state = "attached".to_string();
             self.registry.upsert_device(&formatted).map_err(|e| format!("registry: {e}"))?;
-            self.mount_and_record(&formatted).await?;
+            if auto_mount {
+                self.mount_and_record_at(&formatted, mount_name).await?;
+            }
             self.registry.get_device(&formatted.kname)
                 .map_err(|e| format!("registry: {e}"))?
                 .ok_or_else(|| "formatted pool disappeared from registry".to_string())

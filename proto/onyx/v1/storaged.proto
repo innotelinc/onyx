@@ -37,8 +37,16 @@ message GetPoolRequest {
 message CreatePoolRequest {
   // Stable device name or kernel name, e.g. "sdb".
   string device = 1;
-  // Btrfs filesystem label and Onyx pool name.
+  // Filesystem label and Onyx pool name.
   string name = 2;
+  // btrfs (default) or ext4.
+  string fs_type = 3;
+  // Explicitly overwrite existing filesystem signatures.
+  bool force = 4;
+  // Mount the formatted filesystem automatically under /mnt/onyx/<mount_name>.
+  bool auto_mount = 5;
+  // Optional mount directory name; defaults to name.
+  string mount_name = 6;
 }
 
 message Pool {

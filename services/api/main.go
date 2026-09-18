@@ -354,8 +354,12 @@ func (s *server) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
 // handlePool serves GET /api/v1/pools/{name}; storaged's not_found propagates
 // as a 404 via writeGRPCError (docs/design/06#2-error-model).
 type createPoolBody struct {
-	Device string `json:"device"`
-	Name   string `json:"name"`
+	Device    string `json:"device"`
+	Name      string `json:"name"`
+	FsType    string `json:"fs_type"`
+	Force     bool   `json:"force"`
+	AutoMount *bool  `json:"auto_mount"`
+	MountName string `json:"mount_name"`
 }
 
 func (s *server) handleCreatePool(w http.ResponseWriter, r *http.Request) {
@@ -368,9 +372,18 @@ func (s *server) handleCreatePool(w http.ResponseWriter, r *http.Request) {
 		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "device and name are required"})
 		return
 	}
+	fsType := strings.ToLower(body.FsType)
+	if fsType != "" && fsType != "btrfs" && fsType != "ext4" {
+		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "fs_type must be btrfs or ext4"})
+		return
+	}
+	autoMount := true
+	if body.AutoMount != nil {
+		autoMount = *body.AutoMount
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
-	pool, err := s.core.CreatePool(ctx, &onyxv1.CreatePoolRequest{Device: body.Device, Name: body.Name})
+	pool, err := s.core.CreatePool(ctx, &onyxv1.CreatePoolRequest{Device: body.Device, Name: body.Name, FsType: fsType, Force: body.Force, AutoMount: autoMount, MountName: body.MountName})
 	if err != nil {
 		s.writeGRPCError(w, r, err)
 		return

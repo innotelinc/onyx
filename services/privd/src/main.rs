@@ -57,6 +57,7 @@ fn main() -> ExitCode {
         &args.mkdir_bin,
         &args.smartctl_bin,
         &args.mkfs_btrfs_bin,
+        &args.mkfs_ext4_bin,
         &args.testparm_bin,
         &args.systemctl_bin,
         &args.exportfs_bin,
@@ -82,6 +83,7 @@ struct Args {
     mkdir_bin: String,
     smartctl_bin: String,
     mkfs_btrfs_bin: String,
+    mkfs_ext4_bin: String,
     testparm_bin: String,
     systemctl_bin: String,
     exportfs_bin: String,
@@ -100,6 +102,7 @@ impl Args {
         let mut mkdir_bin = "mkdir".to_string();
         let mut smartctl_bin = "smartctl".to_string();
         let mut mkfs_btrfs_bin = "mkfs.btrfs".to_string();
+        let mut mkfs_ext4_bin = "mkfs.ext4".to_string();
         let mut testparm_bin = "testparm".to_string();
         let mut systemctl_bin = "systemctl".to_string();
         let mut exportfs_bin = "exportfs".to_string();
@@ -120,6 +123,7 @@ impl Args {
                 "--mkdir-bin" => mkdir_bin = it.next().expect("--mkdir-bin requires a value"),
                 "--smartctl-bin" => smartctl_bin = it.next().expect("--smartctl-bin requires a value"),
                 "--mkfs-btrfs-bin" => mkfs_btrfs_bin = it.next().expect("--mkfs-btrfs-bin requires a value"),
+                "--mkfs-ext4-bin" => mkfs_ext4_bin = it.next().expect("--mkfs-ext4-bin requires a value"),
                 "--testparm-bin" => testparm_bin = it.next().expect("--testparm-bin requires a value"),
                 "--systemctl-bin" => systemctl_bin = it.next().expect("--systemctl-bin requires a value"),
                 "--exportfs-bin" => exportfs_bin = it.next().expect("--exportfs-bin requires a value"),
@@ -147,6 +151,7 @@ impl Args {
             mkdir_bin,
             smartctl_bin,
             mkfs_btrfs_bin,
+            mkfs_ext4_bin,
             testparm_bin,
             systemctl_bin,
             exportfs_bin,
@@ -220,6 +225,7 @@ enum AllowedCommand {
     /// `smartctl -H -A <device>` — SMART health + temperature probe.
     SmartInfo { device: PathBuf },
     /// `mkfs.btrfs -f -L <label> <device>` — format one verified device.
+    FormatFilesystem { device: PathBuf, fs_type: String, label: String, force: bool },
     CreateBtrfsPool { device: PathBuf, label: String },
     /// Atomic write of one generated daemon config (target -> fixed path
     /// under the config dir); content is pre-validated size-wise.
@@ -277,6 +283,7 @@ struct Allowlist {
     mkdir_bin: String,
     smartctl_bin: String,
     mkfs_btrfs_bin: String,
+    mkfs_ext4_bin: String,
     testparm_bin: String,
     systemctl_bin: String,
     exportfs_bin: String,
@@ -294,6 +301,7 @@ impl Allowlist {
         mkdir_bin: &str,
         smartctl_bin: &str,
         mkfs_btrfs_bin: &str,
+        mkfs_ext4_bin: &str,
         testparm_bin: &str,
         systemctl_bin: &str,
         exportfs_bin: &str,
@@ -309,6 +317,7 @@ impl Allowlist {
             mkdir_bin: mkdir_bin.to_string(),
             smartctl_bin: smartctl_bin.to_string(),
             mkfs_btrfs_bin: mkfs_btrfs_bin.to_string(),
+            mkfs_ext4_bin: mkfs_ext4_bin.to_string(),
             testparm_bin: testparm_bin.to_string(),
             systemctl_bin: systemctl_bin.to_string(),
             exportfs_bin: exportfs_bin.to_string(),
@@ -393,15 +402,32 @@ impl Allowlist {
                 let device = validate_device_path(&req.args[0], &self.dev_root)?;
                 Ok(AllowedCommand::SmartInfo { device })
             }
+            PrivOp::FormatFilesystem => {
+                if req.args.len() != 4 {
+                    return Err(Status::invalid_argument("FORMAT_FILESYSTEM requires <device> <fs_type> <label> <force>"));
+                }
+                let device = validate_device_path(&req.args[0], &self.dev_root)?;
+                let fs_type = req.args[1].to_ascii_lowercase();
+                if fs_type != "btrfs" && fs_type != "ext4" {
+                    return Err(Status::invalid_argument("filesystem must be btrfs or ext4"));
+                }
+                let label = &req.args[2];
+                if label.is_empty() || label.len() > 32 || !label.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')) {
+                    return Err(Status::invalid_argument("filesystem label must be 1-32 characters: letters, numbers, _, -, ."));
+                }
+                let force = match req.args[3].as_str() {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Err(Status::invalid_argument("force must be true or false")),
+                };
+                Ok(AllowedCommand::FormatFilesystem { device, fs_type, label: label.clone(), force })
+            }
             PrivOp::CreateBtrfsPool => {
                 if req.args.len() != 2 {
                     return Err(Status::invalid_argument("CREATE_BTRFS_POOL requires <device> <label>"));
                 }
                 let device = validate_device_path(&req.args[0], &self.dev_root)?;
                 let label = &req.args[1];
-                if label.is_empty() || label.len() > 32 || !label.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')) {
-                    return Err(Status::invalid_argument("pool label must be 1-32 characters: letters, numbers, _, -, ."));
-                }
                 Ok(AllowedCommand::CreateBtrfsPool { device, label: label.clone() })
             }
             PrivOp::WriteDaemonConfig => {
@@ -677,6 +703,16 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
             allowlist.smartctl_bin.clone(),
             vec!["-H".into(), "-A".into(), device.display().to_string()],
         ),
+        AllowedCommand::FormatFilesystem { device, fs_type, label, force } => {
+            let (bin, force_arg) = if fs_type == "ext4" {
+                (allowlist.mkfs_ext4_bin.clone(), "-F")
+            } else {
+                (allowlist.mkfs_btrfs_bin.clone(), "-f")
+            };
+            let mut args = vec!["-L".into(), label.clone(), device.display().to_string()];
+            if *force { args.insert(0, force_arg.into()); }
+            (bin, args)
+        }
         AllowedCommand::CreateBtrfsPool { device, label } => (
             allowlist.mkfs_btrfs_bin.clone(),
             vec!["-f".into(), "-L".into(), label.clone(), device.display().to_string()],
@@ -846,6 +882,7 @@ mod tests {
             &marker("mkdir"),
             &marker("smartctl"),
             &marker("mkfs.btrfs"),
+            &marker("mkfs.ext4"),
             &marker("testparm"),
             &marker("systemctl"),
             &marker("exportfs"),
@@ -872,6 +909,7 @@ mod tests {
             "mkdir",
             "smartctl",
             "mkfs.btrfs",
+            "mkfs.ext4",
             "testparm",
             "systemctl",
             "exportfs",
@@ -881,6 +919,24 @@ mod tests {
         );
         let resp = run_request(&a, &request(PrivOp::BtrfsFilesystemShowRaw, vec![])).await;
         assert!(resp.is_err(), "missing binary must fail closed");
+    }
+
+    #[tokio::test]
+    async fn format_filesystem_selects_ext4_and_force_flag() {
+        let dir = TempDir::new("format");
+        let dev_root = dir.path().join("dev");
+        fs::create_dir_all(&dev_root).unwrap();
+        let a = test_allowlist(dir.path());
+        let resp = run_request(
+            &a,
+            &request(
+                PrivOp::FormatFilesystem,
+                vec![dev_root.join("sdb").to_str().unwrap(), "ext4", "data", "true"],
+            ),
+        ).await.unwrap();
+        assert_eq!(resp.exit_code, 0);
+        let log = fs::read_to_string(dir.path().join("argv.log")).unwrap();
+        assert!(log.lines().any(|line| line.contains("mkfs.ext4") && line.contains("|-F") && line.contains("|-L|data")), "{log}");
     }
 
     #[tokio::test]
@@ -1063,7 +1119,7 @@ mod tests {
         // testparm that fails validation; the reload must never run.
         let failing = fake_bin(dir.path(), "testparm-bad", "#!/bin/sh\nexit 1\n");
         let a = Allowlist::new(
-            "btrfs", "lsblk", "mount", "umount", "mkdir", "smartctl", "mkfs.btrfs",
+            "btrfs", "lsblk", "mount", "umount", "mkdir", "smartctl", "mkfs.btrfs", "mkfs.ext4",
             &failing, // testparm fails
             "systemctl", "exportfs",
             dir.path(), dir.path(), dir.path().join("dev").as_path(),
