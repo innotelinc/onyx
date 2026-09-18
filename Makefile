@@ -79,7 +79,8 @@ check: vet test
 	else echo "node not found — skipping scripts/web-ui-check.js"; fi
 
 ## e2e — drive a *running* compose stack (app install, tiered bucket sync/evict)
-## through the gateway; POOL_DEVICE=/dev/sdX adds the destructive pool flow.
+## through the gateway; POOL_DEVICE=/dev/sdX or POOL_IMAGE=<file> (a loop device
+## the harness creates and removes) adds the destructive pool flow.
 ## See scripts/e2e-stack.sh.
 e2e:
 	@bash scripts/e2e-stack.sh

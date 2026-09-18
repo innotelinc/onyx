@@ -271,18 +271,22 @@ Btrfs snapshot lifecycle on top of the fixed subvolume layout
 `.github/workflows/` implements CI/CD:
 
 - **`ci.yml`** — on push/PR: `make bootstrap` (cached), `make check`
-  (vet + tests), `make build`. Validation only; nothing is published.
+  (vet + tests), `make build`, plus an `e2e` job that builds the stack and runs
+  the flows below against it. Validation only; nothing is published.
 
 `make check` exercises the code; `scripts/e2e-stack.sh` (`make e2e`) exercises
 the *deployment* — it drives a running compose stack through the three flows
-that span every layer (pool creation on a real disk with `POOL_DEVICE=`, an app
-install, and a tiered bucket's sync → verify → evict → refetch over the S3 API)
-and asserts what only a real stack can show: a pool root the unprivileged
-daemons can write, containers that are running rather than crash-looping, an
-evicted object that comes back on read. A unit test cannot see a mount
-namespace, a file mode or a missing helper binary; this can, and both bugs it
-was written for — an un-clearable disk and a storage root nobody could write
-into — were invisible to the test suite.
+that span every layer (pool creation on a real disk with `POOL_DEVICE=`, or on a
+loop device backed by a file the harness creates and removes with
+`POOL_IMAGE=`, an app install, and a tiered bucket's sync → verify → evict →
+refetch over the S3 API) and asserts what only a real stack can show: a pool
+root the unprivileged daemons can write, containers that are running rather than
+crash-looping, an evicted object that comes back on read and is cached again
+with no download left behind. A unit test cannot see a mount namespace, a file
+mode or a missing helper binary; this can, and both bugs it was written for — an
+un-clearable disk and a storage root nobody could write into — were invisible to
+the test suite. The `e2e` job is the same script, so a regression reaches CI
+instead of an operator's disk.
 - **`release.yml`** — one publish pipeline for both event kinds:
   - `main` push → build + publish `:latest` images;
   - tag `v*` push → build + publish `:latest` + `:<tag>` images, then create
