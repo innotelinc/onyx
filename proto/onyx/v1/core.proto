@@ -21,6 +21,9 @@ service Core {
   // GetPool returns one pool by name, forwarded to onyx-storaged.
   rpc GetPool(GetPoolRequest) returns (Pool);
 
+  // CreatePool formats a verified removable whole-disk device as Btrfs.
+  rpc CreatePool(CreatePoolRequest) returns (Pool);
+
   // ListDevices returns every block device the data plane has detected
   // (attached, mounted or recently detached), forwarded to onyx-storaged.
   rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);

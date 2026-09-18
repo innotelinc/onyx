@@ -82,3 +82,9 @@ func (s *server) ListPools(ctx context.Context, req *onyxv1.ListPoolsRequest) (*
 func (s *server) GetPool(ctx context.Context, req *onyxv1.GetPoolRequest) (*onyxv1.Pool, error) {
 	return s.storaged.GetPool(ctx, req)
 }
+
+// CreatePool forwards the explicitly confirmed destructive storage operation
+// to onyx-storaged, which enforces removable whole-disk policy.
+func (s *server) CreatePool(ctx context.Context, req *onyxv1.CreatePoolRequest) (*onyxv1.Pool, error) {
+	return s.storaged.CreatePool(ctx, req)
+}

@@ -56,6 +56,10 @@ enum PrivOp {
   // `systemctl reload smbd`. "nfs": `exportfs -ra`. Fails closed: no reload
   // unless validation passes.
   RELOAD_DAEMONS = 8;
+
+  // `mkfs.btrfs -f -L <label> <device>` — format a verified removable
+  // whole-disk device as an Onyx storage pool.
+  CREATE_BTRFS_POOL = 9;
 }
 
 message PrivRequest {

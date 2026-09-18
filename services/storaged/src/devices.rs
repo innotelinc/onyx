@@ -546,6 +546,51 @@ impl DeviceManager {
         Ok(updated)
     }
 
+    /// Format a removable whole disk as a Btrfs pool and mount it under the
+    /// Onyx storage root. The privileged helper performs the destructive
+    /// filesystem operation; this layer enforces the device-selection policy.
+    pub async fn create_pool(&self, device_name: &str, pool_name: &str) -> Result<Device, String> {
+        if pool_name.is_empty() || pool_name.len() > 32 || !pool_name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')) {
+            return Err("pool name must be 1-32 characters: letters, numbers, _, -, .".into());
+        }
+        let dev = self
+            .registry
+            .get_device(device_name)
+            .map_err(|e| format!("registry: {e}"))?
+            .ok_or_else(|| format!("device {device_name} not found"))?;
+        if dev.r#type != "disk" || !dev.removable {
+            return Err("only an unmounted removable whole disk can be formatted".into());
+        }
+        if dev.state == "detached" || !dev.mountpoint.is_empty() {
+            return Err("the selected disk is unavailable or already mounted".into());
+        }
+        if !self.begin_attach(&dev.kname) {
+            return Err(format!("pool creation already in progress for {}", dev.name));
+        }
+        let result = async {
+            let response = self.run_op(PrivOp::CreateBtrfsPool, vec![dev.path.clone(), pool_name.to_string()]).await?;
+            if response.exit_code != 0 {
+                return Err(format!("format failed: {}", String::from_utf8_lossy(&response.stderr).trim()));
+            }
+            let mut formatted = dev.clone();
+            formatted.name = pool_name.to_string();
+            formatted.label = pool_name.to_string();
+            formatted.fs_type = "btrfs".to_string();
+            formatted.auto = "manual".to_string();
+            formatted.state = "attached".to_string();
+            self.registry.upsert_device(&formatted).map_err(|e| format!("registry: {e}"))?;
+            self.mount_and_record(&formatted).await?;
+            self.registry.get_device(&formatted.kname)
+                .map_err(|e| format!("registry: {e}"))?
+                .ok_or_else(|| "formatted pool disappeared from registry".to_string())
+        }.await;
+        self.end_attach(&dev.kname);
+        if let Err(e) = &result {
+            self.emit(&dev.kname, &dev.name, "error", e);
+        }
+        result
+    }
+
     /// Detach a device onyx mounted (or is about to mount). Devices mounted
     /// elsewhere are left alone. Idempotent for already-detached devs.
     ///
