@@ -568,6 +568,12 @@ impl DeviceManager {
             return Err(format!("pool creation already in progress for {}", dev.name));
         }
         let result = async {
+            // A whole disk can look unmounted while one of its partitions is
+            // still mounted (for example /dev/sdc1). Unmount only partitions
+            // belonging to this selected disk, and only when Onyx owns the
+            // mount under its configured root. Never unmount an OS/external
+            // mount implicitly.
+            self.unmount_disk_partitions(&dev).await?;
             let response = self.run_op(PrivOp::CreateBtrfsPool, vec![dev.path.clone(), pool_name.to_string()]).await?;
             if response.exit_code != 0 {
                 return Err(format!("format failed: {}", String::from_utf8_lossy(&response.stderr).trim()));
@@ -589,6 +595,45 @@ impl DeviceManager {
             self.emit(&dev.kname, &dev.name, "error", e);
         }
         result
+    }
+
+    /// Unmount mounted child partitions of a selected whole disk. The device
+    /// registry is populated from lsblk, so this catches mounts such as
+    /// /dev/sdc1 even when /dev/sdc itself has no mountpoint.
+    async fn unmount_disk_partitions(&self, disk: &Device) -> Result<(), String> {
+        let related = self
+            .registry
+            .list_devices()
+            .map_err(|e| format!("registry: {e}"))?
+            .into_iter()
+            .filter(|candidate| candidate.kname != disk.kname && Self::is_partition_of(&disk.kname, &candidate.kname))
+            .filter(|candidate| !candidate.mountpoint.is_empty())
+            .collect::<Vec<_>>();
+
+        for partition in related {
+            if !Path::new(&partition.mountpoint).starts_with(self.mount_root.as_path()) {
+                return Err(format!(
+                    "partition {} is mounted at {} outside Onyx; unmount it manually before formatting {}",
+                    partition.path, partition.mountpoint, disk.path
+                ));
+            }
+            self.unmount_block(&partition.mountpoint).await.map_err(|e| {
+                format!("cannot unmount {} at {} before formatting {}: {e}", partition.path, partition.mountpoint, disk.path)
+            })?;
+            self.registry
+                .set_unmounted(&partition.kname)
+                .map_err(|e| format!("registry: {e}"))?;
+            tracing::info!(disk = %disk.path, partition = %partition.path, mountpoint = %partition.mountpoint, "unmounted partition before pool format");
+        }
+        Ok(())
+    }
+
+    /// Return true for a partition kname belonging directly to a disk kname.
+    /// Handles both sdc/sdc1 and nvme0n1/nvme0n1p1 naming.
+    fn is_partition_of(disk: &str, candidate: &str) -> bool {
+        candidate.strip_prefix(disk).is_some_and(|suffix| {
+            !suffix.is_empty() && (suffix.chars().all(|c| c.is_ascii_digit()) || suffix.strip_prefix('p').is_some_and(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())))
+        })
     }
 
     /// Detach a device onyx mounted (or is about to mount). Devices mounted
@@ -618,8 +663,14 @@ impl DeviceManager {
             ));
         }
         if dev.mountpoint.is_empty() {
-            // Not mounted: nothing to unmount, but record the user's intent so
-            // the watcher keeps the drive detached while it is plugged in.
+            // A whole disk can have a mounted child partition even when the
+            // disk itself has no mountpoint. Detach the selected disk as a
+            // unit, then pin it out of auto-attach.
+            if dev.r#type == "disk" {
+                self.unmount_disk_partitions(&dev).await?;
+            }
+            // Not mounted: nothing else to unmount, but record the user's
+            // intent so the watcher keeps the drive detached while plugged in.
             self.registry
                 .mark_detached_by_user(&dev.kname)
                 .map_err(|e| format!("registry: {e}"))?;
