@@ -16,10 +16,17 @@
 # Usage:
 #   scripts/e2e-stack.sh                       # app + tiered (pool skipped)
 #   POOL_DEVICE=/dev/sdc scripts/e2e-stack.sh  # all three, on a scratch disk
+#   POOL_IMAGE=/tmp/onyx-pool.img scripts/e2e-stack.sh
+#                                              # all three, on a loop device
+#                                              # the script creates and removes
 #   APP_ID=jellyfin scripts/e2e-stack.sh
 #   PROJECT=onyx-e2e scripts/e2e-stack.sh      # compose project to look in
 #
-# POOL_DEVICE is destroyed. Point it at a disk you do not need.
+# POOL_DEVICE is destroyed. Point it at a disk you do not need. POOL_IMAGE is a
+# file this script creates, formats and deletes — the safe way to run the
+# destructive flow on a machine with no spare disk (CI, a laptop): the loop
+# device it hands to storaged is a real whole disk to the kernel, so wipefs,
+# mkfs, mount and the pool-root mode all take the production path.
 #
 # Requirements: the stack is up (`docker compose up -d`), bash, python3.
 set -euo pipefail
@@ -28,6 +35,19 @@ API="${ONYX_API:-http://127.0.0.1:2081}/api/v1"
 PROJECT="${PROJECT:-onyx-e2e}"
 APP_ID="${APP_ID:-nextcloud}"
 POOL_DEVICE="${POOL_DEVICE:-}"
+# POOL_IMAGE turns the pool flow into a self-contained one: the script makes the
+# image, attaches it to a free loop device and detaches it again on the way out.
+POOL_IMAGE="${POOL_IMAGE:-}"
+POOL_IMAGE_SIZE="${POOL_IMAGE_SIZE:-2G}"
+# Privilege prefix for losetup: empty as root, `sudo` on a CI runner (the loop
+# control device is root-only, and the harness must not assume it is root).
+SUDO="${SUDO:-}"
+# Provisioning the loop device is the only way to run the pool flow on a host
+# with no spare disk, so where that is the intent (CI) a failure to provision is
+# a failure rather than a skip.
+REQUIRE_POOL="${E2E_REQUIRE_POOL:-0}"
+LOOP_DEVICE=""
+LOOP_ERROR=""
 POOL_NAME="${POOL_NAME:-e2e-pool}"
 BUCKET="${BUCKET:-e2e-tiered}"
 TIER_TARGET="${TIER_TARGET:-/mnt/onyx/e2e-tier-cold}"
@@ -98,17 +118,63 @@ ox_write() { # ox_write <container path> <content>
   docker exec -i "$c" sh -c "cat > '$1'" <<<"$2" || return 1
 }
 
+# loop_for_image <image> <size> — create the image and attach a free loop
+# device, setting LOOP_DEVICE.
+#
+# The destructive flow needs a block device the data plane can format, and most
+# hosts running this script have no disposable disk to give it. A loop device
+# backed by a file is a whole disk with no partition table as far as the kernel,
+# lsblk and mkfs are concerned, so the flow is the production one — and the
+# storage it destroys is a file this script owns. On failure it explains itself
+# in LOOP_ERROR and takes the image with it.
+loop_for_image() {
+  local image="$1" size="$2" out
+  LOOP_DEVICE=""
+  LOOP_ERROR=""
+  command -v losetup >/dev/null 2>&1 || { LOOP_ERROR="losetup is not installed"; return 1; }
+  command -v truncate >/dev/null 2>&1 || { LOOP_ERROR="truncate is not installed"; return 1; }
+  rm -f "$image"
+  if ! truncate -s "$size" "$image" 2>/dev/null; then
+    LOOP_ERROR="cannot create $image"
+    return 1
+  fi
+  if ! out="$($SUDO losetup -f --show "$image" 2>&1)"; then
+    # losetup explains itself over several lines; the report is one line.
+    LOOP_ERROR="losetup could not attach $image: $(printf '%s' "${out:-failed}" | tr '\n' ' ' | tr -s ' ' | sed 's/ $//')"
+    rm -f "$image"
+    return 1
+  fi
+  if [ ! -b "$out" ]; then
+    # Something answered but there is no device node here — a container without
+    # device passthrough, not a full host.
+    LOOP_ERROR="losetup returned ${out:-nothing}, which is not a block device here: this environment cannot provide one"
+    rm -f "$image"
+    return 1
+  fi
+  LOOP_DEVICE="$out"
+}
+
 cleanup() {
   if [ "$KEEP" = 1 ]; then
     echo
     echo "KEEP=1 — leaving ${POOL_NAME}, ${BUCKET} and ${APP_ID} in place"
+    if [ -n "$LOOP_DEVICE" ]; then
+      echo "         $LOOP_DEVICE still backs $POOL_IMAGE (detach it with: $SUDO losetup -d $LOOP_DEVICE)"
+    fi
     return
   fi
   say cleanup
   api DELETE "/buckets/$BUCKET?force=true" >/dev/null 2>&1 || true
   api DELETE "/apps/$APP_ID?purge_data=true&force=true" >/dev/null 2>&1 || true
   if [ -n "$POOL_DEVICE" ]; then
+    # The pool goes first: its mount has to be gone before the device backing it
+    # is detached, or the loop device stays busy and the image is never freed.
     api DELETE "/pools/$POOL_NAME" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$LOOP_DEVICE" ]; then
+    $SUDO losetup -d "$LOOP_DEVICE" >/dev/null 2>&1 || true
+    rm -f "$POOL_IMAGE"
+    echo "  detached $LOOP_DEVICE and removed $POOL_IMAGE"
   fi
   echo "  removed the bucket, the app and (if created) the pool"
 }
@@ -124,8 +190,20 @@ fi
 
 # --- 1. pool ------------------------------------------------------------------
 say "1. create a pool"
+if [ -z "$POOL_DEVICE" ] && [ -n "$POOL_IMAGE" ]; then
+  if loop_for_image "$POOL_IMAGE" "$POOL_IMAGE_SIZE"; then
+    POOL_DEVICE="$LOOP_DEVICE"
+    echo "  $POOL_DEVICE backs $POOL_IMAGE ($POOL_IMAGE_SIZE, created by this script)"
+  elif [ "$REQUIRE_POOL" = 1 ]; then
+    bad "no loop device for $POOL_IMAGE: $LOOP_ERROR"
+  else
+    meh "no loop device for $POOL_IMAGE ($LOOP_ERROR) — the pool flow is skipped"
+  fi
+fi
 if [ -z "$POOL_DEVICE" ]; then
-  meh "POOL_DEVICE is not set; pass a scratch whole disk (POOL_DEVICE=/dev/sdc)"
+  # Reported only when the caller asked for no pool at all; a POOL_IMAGE that
+  # could not be provisioned has already said why above.
+  [ -n "$POOL_IMAGE" ] || meh "no pool device: set POOL_DEVICE=/dev/sdc (a scratch whole disk) or POOL_IMAGE=</path/img>"
 else
   # The device has to exist where the data plane runs, not just on the host: a
   # container that cannot see /dev/<disk> cannot format it, and the failure the
@@ -176,8 +254,11 @@ fi
 # An install is only real once its containers are up: appd starting a compose
 # project can succeed while every container crash-loops (a sandbox posture the
 # image refuses, a missing dependency, a port already taken).
+# The wait covers a first install on a cold host, image pulls included: an
+# `appd` install that pulls its images from a registry takes minutes, and a
+# timeout that is too short reads as a crash-looping app.
 crashed=0
-for _ in $(seq 1 20); do
+for _ in $(seq 1 60); do
   containers="$(api GET /containers)"
   running="$(json_get 'len([c for c in d["containers"] if c["appId"]==sys.argv[2] and c["status"]=="running"])' "$APP_ID" <<<"$containers")"
   crashed="$(json_get 'len([c for c in d["containers"] if c["appId"]==sys.argv[2] and c["status"] in ("exited","restarting")])' "$APP_ID" <<<"$containers")"
@@ -257,6 +338,12 @@ else
     else
       bad "the refetched object was not cached"
     fi
+    # The download lands in a temporary file and is renamed into place; a leak
+    # here would leave an object-shaped file in the bucket that the next sync
+    # uploads to the cloud as data.
+    leftovers="$(docker exec "$os_container" sh -c "find /var/lib/onyx/objectstore/objects/$BUCKET -name 'refetch-*' 2>/dev/null | wc -l" 2>/dev/null)"
+    [ "${leftovers:-x}" = "0" ] && ok "the refetch left no temporary download behind" \
+      || bad "the refetch left ${leftovers:-?} temporary download(s) in the bucket"
   fi
 fi
 
