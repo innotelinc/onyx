@@ -66,8 +66,16 @@ privileged process). Every other container — storaged, api, davd — bind-moun
 that same host directory, so a mount box is only shared if propagation is
 *shared* on both sides:
 
-- the host path must be a shared mount (`mount --make-shared /mnt/onyx`, and an
-  `/etc/fstab` entry with the `shared` option to survive a reboot);
+- the host path must be a shared **mount point**. It is a plain directory on a
+  fresh install, and a directory that is not a mount point cannot be made
+  shared — `mount --make-shared /mnt/onyx` fails with exit 32 ("not mount point
+  or bad option") — so it is bound to itself in the same call:
+  `mount -o bind,shared /mnt/onyx /mnt/onyx`. That binding is recorded in
+  `/etc/fstab` as `/mnt/onyx /mnt/onyx none bind,shared 0 0`, because
+  propagation is lost on reboot and the symptom is an empty Files view rather
+  than an error. `setup.sh` makes it shared and prints the fstab line;
+  `onyx-firstboot` does both, and `scripts/e2e-stack.sh` fails the run when the
+  propagation is not `shared`;
 - the compose bind mounts use `:rshared`.
 
 Get one half right and the failure is silent and confusing: privd mounts the

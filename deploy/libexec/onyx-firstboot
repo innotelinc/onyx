@@ -110,6 +110,33 @@ fi
 echo "$ADMIN_USER:$ADMIN_PASSWORD" | chpasswd
 
 # --- 3. data pool ----------------------------------------------------------
+# The pool is mounted at /mnt/onyx/<name> on the host, inside onyx-privd's own
+# namespace; every other container only sees it because /mnt/onyx is itself a
+# *shared* mount point (docs/design/05#2.4). A plain directory is not one, and
+# `mount --make-shared` says so (exit 32), so the directory is bound to itself as
+# part of the same call — and recorded, because propagation is lost on reboot and
+# the symptom is an empty Files view rather than an error.
+STORAGE_ROOT="${ONYX_STORAGE_ROOT:-/mnt/onyx}"
+share_storage_root() {
+  mkdir -p "$STORAGE_ROOT"
+  if findmnt -no PROPAGATION "$STORAGE_ROOT" 2>/dev/null | grep -qw shared; then
+    say "storage root $STORAGE_ROOT is already a shared mount"
+    return 0
+  fi
+  if ! mount -o bind,shared "$STORAGE_ROOT" "$STORAGE_ROOT" 2>/dev/null; then
+    echo "onyx-firstboot: could not make $STORAGE_ROOT a shared mount" >&2
+    return 1
+  fi
+  say "storage root $STORAGE_ROOT is now a shared mount"
+  local entry="$STORAGE_ROOT $STORAGE_ROOT none bind,shared 0 0"
+  if [ -f /etc/fstab ] && ! grep -qsF "$entry" /etc/fstab; then
+    printf '\n# Onyx: pools are mounted under %s on the host; shared propagation is what\n# carries them into the other containers (docs/design/05-storage-subsystem.md).\n%s\n' \
+      "$STORAGE_ROOT" "$entry" >>/etc/fstab
+    say "recorded it in /etc/fstab so it survives a reboot"
+  fi
+}
+share_storage_root || true
+
 if [ "$SKIP_POOL" = 0 ]; then
   say "data pool: $POOL_LABEL (onyx-pool ensure)"
   ONYX_POOL_LABEL="$POOL_LABEL" /usr/local/lib/onyx/onyx-pool mount \
