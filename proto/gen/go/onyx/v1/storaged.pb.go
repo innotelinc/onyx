@@ -149,8 +149,16 @@ type CreatePoolRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Stable device name or kernel name, e.g. "sdb".
 	Device string `protobuf:"bytes,1,opt,name=device,proto3" json:"device,omitempty"`
-	// Btrfs filesystem label and Onyx pool name.
-	Name          string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// Filesystem label and Onyx pool name.
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// btrfs (default) or ext4.
+	FsType string `protobuf:"bytes,3,opt,name=fs_type,json=fsType,proto3" json:"fs_type,omitempty"`
+	// Explicitly overwrite existing filesystem signatures.
+	Force bool `protobuf:"varint,4,opt,name=force,proto3" json:"force,omitempty"`
+	// Mount the formatted filesystem automatically under /mnt/onyx/<mount_name>.
+	AutoMount bool `protobuf:"varint,5,opt,name=auto_mount,json=autoMount,proto3" json:"auto_mount,omitempty"`
+	// Optional mount directory name; defaults to name.
+	MountName     string `protobuf:"bytes,6,opt,name=mount_name,json=mountName,proto3" json:"mount_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -195,6 +203,34 @@ func (x *CreatePoolRequest) GetDevice() string {
 func (x *CreatePoolRequest) GetName() string {
 	if x != nil {
 		return x.Name
+	}
+	return ""
+}
+
+func (x *CreatePoolRequest) GetFsType() string {
+	if x != nil {
+		return x.FsType
+	}
+	return ""
+}
+
+func (x *CreatePoolRequest) GetForce() bool {
+	if x != nil {
+		return x.Force
+	}
+	return false
+}
+
+func (x *CreatePoolRequest) GetAutoMount() bool {
+	if x != nil {
+		return x.AutoMount
+	}
+	return false
+}
+
+func (x *CreatePoolRequest) GetMountName() string {
+	if x != nil {
+		return x.MountName
 	}
 	return ""
 }
@@ -911,10 +947,16 @@ const file_onyx_v1_storaged_proto_rawDesc = "" +
 	"\x11ListPoolsResponse\x12#\n" +
 	"\x05pools\x18\x01 \x03(\v2\r.onyx.v1.PoolR\x05pools\"$\n" +
 	"\x0eGetPoolRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"?\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"\xac\x01\n" +
 	"\x11CreatePoolRequest\x12\x16\n" +
 	"\x06device\x18\x01 \x01(\tR\x06device\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"\x9d\x01\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x17\n" +
+	"\afs_type\x18\x03 \x01(\tR\x06fsType\x12\x14\n" +
+	"\x05force\x18\x04 \x01(\bR\x05force\x12\x1d\n" +
+	"\n" +
+	"auto_mount\x18\x05 \x01(\bR\tautoMount\x12\x1d\n" +
+	"\n" +
+	"mount_name\x18\x06 \x01(\tR\tmountName\"\x9d\x01\n" +
 	"\x04Pool\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04uuid\x18\x02 \x01(\tR\x04uuid\x12\x17\n" +

@@ -57,9 +57,11 @@ enum PrivOp {
   // unless validation passes.
   RELOAD_DAEMONS = 8;
 
-  // `mkfs.btrfs -f -L <label> <device>` — format a verified removable
-  // whole-disk device as an Onyx storage pool.
-  CREATE_BTRFS_POOL = 9;
+  // `mkfs.btrfs [-f] -L <label> <device>` or `mkfs.ext4 [-F] -L <label> <device>`.
+  // The filesystem and force flag are strictly allowlisted.
+  FORMAT_FILESYSTEM = 9;
+  // Backward-compatible alias for the original Btrfs-only operation.
+  CREATE_BTRFS_POOL = 10;
 }
 
 message PrivRequest {
