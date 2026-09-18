@@ -232,6 +232,10 @@ enum AllowedCommand {
     UnmountBlock { mountpoint: PathBuf, force: bool },
     /// `smartctl -H -A <device>` — SMART health + temperature probe.
     SmartInfo { device: PathBuf },
+    /// `rmdir <mountpoint>` — remove an empty mountpoint directory left behind
+    /// after an unmount. rmdir semantics: never removes a directory that still
+    /// holds anything.
+    RemoveMountpoint { mountpoint: PathBuf },
     /// `mkfs.btrfs -f -L <label> <device>` — format one verified device.
     FormatFilesystem { device: PathBuf, fs_type: String, label: String, force: bool },
     CreateBtrfsPool { device: PathBuf, label: String },
@@ -439,6 +443,15 @@ impl Allowlist {
                 }
                 let device = validate_device_path(&req.args[0], &self.dev_root)?;
                 Ok(AllowedCommand::SmartInfo { device })
+            }
+            PrivOp::RemoveMountpoint => {
+                if req.args.len() != 1 {
+                    return Err(Status::invalid_argument(
+                        "REMOVE_MOUNTPOINT requires exactly one mountpoint argument",
+                    ));
+                }
+                let mountpoint = validate_mount_path(&req.args[0], &self.allowed_root)?;
+                Ok(AllowedCommand::RemoveMountpoint { mountpoint })
             }
             PrivOp::FormatFilesystem => {
                 if req.args.len() != 4 {
@@ -782,6 +795,23 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
             allowlist.mkfs_btrfs_bin.clone(),
             vec!["-f".into(), "-L".into(), label.clone(), device.display().to_string()],
         ),
+        AllowedCommand::RemoveMountpoint { mountpoint } => {
+            // Not a subprocess: rmdir the empty mountpoint. A directory that
+            // still holds anything stays (rmdir refuses non-empty), and the
+            // failure is reported in-band like any other command failure.
+            return match std::fs::remove_dir(mountpoint) {
+                Ok(()) => Ok(PrivResponse {
+                    exit_code: 0,
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                }),
+                Err(e) => Ok(PrivResponse {
+                    exit_code: 1,
+                    stdout: Vec::new(),
+                    stderr: format!("rmdir {}: {e}", mountpoint.display()).into_bytes(),
+                }),
+            };
+        }
         AllowedCommand::WriteDaemonConfig { target, content } => {
             // Not a subprocess: atomic write (tmp -> fsync -> rename).
             write_config(&allowlist.config_dir, target, content)?;
@@ -1115,6 +1145,44 @@ mod tests {
             ))
             .expect_err("extra arg rejected");
         assert_eq!(err.code(), tonic::Code::InvalidArgument, "{err}");
+    }
+
+    #[tokio::test]
+    async fn remove_mountpoint_rmdirs_only_empty_directories() {
+        let dir = TempDir::new("rmmount");
+        let a = test_allowlist(dir.path());
+
+        // An empty mountpoint directory (left over after an unmount) goes away.
+        let empty = dir.path().join("stale-pool");
+        fs::create_dir_all(&empty).unwrap();
+        let resp = run_request(
+            &a,
+            &request(PrivOp::RemoveMountpoint, vec![empty.to_str().unwrap()]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&resp.stderr));
+        assert!(!empty.exists(), "empty mountpoint should be removed");
+
+        // A directory that still holds data is never removed.
+        let busy = dir.path().join("live-pool");
+        fs::create_dir_all(&busy).unwrap();
+        fs::write(busy.join("file.txt"), b"data").unwrap();
+        let resp = run_request(
+            &a,
+            &request(PrivOp::RemoveMountpoint, vec![busy.to_str().unwrap()]),
+        )
+        .await
+        .unwrap();
+        assert_ne!(resp.exit_code, 0, "non-empty directory must not be removed");
+        assert!(busy.join("file.txt").is_file(), "data must survive");
+
+        // Outside the allowed root is rejected outright.
+        let outside = TempDir::new("rmmount-outside");
+        let err = a
+            .validate(&request(PrivOp::RemoveMountpoint, vec![outside.path().to_str().unwrap()]))
+            .expect_err("outside root rejected");
+        assert_eq!(err.code(), tonic::Code::PermissionDenied, "{err}");
     }
 
     #[tokio::test]
