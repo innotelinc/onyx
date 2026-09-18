@@ -206,6 +206,11 @@ Btrfs snapshot lifecycle on top of the fixed subvolume layout
   manifest's bind mount resolves to pool storage on both sides. App projects are
   namespaced `onyx-app-<app>` so an app can never take the platform stack down
   with a `down`.
+- The app sandbox (docs/design/09 §6) is enforced here: a catalog manifest that
+  requests host privilege, host namespaces, an added-back capability, no resource
+  limits, or a bind mount outside the storage root is refused at startup, and an
+  install whose path setting points outside the pool is refused with
+  `InvalidArgument` before anything is written.
 
 ### 6.5 `onyx-ai` — AI Storage Advisor + Backup Intelligence
 

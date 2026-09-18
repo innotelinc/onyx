@@ -25,13 +25,19 @@ type server struct {
 	store   *store
 	runtime Runtime
 	host    string
+	// storageRoot is the only host tree an app may bind-mount (docs/design/09
+	// §6): install-time paths are confined to it before they reach a manifest.
+	storageRoot string
 }
 
 var _ onyxv1.HealthServer = (*server)(nil)
 var _ onyxv1.AppdServer = (*server)(nil)
 
-func newServer(appCatalog map[string]catalogApp, st *store, rt Runtime, host string) *server {
-	return &server{catalog: appCatalog, store: st, runtime: rt, host: host}
+func newServer(appCatalog map[string]catalogApp, st *store, rt Runtime, host, storageRoot string) *server {
+	if storageRoot == "" {
+		storageRoot = storageRootDefault
+	}
+	return &server{catalog: appCatalog, store: st, runtime: rt, host: host, storageRoot: storageRoot}
 }
 
 func (s *server) Check(_ context.Context, _ *onyxv1.HealthCheckRequest) (*onyxv1.HealthCheckResponse, error) {
@@ -81,6 +87,12 @@ func (s *server) InstallApp(ctx context.Context, req *onyxv1.InstallAppRequest) 
 	}
 
 	cfg := catalogConfig(app, req.GetConfig())
+	// The install request is the one place operator input reaches a manifest,
+	// and its path settings become bind mounts, so they are confined to the
+	// pool before anything is written or started.
+	if err := validateConfigPaths(app, cfg, s.storageRoot); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 	manifest := renderManifest(app.Manifest, cfg, s.host)
 	containers, err := s.runtime.Up(ctx, app.ID, manifest, cfg)
 	if err != nil {
