@@ -495,7 +495,7 @@
         '<button class="btn" id="storage-refresh">Refresh</button></div>' +
         '<div class="card" id="storage-pools"><div class="empty"><b>Loading pools…</b>Checking mounted storage.</div></div>' +
         '<div class="card" style="margin-top:16px" id="storage-devices"><div class="empty"><b>Loading devices…</b>Scanning block devices.</div></div>' +
-        '<div class="card" style="margin-top:16px" id="storage-pool-setup"><h3>Create an Onyx storage pool</h3><p class="sub">Format a whole removable disk, then mount it automatically under /mnt/onyx. Disks Onyx already mounted can be re-created in place.</p><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end"><label>Disk<select id="pool-device" class="search" style="width:100%;max-width:none"><option value="">Loading safe disks…</option></select></label><label>Pool label<input id="pool-name" class="search" style="width:100%;max-width:none" placeholder="main-pool"></label><label>Filesystem<select id="pool-fs" class="search" style="width:100%;max-width:none"><option value="btrfs">Btrfs</option><option value="ext4">ext4</option></select></label><label>Mount directory<input id="pool-mount-name" class="search" style="width:100%;max-width:none" placeholder="Defaults to pool label"></label><label style="display:flex;gap:8px;align-items:center"><input id="pool-auto-mount" type="checkbox" checked> Auto-mount after format</label><label style="display:flex;gap:8px;align-items:center"><input id="pool-force" type="checkbox"> Force erase existing signatures</label><button class="btn" id="pool-preview">Review destructive operation</button></div><div id="pool-warning" class="sub" style="margin-top:12px">A verified backup and final confirmation are required before any erase operation.</div></div>';
+        '<div class="card" style="margin-top:16px" id="storage-pool-setup"><h3>Create an Onyx storage pool</h3><p class="sub">Format a whole removable disk, then mount it automatically under /mnt/onyx. The defaults below — label <b>main-pool</b>, Btrfs, mounted at /mnt/onyx/main-pool, force unmount and erase — are ready to use; change any option before creating. Disks Onyx already mounted can be re-created in place.</p><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end"><label>Disk<select id="pool-device" class="search" style="width:100%;max-width:none"><option value="">Loading safe disks…</option></select></label><label>Pool label<input id="pool-name" class="search" style="width:100%;max-width:none" value="main-pool" placeholder="main-pool"></label><label>Filesystem<select id="pool-fs" class="search" style="width:100%;max-width:none"><option value="btrfs">Btrfs</option><option value="ext4">ext4</option></select></label><label>Mount directory<input id="pool-mount-name" class="search" style="width:100%;max-width:none" placeholder="Defaults to pool label"></label><label style="display:flex;gap:8px;align-items:center"><input id="pool-auto-mount" type="checkbox" checked> Auto-mount after format</label><label style="display:flex;gap:8px;align-items:center"><input id="pool-force" type="checkbox" checked> Force unmount &amp; erase</label><button class="btn" id="pool-preview">Review destructive operation</button><button class="btn" id="pool-defaults">Use defaults</button></div><div id="pool-warning" class="sub" style="margin-top:12px">A verified backup and final confirmation are required before any erase operation.</div></div>';
     }
 
     // protojson serializes protocol enums as names ("SHARE_PROTOCOL_SMB");
@@ -681,7 +681,140 @@
         '<label><input type="checkbox" id="share-readonly"> Read-only</label>' +
         '<button class="btn primary" id="share-create">Create share</button>' +
         '</div><p class="sub" style="margin-bottom:0">Only folders under the mounted Onyx storage root can be shared. No disk formatting is performed here.</p></div>' +
-        '<div class="card" id="share-list"><div class="empty"><b>Loading shares…</b>Reading the share catalog.</div></div>';
+        '<div class="card" id="share-list"><div class="empty"><b>Loading shares…</b>Reading the share catalog.</div></div>' +
+        // Cloud/remote storage (docs/design/05#6): configure a provider once,
+        // then clone a storage folder to it or use it as a backup target. The
+        // remote catalog is the shared rclone config the API writes and
+        // backupd reads.
+        '<div class="card" style="margin-top:16px" id="share-remote"><h3>Cloud &amp; remote storage</h3>' +
+        '<p class="sub">Register a provider once — each configured target can then receive a clone of a storage folder and serve as a backup destination.</p>' +
+        '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end">' +
+        '<label>Target name<input id="remote-name" class="search" style="width:100%;max-width:none" placeholder="my-cloud" autocomplete="off"></label>' +
+        '<label>Provider<select id="remote-provider" class="search" style="width:100%;max-width:none"><option value="">Loading providers…</option></select></label>' +
+        '</div>' +
+        '<div id="remote-fields" class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end;margin-top:12px"></div>' +
+        '<p class="sub" id="remote-hint" style="margin:8px 0 0"></p>' +
+        '<button class="btn primary" id="remote-save" style="margin-top:12px">Save target</button>' +
+        '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end;margin-top:16px;border-top:1px solid var(--onyx-border);padding-top:16px">' +
+        '<label>Clone folder<input id="remote-clone-source" class="search" style="width:100%;max-width:none" placeholder="media" autocomplete="off"></label>' +
+        '<label>Target<select id="remote-clone-target" class="search" style="width:100%;max-width:none"><option value="">No target configured</option></select></label>' +
+        '<label>Into folder<input id="remote-clone-dest" class="search" style="width:100%;max-width:none" placeholder="onyx-backups/media" autocomplete="off"></label>' +
+        '<button class="btn" id="remote-clone">Clone to target</button>' +
+        '</div>' +
+        '<div id="remote-list" class="sub" style="margin-top:12px">Loading targets…</div>' +
+        '<div id="remote-status" class="sub" style="margin-top:8px"></div></div>';
+    }
+
+    // copyText writes a connection string to the clipboard, falling back to a
+    // selectable prompt on browsers without the async clipboard API (or on a
+    // non-HTTPS origin, where it is unavailable).
+    function copyText(text, button) {
+      function done() {
+        if (!button) return;
+        var previous = button.textContent;
+        button.textContent = 'Copied';
+        setTimeout(function () { button.textContent = previous; }, 1200);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function () { window.prompt('Copy this connection string', text); });
+        return;
+      }
+      window.prompt('Copy this connection string', text);
+    }
+
+    // shareConnections renders the client-side address for every protocol a
+    // share is published over, using the address the browser reached Onyx on.
+    function shareConnections(share) {
+      var host = location.hostname || 'localhost';
+      var protocols = (share.protocols || []).map(function (p) {
+        return String(p).replace(/^SHARE_PROTOCOL_/, '').toLowerCase();
+      });
+      var lines = [];
+      if (protocols.indexOf('smb') >= 0) {
+        lines.push(['SMB (Windows)', '\\\\' + host + '\\' + share.name]);
+        lines.push(['SMB (macOS / Linux)', 'smb://' + host + '/' + share.name]);
+      }
+      if (protocols.indexOf('nfs') >= 0) lines.push(['NFS', host + ':' + share.path]);
+      if (protocols.indexOf('ftp') >= 0) lines.push(['FTP', 'ftp://' + host + '/']);
+      // The SFTP instance chroots one Onyx user per share (onyx-<share>).
+      if (protocols.indexOf('sftp') >= 0) lines.push(['SFTP', 'sftp://onyx-' + share.name + '@' + host + ':2222/']);
+      if (protocols.indexOf('webdav') >= 0) lines.push(['WebDAV', 'https://' + host + '/webdav/' + share.name]);
+      if (protocols.indexOf('rsync') >= 0) lines.push(['Rsync', 'rsync://' + host + '/' + share.name]);
+      return lines;
+    }
+
+    // loadRemoteProviders fills the provider picker and swaps the credential
+    // fields when the selection changes. Field names are rclone's own option
+    // names, so they are passed straight through to the target config.
+    function loadRemoteProviders() {
+      var select = document.getElementById('remote-provider');
+      if (!select) return;
+      apiJSON('/storage/providers').then(function (data) {
+        var providers = data.providers || [];
+        select.innerHTML = '<option value="">Choose a provider…</option>' + providers.map(function (p) {
+          return '<option value="' + esc(p.type) + '">' + esc(p.label) + (p.oauth ? ' (OAuth)' : '') + '</option>';
+        }).join('');
+        select.addEventListener('change', function () { renderRemoteFields(providers); });
+      }).catch(function () { select.innerHTML = '<option value="">Providers unavailable</option>'; });
+    }
+
+    function renderRemoteFields(providers) {
+      var select = document.getElementById('remote-provider');
+      var fields = document.getElementById('remote-fields');
+      var hint = document.getElementById('remote-hint');
+      if (!select || !fields) return;
+      var provider = (providers || []).filter(function (p) { return p.type === select.value; })[0];
+      if (!provider) {
+        fields.innerHTML = '';
+        if (hint) hint.textContent = '';
+        return;
+      }
+      var required = provider.required || [];
+      fields.innerHTML = (provider.fields || []).map(function (field) {
+        var label = field.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+        if (required.indexOf(field) >= 0) label += ' *';
+        var secret = /pass|secret|key$/.test(field);
+        return '<label>' + esc(label) + '<input class="search" data-remote-field="' + esc(field) + '" style="width:100%;max-width:none"' + (secret ? ' type="password"' : '') + ' autocomplete="off"></label>';
+      }).join('');
+      if (hint) hint.textContent = provider.oauth
+        ? 'Saved with no credentials: ' + (provider.hint || 'approve access in a browser afterwards.')
+        : (provider.hint || '');
+    }
+
+    function loadRemoteTargets() {
+      var list = document.getElementById('remote-list');
+      if (!list) return;
+      apiJSON('/storage/remotes').then(function (data) {
+        var names = data.remotes || [];
+        var details = data.details || {};
+        var select = document.getElementById('remote-clone-target');
+        if (select) {
+          select.innerHTML = names.length
+            ? names.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + (details[n] ? ' · ' + esc(details[n]) : '') + '</option>'; }).join('')
+            : '<option value="">No target configured</option>';
+        }
+        list.innerHTML = names.length
+          ? '<div style="display:grid;gap:6px">' + names.map(function (n) {
+            return '<div style="display:flex;gap:8px;align-items:center"><span class="tag">' + esc(n) + (details[n] ? ' · ' + esc(details[n]) : '') + '</span><button class="btn" data-remote-check="' + esc(n) + '">Check</button><button class="btn" data-remote-delete="' + esc(n) + '">Remove</button></div>';
+          }).join('') + '</div>'
+          : 'No cloud/remote targets configured yet.';
+        if (data.error) list.innerHTML += '<div class="sub" style="margin-top:8px">' + esc(data.error) + '</div>';
+        Array.prototype.forEach.call(list.querySelectorAll('[data-remote-check]'), function (button) {
+          button.addEventListener('click', function () {
+            var status = document.getElementById('remote-status');
+            if (status) status.textContent = 'Checking ' + button.dataset.remoteCheck + '…';
+            apiJSON('/storage/remotes/' + encodeURIComponent(button.dataset.remoteCheck) + '/check', { method: 'POST' }).then(function (result) {
+              if (status) status.textContent = result.ok ? result.name + ' is reachable.' : result.name + ' failed: ' + result.detail;
+            }).catch(showError);
+          });
+        });
+        Array.prototype.forEach.call(list.querySelectorAll('[data-remote-delete]'), function (button) {
+          button.addEventListener('click', function () {
+            if (!confirm('Remove the target ' + button.dataset.remoteDelete + '? Stored data at the provider is not touched.')) return;
+            apiJSON('/storage/remotes/' + encodeURIComponent(button.dataset.remoteDelete), { method: 'DELETE' }).then(loadRemoteTargets).catch(showError);
+          });
+        });
+      }).catch(showError);
     }
 
     function loadSharePaths(path) {
@@ -710,9 +843,16 @@
       apiJSON('/shares').then(function (data) {
         var rows = data.shares || [];
         list.innerHTML = rows.length ? '<div style="display:grid;gap:10px">' + rows.map(function (s) {
-          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(s.name) + '</b><div class="sub">' + esc(s.path) + ' · ' + esc(friendlyProtocols(s.protocols)) + '</div></div><div style="display:flex;gap:8px;align-items:center"><span class="tag">' + (s.readonly ? 'read-only' : 'read-write') + '</span><button class="btn" data-share-delete="' + esc(s.name) + '">Remove</button></div></div>';
+          // Connection strings: the address a client actually types, per
+          // protocol, so nobody has to guess the exported path.
+          var connections = shareConnections(s);
+          var connectionHtml = connections.map(function (pair) {
+            return '<div class="sub" style="display:flex;gap:8px;align-items:center;margin-top:4px"><span style="min-width:150px">' + esc(pair[0]) + '</span><code style="flex:1;overflow-wrap:anywhere">' + esc(pair[1]) + '</code><button class="btn" data-copy="' + esc(pair[1]) + '">Copy</button></div>';
+          }).join('');
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div style="flex:1"><b>' + esc(s.name) + '</b><div class="sub">' + esc(s.path) + ' · ' + esc(friendlyProtocols(s.protocols)) + '</div>' + connectionHtml + '</div><div style="display:flex;gap:8px;align-items:center"><span class="tag">' + (s.readonly ? 'read-only' : 'read-write') + '</span><button class="btn" data-share-delete="' + esc(s.name) + '">Remove</button></div></div>';
         }).join('') + '</div>' : '<div class="empty"><b>No shares yet</b>Create a share to expose a dataset over SMB or NFS.</div>';
         Array.prototype.forEach.call(list.querySelectorAll('[data-share-delete]'), function (button) { button.addEventListener('click', function () { if (!confirm('Remove this share? Files will remain unchanged.')) return; apiJSON('/shares/' + encodeURIComponent(button.dataset.shareDelete), { method: 'DELETE' }).then(loadShares).catch(showError); }); });
+        Array.prototype.forEach.call(list.querySelectorAll('[data-copy]'), function (button) { button.addEventListener('click', function () { copyText(button.dataset.copy, button); }); });
       }).catch(showError);
     }
 
@@ -782,6 +922,15 @@
             return '<option value="' + esc(device.name) + '">' + esc(device.path + ' · ' + formatBytes(device.sizeBytes) + (device.label ? ' · ' + device.label : '') + note) + '</option>';
           }).join('') : '<option value="">No safe removable disks detected</option>';
         }).catch(showError);
+        document.getElementById('pool-defaults').addEventListener('click', function () {
+          document.getElementById('pool-name').value = 'main-pool';
+          document.getElementById('pool-mount-name').value = '';
+          document.getElementById('pool-fs').value = 'btrfs';
+          document.getElementById('pool-auto-mount').checked = true;
+          document.getElementById('pool-force').checked = true;
+          var warning = document.getElementById('pool-warning');
+          if (warning) warning.textContent = 'Defaults restored: label main-pool, Btrfs, mounted at /mnt/onyx/main-pool, force unmount and erase enabled.';
+        });
         document.getElementById('pool-preview').addEventListener('click', function () {
           var device = document.getElementById('pool-device').value;
           var name = document.getElementById('pool-name').value.trim() || 'main-pool';
@@ -865,6 +1014,41 @@
           apiJSON('/shares', { method: 'POST', body: JSON.stringify({ name: name, path: '/mnt/onyx/' + relativePath, comment: document.getElementById('share-comment').value.trim(), readonly: document.getElementById('share-readonly').checked, protocols: protocols }) }).then(loadShares).catch(showError);
         });
         loadShares();
+        // Cloud/remote storage setup lives on this page too.
+        loadRemoteProviders();
+        loadRemoteTargets();
+        document.getElementById('remote-save').addEventListener('click', function () {
+          var status = document.getElementById('remote-status');
+          var params = {};
+          Array.prototype.forEach.call(document.querySelectorAll('[data-remote-field]'), function (input) {
+            var value = input.value.trim();
+            if (value) params[input.dataset.remoteField] = value;
+          });
+          var body = { name: document.getElementById('remote-name').value.trim(), type: document.getElementById('remote-provider').value, params: params };
+          if (!body.name || !body.type) {
+            showError({ error: { message: 'A target name and a provider are required.' } });
+            return;
+          }
+          if (status) status.textContent = 'Saving target…';
+          apiJSON('/storage/remotes', { method: 'POST', body: JSON.stringify(body) }).then(function (result) {
+            if (status) status.textContent = 'Saved ' + result.name + ' (' + result.type + ').' + (result.next_step ? ' ' + result.next_step : '');
+            document.getElementById('remote-name').value = '';
+            loadRemoteTargets();
+          }).catch(showError);
+        });
+        document.getElementById('remote-clone').addEventListener('click', function () {
+          var status = document.getElementById('remote-status');
+          var source = document.getElementById('remote-clone-source').value.trim().replace(/^\/+/, '');
+          var remote = document.getElementById('remote-clone-target').value;
+          if (!source || !remote) {
+            showError({ error: { message: 'Choose a storage folder and a configured target.' } });
+            return;
+          }
+          if (status) status.textContent = 'Cloning ' + source + ' to ' + remote + '…';
+          apiJSON('/storage/clone', { method: 'POST', body: JSON.stringify({ source: source, remote: remote, dest: document.getElementById('remote-clone-dest').value.trim() }) }).then(function (result) {
+            if (status) status.textContent = 'Cloned ' + result.source + ' to ' + result.target + '. ' + (result.detail || '');
+          }).catch(showError);
+        });
       }
       if (v.id === 'users') {
         document.getElementById('user-create').addEventListener('click', function () {
