@@ -56,6 +56,7 @@ fn main() -> ExitCode {
         &args.umount_bin,
         &args.mkdir_bin,
         &args.smartctl_bin,
+        &args.mkfs_btrfs_bin,
         &args.testparm_bin,
         &args.systemctl_bin,
         &args.exportfs_bin,
@@ -80,6 +81,7 @@ struct Args {
     umount_bin: String,
     mkdir_bin: String,
     smartctl_bin: String,
+    mkfs_btrfs_bin: String,
     testparm_bin: String,
     systemctl_bin: String,
     exportfs_bin: String,
@@ -97,6 +99,7 @@ impl Args {
         let mut umount_bin = "umount".to_string();
         let mut mkdir_bin = "mkdir".to_string();
         let mut smartctl_bin = "smartctl".to_string();
+        let mut mkfs_btrfs_bin = "mkfs.btrfs".to_string();
         let mut testparm_bin = "testparm".to_string();
         let mut systemctl_bin = "systemctl".to_string();
         let mut exportfs_bin = "exportfs".to_string();
@@ -116,6 +119,7 @@ impl Args {
                 "--umount-bin" => umount_bin = it.next().expect("--umount-bin requires a value"),
                 "--mkdir-bin" => mkdir_bin = it.next().expect("--mkdir-bin requires a value"),
                 "--smartctl-bin" => smartctl_bin = it.next().expect("--smartctl-bin requires a value"),
+                "--mkfs-btrfs-bin" => mkfs_btrfs_bin = it.next().expect("--mkfs-btrfs-bin requires a value"),
                 "--testparm-bin" => testparm_bin = it.next().expect("--testparm-bin requires a value"),
                 "--systemctl-bin" => systemctl_bin = it.next().expect("--systemctl-bin requires a value"),
                 "--exportfs-bin" => exportfs_bin = it.next().expect("--exportfs-bin requires a value"),
@@ -142,6 +146,7 @@ impl Args {
             umount_bin,
             mkdir_bin,
             smartctl_bin,
+            mkfs_btrfs_bin,
             testparm_bin,
             systemctl_bin,
             exportfs_bin,
@@ -214,6 +219,8 @@ enum AllowedCommand {
     UnmountBlock { mountpoint: PathBuf },
     /// `smartctl -H -A <device>` — SMART health + temperature probe.
     SmartInfo { device: PathBuf },
+    /// `mkfs.btrfs -f -L <label> <device>` — format one verified device.
+    CreateBtrfsPool { device: PathBuf, label: String },
     /// Atomic write of one generated daemon config (target -> fixed path
     /// under the config dir); content is pre-validated size-wise.
     WriteDaemonConfig { target: String, content: Vec<u8> },
@@ -269,6 +276,7 @@ struct Allowlist {
     umount_bin: String,
     mkdir_bin: String,
     smartctl_bin: String,
+    mkfs_btrfs_bin: String,
     testparm_bin: String,
     systemctl_bin: String,
     exportfs_bin: String,
@@ -285,6 +293,7 @@ impl Allowlist {
         umount_bin: &str,
         mkdir_bin: &str,
         smartctl_bin: &str,
+        mkfs_btrfs_bin: &str,
         testparm_bin: &str,
         systemctl_bin: &str,
         exportfs_bin: &str,
@@ -299,6 +308,7 @@ impl Allowlist {
             umount_bin: umount_bin.to_string(),
             mkdir_bin: mkdir_bin.to_string(),
             smartctl_bin: smartctl_bin.to_string(),
+            mkfs_btrfs_bin: mkfs_btrfs_bin.to_string(),
             testparm_bin: testparm_bin.to_string(),
             systemctl_bin: systemctl_bin.to_string(),
             exportfs_bin: exportfs_bin.to_string(),
@@ -382,6 +392,17 @@ impl Allowlist {
                 }
                 let device = validate_device_path(&req.args[0], &self.dev_root)?;
                 Ok(AllowedCommand::SmartInfo { device })
+            }
+            PrivOp::CreateBtrfsPool => {
+                if req.args.len() != 2 {
+                    return Err(Status::invalid_argument("CREATE_BTRFS_POOL requires <device> <label>"));
+                }
+                let device = validate_device_path(&req.args[0], &self.dev_root)?;
+                let label = &req.args[1];
+                if label.is_empty() || label.len() > 32 || !label.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')) {
+                    return Err(Status::invalid_argument("pool label must be 1-32 characters: letters, numbers, _, -, ."));
+                }
+                Ok(AllowedCommand::CreateBtrfsPool { device, label: label.clone() })
             }
             PrivOp::WriteDaemonConfig => {
                 if req.args.len() != 2 {
@@ -656,6 +677,10 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
             allowlist.smartctl_bin.clone(),
             vec!["-H".into(), "-A".into(), device.display().to_string()],
         ),
+        AllowedCommand::CreateBtrfsPool { device, label } => (
+            allowlist.mkfs_btrfs_bin.clone(),
+            vec!["-f".into(), "-L".into(), label.clone(), device.display().to_string()],
+        ),
         AllowedCommand::WriteDaemonConfig { target, content } => {
             // Not a subprocess: atomic write (tmp -> fsync -> rename).
             write_config(&allowlist.config_dir, target, content)?;
@@ -820,6 +845,7 @@ mod tests {
             &marker("umount"),
             &marker("mkdir"),
             &marker("smartctl"),
+            &marker("mkfs.btrfs"),
             &marker("testparm"),
             &marker("systemctl"),
             &marker("exportfs"),
@@ -845,6 +871,7 @@ mod tests {
             "umount",
             "mkdir",
             "smartctl",
+            "mkfs.btrfs",
             "testparm",
             "systemctl",
             "exportfs",
@@ -1036,7 +1063,7 @@ mod tests {
         // testparm that fails validation; the reload must never run.
         let failing = fake_bin(dir.path(), "testparm-bad", "#!/bin/sh\nexit 1\n");
         let a = Allowlist::new(
-            "btrfs", "lsblk", "mount", "umount", "mkdir", "smartctl",
+            "btrfs", "lsblk", "mount", "umount", "mkdir", "smartctl", "mkfs.btrfs",
             &failing, // testparm fails
             "systemctl", "exportfs",
             dir.path(), dir.path(), dir.path().join("dev").as_path(),

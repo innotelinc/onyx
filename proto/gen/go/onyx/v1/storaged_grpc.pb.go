@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	Storaged_ListPools_FullMethodName     = "/onyx.v1.Storaged/ListPools"
 	Storaged_GetPool_FullMethodName       = "/onyx.v1.Storaged/GetPool"
+	Storaged_CreatePool_FullMethodName    = "/onyx.v1.Storaged/CreatePool"
 	Storaged_ListDevices_FullMethodName   = "/onyx.v1.Storaged/ListDevices"
 	Storaged_GetDevice_FullMethodName     = "/onyx.v1.Storaged/GetDevice"
 	Storaged_MountDevice_FullMethodName   = "/onyx.v1.Storaged/MountDevice"
@@ -39,6 +40,7 @@ const (
 type StoragedClient interface {
 	ListPools(ctx context.Context, in *ListPoolsRequest, opts ...grpc.CallOption) (*ListPoolsResponse, error)
 	GetPool(ctx context.Context, in *GetPoolRequest, opts ...grpc.CallOption) (*Pool, error)
+	CreatePool(ctx context.Context, in *CreatePoolRequest, opts ...grpc.CallOption) (*Pool, error)
 	ListDevices(ctx context.Context, in *ListDevicesRequest, opts ...grpc.CallOption) (*ListDevicesResponse, error)
 	GetDevice(ctx context.Context, in *GetDeviceRequest, opts ...grpc.CallOption) (*Device, error)
 	MountDevice(ctx context.Context, in *MountDeviceRequest, opts ...grpc.CallOption) (*Device, error)
@@ -72,6 +74,16 @@ func (c *storagedClient) GetPool(ctx context.Context, in *GetPoolRequest, opts .
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Pool)
 	err := c.cc.Invoke(ctx, Storaged_GetPool_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *storagedClient) CreatePool(ctx context.Context, in *CreatePoolRequest, opts ...grpc.CallOption) (*Pool, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Pool)
+	err := c.cc.Invoke(ctx, Storaged_CreatePool_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -157,6 +169,7 @@ type Storaged_WatchDevicesClient = grpc.ServerStreamingClient[DeviceEvent]
 type StoragedServer interface {
 	ListPools(context.Context, *ListPoolsRequest) (*ListPoolsResponse, error)
 	GetPool(context.Context, *GetPoolRequest) (*Pool, error)
+	CreatePool(context.Context, *CreatePoolRequest) (*Pool, error)
 	ListDevices(context.Context, *ListDevicesRequest) (*ListDevicesResponse, error)
 	GetDevice(context.Context, *GetDeviceRequest) (*Device, error)
 	MountDevice(context.Context, *MountDeviceRequest) (*Device, error)
@@ -181,6 +194,9 @@ func (UnimplementedStoragedServer) ListPools(context.Context, *ListPoolsRequest)
 }
 func (UnimplementedStoragedServer) GetPool(context.Context, *GetPoolRequest) (*Pool, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetPool not implemented")
+}
+func (UnimplementedStoragedServer) CreatePool(context.Context, *CreatePoolRequest) (*Pool, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreatePool not implemented")
 }
 func (UnimplementedStoragedServer) ListDevices(context.Context, *ListDevicesRequest) (*ListDevicesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListDevices not implemented")
@@ -253,6 +269,24 @@ func _Storaged_GetPool_Handler(srv interface{}, ctx context.Context, dec func(in
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(StoragedServer).GetPool(ctx, req.(*GetPoolRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Storaged_CreatePool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreatePoolRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StoragedServer).CreatePool(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Storaged_CreatePool_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StoragedServer).CreatePool(ctx, req.(*CreatePoolRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -372,6 +406,10 @@ var Storaged_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetPool",
 			Handler:    _Storaged_GetPool_Handler,
+		},
+		{
+			MethodName: "CreatePool",
+			Handler:    _Storaged_CreatePool_Handler,
 		},
 		{
 			MethodName: "ListDevices",

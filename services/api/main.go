@@ -184,6 +184,7 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("GET /api/v1/files/trash", s.handleTrash)
 	mux.HandleFunc("DELETE /api/v1/files/trash", s.handleEmptyTrash)
 	mux.HandleFunc("GET /api/v1/pools", s.handlePools)
+	mux.HandleFunc("POST /api/v1/pools", s.handleCreatePool)
 	mux.HandleFunc("GET /api/v1/pools/{name}", s.handlePool)
 	mux.HandleFunc("GET /api/v1/shares", s.handleShares)
 	mux.HandleFunc("POST /api/v1/shares", s.handleCreateShare)
@@ -352,6 +353,31 @@ func (s *server) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
 
 // handlePool serves GET /api/v1/pools/{name}; storaged's not_found propagates
 // as a 404 via writeGRPCError (docs/design/06#2-error-model).
+type createPoolBody struct {
+	Device string `json:"device"`
+	Name   string `json:"name"`
+}
+
+func (s *server) handleCreatePool(w http.ResponseWriter, r *http.Request) {
+	var body createPoolBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "invalid JSON body: " + err.Error()})
+		return
+	}
+	if body.Device == "" || body.Name == "" {
+		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "device and name are required"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	pool, err := s.core.CreatePool(ctx, &onyxv1.CreatePoolRequest{Device: body.Device, Name: body.Name})
+	if err != nil {
+		s.writeGRPCError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, protoMessage(pool))
+}
+
 func (s *server) handlePool(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()

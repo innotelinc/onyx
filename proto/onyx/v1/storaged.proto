@@ -10,6 +10,7 @@ option go_package = "github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1";
 service Storaged {
   rpc ListPools(ListPoolsRequest) returns (ListPoolsResponse);
   rpc GetPool(GetPoolRequest) returns (Pool);
+  rpc CreatePool(CreatePoolRequest) returns (Pool);
   rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
   rpc GetDevice(GetDeviceRequest) returns (Device);
   rpc MountDevice(MountDeviceRequest) returns (Device);
@@ -31,6 +32,13 @@ message ListPoolsResponse {
 
 message GetPoolRequest {
   string name = 1;
+}
+
+message CreatePoolRequest {
+  // Stable device name or kernel name, e.g. "sdb".
+  string device = 1;
+  // Btrfs filesystem label and Onyx pool name.
+  string name = 2;
 }
 
 message Pool {
