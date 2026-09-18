@@ -116,6 +116,29 @@ connection strings (`smb://`, `nfs://`, `davs://`, `rsync://`, `sftp://`).
 - **Backup of the OS config:** every snapshot job includes `/etc/onyx` + SQLite set, so a
   full disaster restore = reinstall + import pool + restore config.
 
+### 8.1 Cloud and remote targets (setup)
+
+The Shares page registers a cloud account or remote server once and stores it in the single
+shared rclone catalog (`/etc/rclone/rclone.conf` — bind-mounted read-write into `onyx-api`
+and read-only into `onyx-backupd`), so a target configured there is immediately usable as a
+backup destination *and* as a clone target:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/v1/storage/providers` | the closed set of backends the form offers, with each one's option names |
+| `GET /api/v1/storage/remotes` | configured targets (name → backend type) |
+| `POST /api/v1/storage/remotes` | write one target (`name`, `type`, `params`) |
+| `POST /api/v1/storage/remotes/{name}/check` | reachability probe (`rclone lsd`) |
+| `DELETE /api/v1/storage/remotes/{name}` | forget a target; data at the provider is untouched |
+| `POST /api/v1/storage/clone` | copy a storage folder out to a target (`rclone copy`, additive) |
+
+Only the options a backend declares are accepted, values for password/secret fields are
+obscured with `rclone obscure` before they are written, and every invocation uses an
+explicit argv — never a shell. OAuth backends (Google Drive, OneDrive, Dropbox, Box,
+pCloud) are created without credentials and need one browser approval per target:
+`rclone config reconnect <name>:` on the host. CLI equivalents: `onyx storage
+providers|remotes|add|rm|check|clone`.
+
 ## 9. Performance tuning (defaults, expert-overridable)
 
 - Compression: `zstd:3` on `@data` (best speed/size for mixed media); `zstd:1` on `@apps`.

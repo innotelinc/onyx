@@ -273,12 +273,13 @@ func (c *Client) GetPool(ctx context.Context, name string) (*Pool, error) {
 
 // CreatePoolRequest is the body of POST /api/v1/pools. Device is a device
 // name or kernel name; Name becomes the filesystem label and pool name.
-// AutoMount nil means the server default (true).
+// Force and AutoMount nil mean the server defaults (both true): creating a
+// pool force-unmounts busy mounts, overwrites existing signatures and remounts.
 type CreatePoolRequest struct {
 	Device    string `json:"device"`
 	Name      string `json:"name"`
 	FSType    string `json:"fs_type,omitempty"`
-	Force     bool   `json:"force,omitempty"`
+	Force     *bool  `json:"force,omitempty"`
 	AutoMount *bool  `json:"auto_mount,omitempty"`
 	MountName string `json:"mount_name,omitempty"`
 }
@@ -293,6 +294,112 @@ func (c *Client) CreatePool(ctx context.Context, req *CreatePoolRequest) (*Pool,
 		return nil, err
 	}
 	return &p, nil
+}
+
+// RemoteProvider describes one cloud/remote backend the API can configure
+// (GET /api/v1/storage/providers). Field names are rclone's own option names.
+type RemoteProvider struct {
+	Type     string   `json:"type"`
+	Label    string   `json:"label"`
+	Fields   []string `json:"fields"`
+	Required []string `json:"required"`
+	OAuth    bool     `json:"oauth"`
+	Hint     string   `json:"hint,omitempty"`
+}
+
+// Remotes is the response of GET /api/v1/storage/remotes. Details maps a
+// remote name to its backend type.
+type Remotes struct {
+	Configured bool              `json:"configured"`
+	Remotes    []string          `json:"remotes"`
+	Details    map[string]string `json:"details,omitempty"`
+	Providers  []RemoteProvider  `json:"providers,omitempty"`
+}
+
+// CreateRemoteRequest is the body of POST /api/v1/storage/remotes.
+type CreateRemoteRequest struct {
+	Name   string            `json:"name"`
+	Type   string            `json:"type"`
+	Params map[string]string `json:"params"`
+}
+
+// Remote is the result of creating a remote. NextStep carries the one-time
+// browser approval an OAuth backend still needs.
+type Remote struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	OAuth    bool   `json:"oauth"`
+	NextStep string `json:"next_step,omitempty"`
+}
+
+// RemoteCheck is the reachability probe of POST /api/v1/storage/remotes/{name}/check.
+type RemoteCheck struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+}
+
+// CloneToRemoteRequest is the body of POST /api/v1/storage/clone. Source is
+// relative to the storage root; Dest is the folder inside the remote.
+type CloneToRemoteRequest struct {
+	Source string `json:"source"`
+	Remote string `json:"remote"`
+	Dest   string `json:"dest,omitempty"`
+}
+
+// CloneResult reports a finished rclone copy to a remote.
+type CloneResult struct {
+	Source   string `json:"source"`
+	Target   string `json:"target"`
+	Detail   string `json:"detail"`
+	Finished bool   `json:"finished"`
+}
+
+// ListRemotes returns the configured remotes and the provider catalog
+// (GET /api/v1/storage/remotes).
+func (c *Client) ListRemotes(ctx context.Context) (*Remotes, error) {
+	var remotes Remotes
+	if err := c.getJSON(ctx, "/api/v1/storage/remotes", &remotes); err != nil {
+		return nil, err
+	}
+	if remotes.Remotes == nil {
+		remotes.Remotes = []string{}
+	}
+	return &remotes, nil
+}
+
+// CreateRemote configures a cloud/remote backend (POST /api/v1/storage/remotes).
+func (c *Client) CreateRemote(ctx context.Context, req *CreateRemoteRequest) (*Remote, error) {
+	var remote Remote
+	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/storage/remotes", req, &remote); err != nil {
+		return nil, err
+	}
+	return &remote, nil
+}
+
+// DeleteRemote removes a configured remote (DELETE /api/v1/storage/remotes/{name}).
+func (c *Client) DeleteRemote(ctx context.Context, name string) error {
+	return c.delete(ctx, "/api/v1/storage/remotes/"+url.PathEscape(name))
+}
+
+// CheckRemote probes a remote for reachability
+// (POST /api/v1/storage/remotes/{name}/check).
+func (c *Client) CheckRemote(ctx context.Context, name string) (*RemoteCheck, error) {
+	var check RemoteCheck
+	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/storage/remotes/"+url.PathEscape(name)+"/check", nil, &check); err != nil {
+		return nil, err
+	}
+	return &check, nil
+}
+
+// CloneToRemote copies a storage folder out to a configured remote
+// (POST /api/v1/storage/clone).
+func (c *Client) CloneToRemote(ctx context.Context, req *CloneToRemoteRequest) (*CloneResult, error) {
+	var result CloneResult
+	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/storage/clone", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // ShareProtocol identifies a protocol a share is exposed over.

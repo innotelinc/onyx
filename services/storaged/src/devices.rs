@@ -613,7 +613,7 @@ impl DeviceManager {
             // /dev/sdc shows no mountpoint) — forcing busy mounts so a stale
             // handle cannot block the format. The filesystem is re-mounted
             // below when auto_mount is set.
-            self.unmount_disk_mounts(&dev, true, false).await?;
+            self.unmount_disk_mounts(&dev, true).await?;
             let response = self.run_op(
                 PrivOp::FormatFilesystem,
                 vec![dev.path.clone(), fs_type.to_string(), pool_name.to_string(), force.to_string()],
@@ -666,21 +666,19 @@ impl DeviceManager {
     /// mountpoint.
     ///
     /// `force` escalates a busy mount to `umount -f` / `umount -l` (pool
-    /// creation, where the user already confirmed erasing the disk).
-    /// `onyx_only` keeps detach safe: a mount living outside Onyx's storage
-    /// root is an error, never something detached silently.
-    async fn unmount_disk_mounts(
-        &self,
-        disk: &Device,
-        force: bool,
-        onyx_only: bool,
-    ) -> Result<(), String> {
-        let devices = self
-            .registry
-            .list_devices()
-            .map_err(|e| format!("registry: {e}"))?;
-        for (kname, mountpoint) in Self::mounts_to_release(disk, &devices) {
-            if onyx_only && !Path::new(&mountpoint).starts_with(self.mount_root.as_path()) {
+    /// creation, where the user already confirmed erasing the disk). A mount
+    /// living outside Onyx's storage root is always an error: privd may not
+    /// unmount it, and we never touch a host or OS volume silently.
+    async fn unmount_disk_mounts(&self, disk: &Device, force: bool) -> Result<(), String> {
+        for (kname, mountpoint) in self.disk_mounts_to_release(disk).await? {
+            // lsblk reports non-mount users in brackets ("[SWAP]"): the disk is
+            // held by the kernel, not by a path privd could unmount.
+            if mountpoint.starts_with('[') {
+                return Err(format!(
+                    "{kname} is in use as {mountpoint}; release it (for example `swapoff {kname}`) before this operation"
+                ));
+            }
+            if !Path::new(&mountpoint).starts_with(self.mount_root.as_path()) {
                 return Err(format!(
                     "{kname} is mounted at {mountpoint} outside Onyx; unmount it manually before this operation"
                 ));
@@ -694,6 +692,43 @@ impl DeviceManager {
             tracing::info!(disk = %disk.path, kname = %kname, mountpoint = %mountpoint, "unmounted before disk operation");
         }
         Ok(())
+    }
+
+    /// Every mount to release for a disk, partitions first. The registry view
+    /// is merged with a live `lsblk` scan: the scan also catches mounts whose
+    /// filesystem the registry does not track (swap, LVM, RAID, anything the
+    /// scanner skipped), and a still-mounted child keeps the whole disk busy so
+    /// mkfs fails with "Resource busy".
+    async fn disk_mounts_to_release(&self, disk: &Device) -> Result<Vec<(String, String)>, String> {
+        let devices = self
+            .registry
+            .list_devices()
+            .map_err(|e| format!("registry: {e}"))?;
+        let mut by_kname: HashMap<String, String> = HashMap::new();
+        for (kname, mountpoint) in Self::mounts_to_release(disk, &devices) {
+            by_kname.entry(kname).or_insert(mountpoint);
+        }
+        if let Ok(scan) = self.lsblk().await {
+            for info in parse_lsblk(&scan) {
+                let mountpoint = info.mountpoint.trim();
+                if mountpoint.is_empty() {
+                    continue;
+                }
+                if info.kname == disk.kname || Self::is_partition_of(&disk.kname, &info.kname) {
+                    by_kname
+                        .entry(info.kname.clone())
+                        .or_insert_with(|| mountpoint.to_string());
+                }
+            }
+        }
+        let mut targets: Vec<(String, String)> = by_kname.into_iter().collect();
+        // Partitions first, then the whole disk: unmounting a disk while one of
+        // its partitions is still mounted fails (and would format the wrong view).
+        targets.sort_by(|a, b| {
+            let (a_disk, b_disk) = (a.0 == disk.kname, b.0 == disk.kname);
+            a_disk.cmp(&b_disk).then_with(|| a.0.cmp(&b.0))
+        });
+        Ok(targets)
     }
 
     /// The mounts to release before re-formatting or detaching a disk: its
@@ -754,7 +789,7 @@ impl DeviceManager {
             // unit (never touching mounts outside Onyx), then pin it out of
             // auto-attach.
             if dev.r#type == "disk" {
-                self.unmount_disk_mounts(&dev, false, true).await?;
+                self.unmount_disk_mounts(&dev, false).await?;
             }
             // Not mounted: nothing else to unmount, but record the user's
             // intent so the watcher keeps the drive detached while plugged in.

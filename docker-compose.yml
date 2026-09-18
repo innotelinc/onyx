@@ -87,7 +87,11 @@ services:
     volumes:
       - onyx-sockets:/run/onyx
       - onyx-api-state:/var/lib/onyx/api
-      - ${RCLONE_CONFIG_DIR:-./data/rclone}:/etc/rclone:ro
+      # Read-write: the Shares page's cloud/remote storage setup writes the
+      # remote catalog here (rclone config create), and onyx-backupd reads the
+      # same file for remote backup targets. setup.sh makes the directory
+      # writable by the container user (uid 100) before the stack starts.
+      - ${RCLONE_CONFIG_DIR:-./data/rclone}:/etc/rclone
       # The file explorer and safe mutations operate on the same host storage
       # root as storaged; without this bind mount /mnt/onyx is absent in the API
       # container even while the data plane can see it.

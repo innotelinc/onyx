@@ -79,7 +79,23 @@ case "$DEVICE_TRUST" in
   *) echo "error: DEVICE_TRUST must be off, local or cerulean (got: $DEVICE_TRUST)" >&2; exit 1 ;;
 esac
 
-# --- 2. Bring the stack up -----------------------------------------------------
+# --- 2. Remote/cloud storage config (docs/design/05#6) -------------------------
+# onyx-api writes rclone remotes here (the Shares page's cloud & remote storage
+# setup) and onyx-backupd reads the same catalog for remote backup targets. The
+# containers run as the unprivileged "onyx" user (uid 100, gid 101 in alpine),
+# so the bind-mounted directory has to be writable by it — otherwise the API can
+# read the catalog but every setup attempt fails with a permission error.
+RCLONE_DIR="${RCLONE_CONFIG_DIR:-./data/rclone}"
+mkdir -p "$RCLONE_DIR"
+if [ "$(id -u)" = "0" ]; then
+  chown -R 100:101 "$RCLONE_DIR" 2>/dev/null || true
+else
+  chmod 0777 "$RCLONE_DIR" 2>/dev/null || true
+fi
+[ -f "$RCLONE_DIR/rclone.conf" ] || : > "$RCLONE_DIR/rclone.conf"
+chmod 0666 "$RCLONE_DIR/rclone.conf" 2>/dev/null || true
+
+# --- 3. Bring the stack up -----------------------------------------------------
 # Compose profiles for local replacements of shared platform services.
 PROFILES=""
 [ "$AUTHENTIK_MODE" = "local" ] && PROFILES="$PROFILES authentik"
@@ -106,7 +122,7 @@ else
   docker compose --profile${PROFILES:+ $PROFILES} up -d
 fi
 
-# --- 3. Wait for ingress + IdP -------------------------------------------------
+# --- 4. Wait for ingress + IdP -------------------------------------------------
 if [ "$NPM_MODE" = "local" ]; then
   log "waiting for Nginx Proxy Manager API (http://127.0.0.1:81) ..."
   for _ in $(seq 1 60); do
@@ -123,7 +139,7 @@ for _ in $(seq 1 60); do
   sleep 5
 done
 
-# --- 4. Authentik provider (SSO) ------------------------------------------------
+# --- 5. Authentik provider (SSO) ------------------------------------------------
 if [ "$SKIP_AUTH" = 0 ]; then
   log "provisioning Authentik (bootstrap + ONYX OIDC application + passkeys)..."
   bash scripts/provision-authentik.sh || log "authentik provisioning reported a problem — see above"
@@ -131,7 +147,7 @@ else
   log "skipping Authentik provisioning (--skip-auth)"
 fi
 
-# --- 5. Device trust (docs/design/11 §10) — per DEVICE_TRUST ----------------------
+# --- 6. Device trust (docs/design/11 §10) — per DEVICE_TRUST ----------------------
 # Passkeys are provisioned with Authentik in step 4 regardless of mode.
 DT_SUBDOMAINS="${DEVICE_TRUST_SUBDOMAINS:-app admin}"
 case "$DEVICE_TRUST" in
@@ -175,7 +191,7 @@ case "$DEVICE_TRUST" in
     ;;
 esac
 
-# --- 6. Nginx Proxy Manager: wildcard cert + subdomains -------------------------
+# --- 7. Nginx Proxy Manager: wildcard cert + subdomains -------------------------
 if [ "$NPM_MODE" = "cerulean" ]; then
   log "edge is Cerulean-managed (NPM_MODE=cerulean) — skipping local NPM provisioning"
 else
@@ -184,7 +200,7 @@ else
   python3 scripts/npm-proxy-hosts.py
 fi
 
-# --- 7. Summary -----------------------------------------------------------------
+# --- 8. Summary -----------------------------------------------------------------
 cat <<EOF
 
 ONYX platform is up. Public endpoints (once DNS for *.${DOMAIN} points here):
