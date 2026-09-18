@@ -450,7 +450,15 @@ impl Storaged for RegistryBackend {
         request: Request<CreatePoolRequest>,
     ) -> Result<Response<Pool>, Status> {
         let req = request.into_inner();
-        let device = self.manager.create_pool(&req.device, &req.name).await.map_err(Status::failed_precondition)?;
+        let auto_mount = req.auto_mount || (req.fs_type.is_empty() && req.mount_name.is_empty());
+        let device = self.manager.create_pool(
+            &req.device,
+            &req.name,
+            &req.fs_type,
+            req.force,
+            auto_mount,
+            &req.mount_name,
+        ).await.map_err(Status::failed_precondition)?;
         let pools = self.registry.list_pools().map_err(|e| Status::internal(format!("registry read failed: {e}")))?;
         let pool = pools.into_iter().find(|p| p.name == req.name).unwrap_or(Pool {
             name: req.name,

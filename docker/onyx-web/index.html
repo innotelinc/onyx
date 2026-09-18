@@ -495,7 +495,7 @@
         '<button class="btn" id="storage-refresh">Refresh</button></div>' +
         '<div class="card" id="storage-pools"><div class="empty"><b>Loading pools…</b>Checking mounted storage.</div></div>' +
         '<div class="card" style="margin-top:16px" id="storage-devices"><div class="empty"><b>Loading devices…</b>Scanning block devices.</div></div>' +
-        '<div class="card" style="margin-top:16px" id="storage-pool-setup"><h3>Create an Onyx storage pool</h3><p class="sub">Format a whole removable disk as Btrfs for snapshots, scrub, and safety features.</p><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end"><label>Disk<select id="pool-device" class="search" style="width:100%;max-width:none"><option value="">Loading safe disks…</option></select></label><label>Pool name<input id="pool-name" class="search" style="width:100%;max-width:none" placeholder="main-pool"></label><button class="btn" id="pool-preview">Review destructive operation</button></div><div id="pool-warning" class="sub" style="margin-top:12px">A verified backup and final confirmation are required before any erase operation.</div></div>';
+        '<div class="card" style="margin-top:16px" id="storage-pool-setup"><h3>Create an Onyx storage pool</h3><p class="sub">Format a whole removable disk, then mount it automatically under /mnt/onyx.</p><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end"><label>Disk<select id="pool-device" class="search" style="width:100%;max-width:none"><option value="">Loading safe disks…</option></select></label><label>Pool label<input id="pool-name" class="search" style="width:100%;max-width:none" placeholder="main-pool"></label><label>Filesystem<select id="pool-fs" class="search" style="width:100%;max-width:none"><option value="btrfs">Btrfs</option><option value="ext4">ext4</option></select></label><label>Mount directory<input id="pool-mount-name" class="search" style="width:100%;max-width:none" placeholder="Defaults to pool label"></label><label style="display:flex;gap:8px;align-items:center"><input id="pool-auto-mount" type="checkbox" checked> Auto-mount after format</label><label style="display:flex;gap:8px;align-items:center"><input id="pool-force" type="checkbox"> Force erase existing signatures</label><button class="btn" id="pool-preview">Review destructive operation</button></div><div id="pool-warning" class="sub" style="margin-top:12px">A verified backup and final confirmation are required before any erase operation.</div></div>';
     }
 
     function formatBytes(value) {
@@ -725,23 +725,26 @@
         loadStorage();
         apiJSON('/devices').then(function (data) {
           var select = document.getElementById('pool-device');
-          var disks = (data.devices || []).filter(function (device) { return device.type === 'disk' && device.removable && device.state !== 'detached'; });
+          var disks = (data.devices || []).filter(function (device) { return device.type === 'disk' && device.removable && device.state !== 'detached' && !device.mountpoint; });
           select.innerHTML = disks.length ? '<option value="">Choose a removable disk…</option>' + disks.map(function (device) { return '<option value="' + esc(device.name) + '">' + esc(device.path + ' · ' + formatBytes(device.sizeBytes) + (device.label ? ' · ' + device.label : '')) + '</option>'; }).join('') : '<option value="">No safe removable disks detected</option>';
         }).catch(showError);
         document.getElementById('pool-preview').addEventListener('click', function () {
           var device = document.getElementById('pool-device').value;
           var name = document.getElementById('pool-name').value.trim() || 'main-pool';
+          var fsType = document.getElementById('pool-fs').value;
+          var mountName = document.getElementById('pool-mount-name').value.trim() || name;
+          var autoMount = document.getElementById('pool-auto-mount').checked;
+          var force = document.getElementById('pool-force').checked;
           var warning = document.getElementById('pool-warning');
           if (!device) { warning.textContent = 'Choose a removable whole disk first.'; return; }
-          warning.innerHTML = '<b>Destructive preview:</b> format /dev/' + esc(device) + ' as a Btrfs pool named ' + esc(name) + '. Existing partitions and files will be erased. Click <b>Create pool</b> only after verifying the disk and backup.';
+          warning.innerHTML = '<b>Destructive preview:</b> format /dev/' + esc(device) + ' as ' + esc(fsType) + ' with label ' + esc(name) + (force ? ' (force enabled)' : '') + '. ' + (autoMount ? 'It will be mounted at /mnt/onyx/' + esc(mountName) + '.' : 'It will remain unmounted after formatting.') + ' Existing partitions and files will be erased. Click <b>Create pool</b> only after verifying the disk and backup.';
           var button = document.getElementById('pool-preview');
           button.textContent = 'Create pool';
           button.classList.add('primary');
           button.onclick = function () {
-            if (!confirm('Format /dev/' + device + ' as Btrfs and erase all existing data? This cannot be undone.')) return;
+            if (!confirm('Format /dev/' + device + ' as ' + fsType + ' and erase all existing data? This cannot be undone.')) return;
             button.disabled = true;
-            button.textContent = 'Creating…';
-            apiJSON('/pools', { method: 'POST', body: JSON.stringify({ device: device, name: name }) })
+            button.textContent = 'Creating…';              apiJSON('/pools', { method: 'POST', body: JSON.stringify({ device: device, name: name, fs_type: fsType, force: force, auto_mount: autoMount, mount_name: mountName }) })
               .then(function (pool) {
                 warning.innerHTML = '<b>Pool created:</b> ' + esc(pool.name || name) + '. It is mounted and ready for Files.';
                 button.textContent = 'Pool created';

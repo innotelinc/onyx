@@ -46,7 +46,7 @@ type CoreClient interface {
 	ListPools(ctx context.Context, in *ListPoolsRequest, opts ...grpc.CallOption) (*ListPoolsResponse, error)
 	// GetPool returns one pool by name, forwarded to onyx-storaged.
 	GetPool(ctx context.Context, in *GetPoolRequest, opts ...grpc.CallOption) (*Pool, error)
-	// CreatePool formats a verified removable whole-disk device as Btrfs.
+	// CreatePool formats a verified removable whole-disk device and optionally mounts it.
 	CreatePool(ctx context.Context, in *CreatePoolRequest, opts ...grpc.CallOption) (*Pool, error)
 	// ListDevices returns every block device the data plane has detected
 	// (attached, mounted or recently detached), forwarded to onyx-storaged.
@@ -196,7 +196,7 @@ type CoreServer interface {
 	ListPools(context.Context, *ListPoolsRequest) (*ListPoolsResponse, error)
 	// GetPool returns one pool by name, forwarded to onyx-storaged.
 	GetPool(context.Context, *GetPoolRequest) (*Pool, error)
-	// CreatePool formats a verified removable whole-disk device as Btrfs.
+	// CreatePool formats a verified removable whole-disk device and optionally mounts it.
 	CreatePool(context.Context, *CreatePoolRequest) (*Pool, error)
 	// ListDevices returns every block device the data plane has detected
 	// (attached, mounted or recently detached), forwarded to onyx-storaged.
