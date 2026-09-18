@@ -33,7 +33,16 @@ Rules:
 - The **network boundary** terminates at `onyx-api` and the protocol daemons. Nothing else
   listens on TCP.
 - The **privilege boundary** is `onyx-privd`: the only process that elevates, with an
-  allowlist (see §04.7).
+  allowlist (see §04.7). Pool creation is its most destructive operation, so the disk's
+  kernel stacks (active swap, device-mapper, mdraid, loop) are released there and only
+  there — see `docs/design/05` §2.3 for the order and the refusal rules. Each tool is
+  invoked with a fixed argv built from a validated device path; `os.system`-style composed
+  command lines do not exist in this codebase.
+- A **pool root** is a shared volume: privd mounts it `--pool-mode` (default `0777`) so the
+  unprivileged daemons, SFTP/FTP share users and containerised apps can write into it
+  (`docs/design/05` §2.4). Authorization for *which* user reaches *which* share stays at the
+  protocol layer (SMB/NFS authentication, share ACLs, ownership), never in the volume root's
+  mode.
 - The **app boundary** is the container sandbox; apps never see host unix sockets, the API
   token, or other apps' data.
 - The **data boundary** is POSIX ACLs + quota on the pool; every service runs as its own uid.

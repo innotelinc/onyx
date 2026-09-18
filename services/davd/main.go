@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -54,7 +55,17 @@ func main() {
 	}
 
 	cfg, err := loadConfig(*configPath)
-	if err != nil {
+	switch {
+	case errors.Is(err, errNoConfig):
+		// Nothing to serve *yet* is not a failure. onyx-core renders davd.conf
+		// when the first share enables WebDAV; the systemd unit is gated on that
+		// file, but a container restart-looping until an operator creates a
+		// share is not a useful answer. Serve an empty table on the default
+		// (loopback, gateway-auth) listener and pick the file up when it lands.
+		slog.Warn("no share configuration yet: serving an empty WebDAV table",
+			"config", *configPath, "hint", "onyx-core writes it when a share enables WebDAV")
+		cfg = defaultConfig()
+	case err != nil:
 		fatal("load "+*configPath, err)
 	}
 	if err := applyListenOverride(cfg, *listen); err != nil {
@@ -65,6 +76,13 @@ func main() {
 
 	active := &reloadable{}
 	active.swap(newHandler(cfg), cfg.Shares)
+	boundListen := cfg.Listen
+
+	// Watch for a config that has not been rendered yet, so the first share
+	// that enables WebDAV is served without restarting the daemon.
+	if _, statErr := os.Stat(*configPath); statErr != nil {
+		go watchForConfig(*configPath, *listen, active, boundListen, configWatchInterval)
+	}
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Listen,
@@ -101,7 +119,7 @@ func main() {
 		select {
 		case s := <-sig:
 			if s == syscall.SIGHUP {
-				reload(active, *configPath, *listen)
+				reload(active, *configPath, *listen, boundListen)
 				continue
 			}
 			slog.Info("shutting down")
@@ -116,12 +134,35 @@ func main() {
 	}
 }
 
+// configWatchInterval is how often a daemon that started with no rendered
+// config looks for one. It is slow on purpose: this only happens on a machine
+// with no WebDAV shares, and the file is written once when the first one is
+// created.
+const configWatchInterval = 5 * time.Second
+
+// watchForConfig serves the rendered config as soon as it appears. It returns
+// once the file has been loaded (or when the process stops), so the common case
+// — a deployment that already has shares — costs no polling at all.
+func watchForConfig(path, listenOverride string, active *reloadable, boundListen string, interval time.Duration) {
+	for range time.Tick(interval) {
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		reload(active, path, listenOverride, boundListen)
+		return
+	}
+}
+
 // reload re-reads the config on SIGHUP (the path onyx-privd uses for a WebDAV
 // reload). A config that fails to load or validate leaves the previous share
 // table serving: a bad render must never take the shares offline.
-func reload(active *reloadable, path, listenOverride string) {
+func reload(active *reloadable, path, listenOverride, boundListen string) {
 	cfg, err := loadConfig(path)
 	if err != nil {
+		if errors.Is(err, errNoConfig) {
+			slog.Warn("no share configuration has been rendered yet, keeping the current configuration", "config", path)
+			return
+		}
 		slog.Error("reload failed, keeping the current configuration", "config", path, "error", err)
 		return
 	}
@@ -130,6 +171,14 @@ func reload(active *reloadable, path, listenOverride string) {
 		return
 	}
 	active.swap(newHandler(cfg), cfg.Shares)
+	// The share table is swapped in place, but the socket is not: a changed
+	// listen address takes effect on the next start (privd restarts this
+	// daemon when the rendered listener changes).
+	if boundListen != "" && cfg.Listen != boundListen {
+		slog.Warn("configuration reloaded, but the listen address changed and needs a restart",
+			"listening", boundListen, "configured", cfg.Listen, "shares", len(cfg.Shares))
+		return
+	}
 	slog.Info("configuration reloaded", "listen", cfg.Listen, "shares", len(cfg.Shares))
 }
 

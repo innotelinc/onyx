@@ -152,11 +152,34 @@ func addedCapability(body string) string {
 			continue
 		}
 		capability := strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))
-		if dangerousCapabilities[capability] {
+		if dangerousCapabilities[strings.ToUpper(capability)] {
 			return capability
 		}
 	}
 	return ""
+}
+
+// droppedAllCapabilities reports whether a service carries the baseline posture
+// `cap_drop: [ALL]` (docs/design/09 §6). It is required rather than assumed:
+// a manifest that never drops anything runs with the engine's default set, and
+// the check that refuses dangerous additions would then be checking a posture
+// the app never adopted.
+func droppedAllCapabilities(body string) bool {
+	inCapDrop := false
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "-") {
+			inCapDrop = trimmed == "cap_drop:"
+			continue
+		}
+		if !inCapDrop {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(strings.TrimPrefix(trimmed, "-")), "ALL") {
+			return true
+		}
+	}
+	return false
 }
 
 // validateManifestHardening enforces the platform's app sandbox on one catalog
@@ -189,9 +212,16 @@ func validateManifestHardening(id, manifest string) error {
 			return fmt.Errorf("app %q service %q sets no mem_limit (docs/design/09 §6 requires memory limits)",
 				id, service.name)
 		}
+		// A dangerous addition is the more serious finding, so it is reported
+		// before the missing baseline: a manifest asking for SYS_ADMIN must be
+		// told exactly that, not that it forgot `cap_drop`.
 		if capability := addedCapability(body); capability != "" {
-			return fmt.Errorf("app %q service %q adds the %s capability back: apps run with every capability dropped (docs/design/09 §6)",
+			return fmt.Errorf("app %q service %q adds the %s capability back: apps run with every capability dropped except the narrow ones they declare (docs/design/09 §6)",
 				id, service.name, capability)
+		}
+		if !droppedAllCapabilities(body) {
+			return fmt.Errorf("app %q service %q does not drop every capability (docs/design/09 §6 requires `cap_drop: [ALL]` as the baseline)",
+				id, service.name)
 		}
 		for _, mount := range serviceMounts(service) {
 			if err := validateMountSource(id, service.name, mount); err != nil {

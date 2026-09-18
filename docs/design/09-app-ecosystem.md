@@ -115,6 +115,16 @@ store:
   bind-mounts a path that is not a named volume or a location under the storage root.
   Install-time path settings are confined to the storage root the same way, so an
   operator's input cannot widen an app's reach.
+- **`cap_drop: [ALL]` is the baseline, and a manifest may add narrow capabilities back.**
+  Dropping everything and declaring what is needed is the supported direction; a dangerous
+  addition (`SYS_ADMIN`, `SYS_PTRACE`, `SYS_MODULE`, `SYS_RAWIO`, `DAC_READ_SEARCH`, `ALL`)
+  is refused outright. The narrow additions exist because mainstream images drop privileges
+  in their entrypoint — MariaDB chowns its data directory and `su-exec`s to `mysql`, Nextcloud
+  rsyncs and chowns its code before Apache drops to `www-data`. With everything dropped and
+  nothing added back, that entrypoint fails (`failed switching to 'mysql': operation not
+  permitted`) and the app crash-loops, so the catalog manifests declare exactly the
+  capabilities those images need (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`, `SETUID`)
+  and nothing more.
 
 ## 7. SDK
 

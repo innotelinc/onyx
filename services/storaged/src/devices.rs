@@ -8,6 +8,7 @@
 //! (/sys/class/block for attach/detach, lsblk for enrichment).
 
 use std::collections::{HashMap, HashSet};
+use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -35,7 +36,50 @@ const EXCLUDED_FS: &[&str] = &[
     "zfs_member",
 ];
 
-const ATTACHABLE_TYPES: &[&str] = &["part", "disk"];
+/// Device types the registry tracks. `loop` is included because a loop device
+/// is a whole, partitionable block device like any other — it is how a pool is
+/// exercised on a workstation or in a container (and how the platform's own
+/// end-to-end runs create one), while squashfs-backed snap loops stay excluded
+/// by EXCLUDED_FS.
+const ATTACHABLE_TYPES: &[&str] = &["part", "disk", "loop"];
+
+/// Whole devices a pool may be created on: a disk, or a loop device (a
+/// file-backed scratch disk). A partition is never one — a pool owns the whole
+/// device.
+pub fn poolable_type(device_type: &str) -> bool {
+    matches!(device_type, "disk" | "loop")
+}
+
+/// Why a device that lsblk lists cannot be used *from this process*, or None
+/// when its node is openable.
+///
+/// `lsblk` reads /sys, so the kernel view and the mount namespace can disagree:
+/// a nested or locked-down container (or a runtime that does not pass block
+/// devices through) lists every disk while `/dev/<kname>` does not exist. The
+/// user then picks a disk in the UI and the operation fails inside mkfs with
+/// "The file /dev/sda does not exist and no size was specified" — a dead end,
+/// and one that arrives *after* a destructive confirmation. Refusing at
+/// selection time turns that into a plain-language explanation.
+pub fn dev_node_error(dev_root: &Path, kname: &str) -> Option<String> {
+    let path = dev_root.join(kname);
+    match std::fs::metadata(&path) {
+        Ok(meta) if meta.file_type().is_block_device() => None,
+        Ok(_) => Some(format!(
+            "{} is not a block device node, so it cannot be formatted or mounted from here",
+            path.display()
+        )),
+        Err(_) => Some(format!(
+            "{} does not exist in this container: the data plane sees {kname} through /sys but has no device node to open. \
+             Block devices have to be visible inside onyx-privd and onyx-storaged (compose mounts `- /dev:/dev`; a nested or restricted runtime can still hide them), then retry.",
+            path.display()
+        )),
+    }
+}
+
+/// Whether the device node is visible and usable here (see [`dev_node_error`]).
+pub fn dev_node_present(dev_root: &Path, kname: &str) -> bool {
+    dev_node_error(dev_root, kname).is_none()
+}
 
 /// Is this (type, filesystem) pair safe to keep in the device registry?
 /// Unformatted disks are tracked for the UI but are never auto-attached.
@@ -282,6 +326,10 @@ pub struct DeviceManager {
     pub registry: Arc<Registry>,
     privd: Arc<AsyncMutex<PrivdClient<Channel>>>,
     pub mount_root: PathBuf,
+    /// Where block device nodes live in this process's mount namespace (usually
+    /// /dev). Configurable so a deployment — or a test — can point it
+    /// elsewhere; [`dev_node_error`] is applied against it.
+    pub dev_root: PathBuf,
     /// removable | all | none
     pub auto_attach: String,
     /// Forget detached records older than this (minutes).
@@ -312,10 +360,12 @@ fn requires_ownership_opts(fs_type: &str) -> bool {
 }
 
 impl DeviceManager {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         registry: Arc<Registry>,
         privd: Arc<AsyncMutex<PrivdClient<Channel>>>,
         mount_root: PathBuf,
+        dev_root: PathBuf,
         auto_attach: &str,
         detached_ttl_minutes: i64,
         mount_uid: u32,
@@ -327,6 +377,7 @@ impl DeviceManager {
             registry,
             privd,
             mount_root,
+            dev_root,
             auto_attach: auto_attach.to_string(),
             detached_ttl_minutes,
             mount_uid,
@@ -615,8 +666,26 @@ impl DeviceManager {
             .get_device(device_name)
             .map_err(|e| format!("registry: {e}"))?
             .ok_or_else(|| format!("device {device_name} not found"))?;
-        if dev.r#type != "disk" || !dev.removable {
-            return Err("only a removable whole disk can be formatted".into());
+        // Any whole device an operator picks may be pooled — an internal SSD or
+        // NVMe is a first-class pool target (docs/design/05 §2), and requiring
+        // the `removable` flag would leave a machine with internal disks with
+        // nothing to create a pool on. What must never be formatted is a device
+        // the running system is using, and that is a property of what is
+        // *mounted*, not of the hardware: `unmount_disk_mounts` below refuses a
+        // mount outside the storage root (and privd refuses it a second time),
+        // so an OS disk fails with a plain-language reason while an unused disk
+        // has nothing to release.
+        if !poolable_type(&dev.r#type) {
+            return Err(format!(
+                "{} is a {} device: a pool is created on a whole disk, not a partition",
+                dev.name, dev.r#type
+            ));
+        }
+        // Visible to the kernel is not the same as openable here: refuse before
+        // the destructive confirmation is acted on, not inside mkfs (see
+        // dev_node_error).
+        if let Some(reason) = dev_node_error(&self.dev_root, &dev.kname) {
+            return Err(reason);
         }
         if dev.state == "detached" {
             return Err("the selected disk is unavailable".into());
@@ -692,6 +761,16 @@ impl DeviceManager {
             // lsblk reports non-mount users in brackets ("[SWAP]"): the disk is
             // held by the kernel, not by a path privd could unmount.
             if mountpoint.starts_with('[') {
+                // …but an active swap area is exactly what a "force erase"
+                // is allowed to deactivate: mke2fs refuses a swap-holding disk
+                // with "is apparently in use by the system", so a disk that
+                // still carries a swap partition from its previous life could
+                // otherwise never be pooled. privd runs `swapoff` for it (see
+                // its FormatFilesystem path) before the format.
+                if force && mountpoint.eq_ignore_ascii_case("[SWAP]") {
+                    tracing::info!(disk = %disk.path, kname = %kname, "swap on this disk will be deactivated before formatting");
+                    continue;
+                }
                 return Err(format!(
                     "{kname} is in use as {mountpoint}; release it (for example `swapoff {kname}`) before this operation"
                 ));
@@ -908,6 +987,7 @@ impl DeviceManager {
                         auto,
                         health_status: String::new(),
                         temperature_c: 0,
+                        node_present: Some(dev_node_present(&self.dev_root, &info.kname)),
                     };
                     if let Err(e) = self.registry.upsert_device(&dev) {
                         tracing::warn!(kname = %info.kname, error = %e, "device registry upsert failed");
@@ -1036,9 +1116,21 @@ mod tests {
         assert!(!attachable("part", "swap"));
         assert!(!attachable("part", "LVM2_member"));
         assert!(!attachable("part", "linux_raid_member"));
-        assert!(!attachable("loop", "ext4")); // loopback
+        // A loop device is a whole block device with a filesystem on it: it is
+        // tracked (and poolable) like any disk. Its scratch nature is a
+        // labelling concern, not an eligibility one.
+        assert!(attachable("loop", "ext4"));
         assert!(!attachable("rom", "iso9660")); // cdrom
         assert!(!attachable("dm", "ext4")); // device mapper
+    }
+
+    #[test]
+    fn only_whole_devices_are_poolable() {
+        assert!(poolable_type("disk"));
+        assert!(poolable_type("loop"));
+        assert!(!poolable_type("part"));
+        assert!(!poolable_type("rom"));
+        assert!(!poolable_type("dm"));
     }
 
     fn test_device(kname: &str, device_type: &str, mountpoint: &str) -> Device {
@@ -1057,6 +1149,7 @@ mod tests {
             auto: "removable".to_string(),
             health_status: String::new(),
             temperature_c: 0,
+            node_present: Some(true),
         }
     }
 
@@ -1106,6 +1199,7 @@ mod tests {
                 registry: reg,
                 privd: Arc::new(AsyncMutex::new(privd_dummy())),
                 mount_root: PathBuf::from("/mnt/onyx"),
+                dev_root: PathBuf::from("/dev"),
                 auto_attach: "removable".into(),
                 detached_ttl_minutes: 10,
                 mount_uid: uid,
@@ -1138,6 +1232,105 @@ mod tests {
             custom.fat_mount_options("vfat"),
             vec!["uid=1500".to_string(), "gid=2000".to_string(), "umask=007".to_string()]
         );
+    }
+
+    /// A device the kernel lists but this namespace cannot open: the exact
+    /// shape of a nested/restricted container (lsblk reads /sys, `/dev` has no
+    /// node). Selection must fail with an explanation instead of reaching mkfs.
+    #[test]
+    fn dev_node_error_explains_a_device_this_namespace_cannot_see() {
+        let dir = std::env::temp_dir().join(format!("onyx-devroot-ut-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Nothing at all in /dev for this kname.
+        let missing = dev_node_error(&dir, "sdz").expect("a missing node is not usable");
+        assert!(missing.contains("sdz"), "{missing}");
+        assert!(missing.contains("/dev"), "the fix (bind /dev in) must be named: {missing}");
+        assert!(!dev_node_present(&dir, "sdz"));
+
+        // A plain file is not a device node either, and must be reported as
+        // such rather than as "missing".
+        std::fs::write(dir.join("sdy"), b"not a node").unwrap();
+        let regular = dev_node_error(&dir, "sdy").expect("a regular file is not a block device");
+        assert!(regular.contains("not a block device node"), "{regular}");
+        assert!(!dev_node_present(&dir, "sdy"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Pool creation is where a destructive confirmation has already been
+    /// given, so the visibility check has to happen in the control plane,
+    /// before the disk is released or a privileged op is attempted.
+    #[tokio::test]
+    async fn create_pool_refuses_a_disk_with_no_device_node() {
+        let dir = std::env::temp_dir().join(format!("onyx-devroot-pool-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let reg = registry_for_test();
+        let mut dev = test_device("sdz", "disk", "");
+        dev.node_present = Some(false);
+        reg.upsert_device(&dev).unwrap();
+        let mgr = DeviceManager {
+            registry: reg,
+            privd: Arc::new(AsyncMutex::new(privd_dummy())),
+            mount_root: PathBuf::from("/mnt/onyx"),
+            dev_root: dir.clone(),
+            auto_attach: "removable".into(),
+            detached_ttl_minutes: 10,
+            mount_uid: 1000,
+            mount_gid: 100,
+            fat_umask: 0o002,
+            events: broadcast::channel(1).0,
+            ops: Mutex::new(HashSet::new()),
+            scan: AsyncMutex::new(()),
+        };
+
+        let err = mgr
+            .create_pool("sdz", "main-pool", "ext4", true, true, "main-pool")
+            .await
+            .expect_err("a disk with no node must be refused");
+        assert!(err.contains("sdz"), "{err}");
+        assert!(err.contains("does not exist in this container"), "{err}");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A disk that still carries an active swap partition from its previous
+    /// life. Without force the user is told to release it; with force (the
+    /// confirmed "erase this disk") privd is allowed to deactivate the swap area
+    /// and the pool creation proceeds — otherwise a used disk could never be
+    /// pooled, which is the common case for a disk out of an old NAS.
+    #[tokio::test]
+    async fn unmount_disk_mounts_releases_swap_only_when_forced() {
+        let reg = registry_for_test();
+        let disk = test_device("sdc", "disk", "");
+        reg.upsert_device(&disk).unwrap();
+        let partition = test_device("sdc1", "part", "[SWAP]");
+        reg.upsert_device(&partition).unwrap();
+        let mgr = DeviceManager {
+            registry: reg,
+            privd: Arc::new(AsyncMutex::new(privd_dummy())),
+            mount_root: PathBuf::from("/mnt/onyx"),
+            dev_root: PathBuf::from("/dev"),
+            auto_attach: "removable".into(),
+            detached_ttl_minutes: 10,
+            mount_uid: 1000,
+            mount_gid: 100,
+            fat_umask: 0o002,
+            events: broadcast::channel(1).0,
+            ops: Mutex::new(HashSet::new()),
+            scan: AsyncMutex::new(()),
+        };
+
+        let err = mgr
+            .unmount_disk_mounts(&disk, false)
+            .await
+            .expect_err("an unforced operation must not touch active swap");
+        assert!(err.contains("[SWAP]"), "{err}");
+        assert!(err.contains("swapoff"), "the fix must be named: {err}");
+
+        mgr.unmount_disk_mounts(&disk, true)
+            .await
+            .expect("a forced erase may deactivate swap and continue");
     }
 
     fn registry_for_test() -> Arc<Registry> {

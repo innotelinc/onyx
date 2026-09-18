@@ -78,6 +78,18 @@ sockets in `/run/onyx` are group-owned (`/run/onyx` is `2770 root:onyx` and
 every unit uses `UMask=0002`), so per-service users can reach each other over
 gRPC without ever being root.
 
+## Who can write into a pool
+
+`/mnt/onyx` is `2770 root:onyx` (`deploy/tmpfiles.d/onyx.conf`), and the root of
+a pool *inside* it is opened up by `onyx-privd` after the mount
+(`--pool-mode`, default `0777`). Both are deliberate: the writers are
+`onyx-davd`, the SFTP/FTP/rsync daemons, containerised apps and the
+object-store tier target — ordinary uids, and SFTP/FTP share users are not in
+the `onyx` group. See `docs/design/05` §2.4. The compose install expresses the
+same thing differently: its containers run as their own `onyx` user with no
+host counterpart, so `setup.sh` sets the host storage root to `0777` instead
+(the systemd install's group does not exist there).
+
 ## Why the default install binds the API to loopback
 
 docs/design/07: no surface on the wire until the user enables it. A NAS that

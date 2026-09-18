@@ -72,6 +72,13 @@ volumes:
 			Description: "File sync and share with a web UI",
 			Defaults:    map[string]string{"http_port": "8080", "data_path": "/mnt/onyx", "db_password": "onyx"},
 			PathKeys:    []string{"data_path"},
+			// Both images drop privileges in their entrypoint (the app rsyncs and
+			// chowns its code into /var/www/html before apache drops to www-data;
+			// the database chowns its data directory and then `su-exec`s to the
+			// mysql user). `cap_drop: ALL` is still the baseline — these are the
+			// narrow additions it needs back, which is the supported direction
+			// (docs/design/09 §6). Without them the database crash-loops with
+			// "failed switching to 'mysql': operation not permitted".
 			Manifest: `# Onyx app manifest: Nextcloud (docs/design/09).
 # Two services: the app and its database. The database is private to the
 # project's network, so only the app publishes a port. Both carry the platform
@@ -98,6 +105,12 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
     pids_limit: 512
     mem_limit: 2g
   db:
@@ -115,6 +128,12 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
     pids_limit: 512
     mem_limit: 2g
 volumes:
