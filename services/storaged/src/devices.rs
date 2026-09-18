@@ -230,6 +230,18 @@ pub fn is_removable(snapshot: &HashMap<String, bool>, kname: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// USB-SATA bridges sometimes report RM=0 even though the physical disk is
+/// removable. Treat a block device whose sysfs device path traverses USB as
+/// removable so provisioning cannot hide an attached USB disk behind a bad
+/// bridge-reported flag.
+pub fn is_usb(sysfs_root: &Path, kname: &str) -> bool {
+    let device = sysfs_root.join(kname).join("device");
+    std::fs::canonicalize(device)
+        .ok()
+        .map(|path| path.to_string_lossy().contains("/usb"))
+        .unwrap_or(false)
+}
+
 /// Parse `smartctl -H -A` text output into (status, temperature_celsius).
 /// Status: "ok" (PASSED), "degraded" (FAILED/FAILING), else "unknown"
 /// (unsupported device, no SMART data, or smartctl error).
@@ -625,7 +637,7 @@ impl DeviceManager {
                     if !trackable(&info.device_type, &info.fs_type) {
                         continue;
                     }
-                    let removable = is_removable(&snapshot, &info.kname);
+                    let removable = is_removable(&snapshot, &info.kname) || is_usb(sysfs_root, &info.kname);
                     let mountpoint = info.mountpoint.trim().to_string();
                     // Keep the device's own existing name (label changes or a
                     // replug must not churn the mountpoint/share); only avoid
