@@ -668,13 +668,15 @@
       apiJSON('/shares').then(function (data) {
         var rows = data.shares || [];
         list.innerHTML = rows.length ? '<div style="display:grid;gap:10px">' + rows.map(function (s) {
-          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(s.name) + '</b><div class="sub">' + esc(s.path) + ' · ' + esc((s.protocols || []).join(', ')) + '</div></div><span class="tag">' + (s.readonly ? 'read-only' : 'read-write') + '</span></div>';
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(s.name) + '</b><div class="sub">' + esc(s.path) + ' · ' + esc((s.protocols || []).join(', ')) + '</div></div><div style="display:flex;gap:8px;align-items:center"><span class="tag">' + (s.readonly ? 'read-only' : 'read-write') + '</span><button class="btn" data-share-delete="' + esc(s.name) + '">Remove</button></div></div>';
         }).join('') + '</div>' : '<div class="empty"><b>No shares yet</b>Create a share to expose a dataset over SMB or NFS.</div>';
+        Array.prototype.forEach.call(list.querySelectorAll('[data-share-delete]'), function (button) { button.addEventListener('click', function () { if (!confirm('Remove this share? Files will remain unchanged.')) return; apiJSON('/shares/' + encodeURIComponent(button.dataset.shareDelete), { method: 'DELETE' }).then(loadShares).catch(showError); }); });
       }).catch(showError);
     }
 
     function viewUsers() {
-      return '<div class="page-head"><div><h1>Users</h1><p>Roles and share grants; authentication remains with Authentik.</p></div><button class="btn primary" id="user-create">Add user</button></div>' +
+      return '<div class="page-head"><div><h1>Users</h1><p>Identity is owned by Cerulean Authentik; Onyx stores only local storage roles and grants.</p></div><a class="btn" href="https://auth.onyx.innotel.us/if/admin/" target="_blank" rel="noopener">Open Authentik</a></div>' +
+        '<div class="card" style="margin-bottom:16px"><h3>Add Onyx access mapping</h3><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end"><label>Authentik username<input id="user-username" class="search" style="width:100%;max-width:none" placeholder="alex"></label><label>Email<input id="user-email" class="search" style="width:100%;max-width:none" placeholder="alex@example.com"></label><label>Role<select id="user-role" class="search" style="width:100%;max-width:none"><option>user</option><option>viewer</option><option>operator</option><option>admin</option></select></label><button class="btn primary" id="user-create">Save mapping</button></div></div>' +
         '<div class="card" id="user-list"><div class="empty"><b>Loading users…</b>Reading local permission metadata.</div></div>';
     }
 
@@ -687,6 +689,10 @@
           return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(u.display_name || u.username) + '</b><div class="sub">' + esc(u.username) + ' · ' + esc(u.status) + '</div></div><span class="tag">' + esc(u.role) + '</span></div>';
         }).join('') + '</div>' : '<div class="empty"><b>No local role mappings</b>Add a user mapping after creating the identity in Authentik.</div>';
       }).catch(showError);
+    }
+
+    function viewSettings() {
+      return '<div class="page-head"><div><h1>Settings</h1><p>Current platform connections and dashboard preferences.</p></div></div><div class="grid"><div class="card"><h3>Identity</h3><p class="sub">Cerulean Authentik provides SSO and user identity.</p><a class="btn" href="https://auth.onyx.innotel.us/if/admin/" target="_blank" rel="noopener">Manage identity</a></div><div class="card"><h3>Remote storage</h3><p class="sub">Rclone provides Google Drive, OneDrive, SMB, and NFS remotes.</p><button class="btn" id="settings-refresh-remotes">Check rclone remotes</button><div id="settings-remotes" class="sub" style="margin-top:8px">Not checked</div></div><div class="card"><h3>Appearance</h3><label>Theme<select id="settings-theme" class="search" style="width:100%;margin-top:8px"><option value="dark">Dark</option><option value="light">Light</option></select></label></div></div>';
     }
 
     function viewScrub() {
@@ -709,7 +715,8 @@
       else if (v.id === 'apps') body = viewSimple('Apps', 'Self-hosted apps on this host.', 'The app store and sandboxing land in v0.4 “Jade”.');
       else if (v.id === 'shares') body = viewShares();
       else if (v.id === 'users') body = viewUsers();
-      else body = viewSimple('Settings', 'Theme, density and system preferences.', 'Preferences persist per user in v0.2.');
+      else if (v.id === 'settings') body = viewSettings();
+      else body = viewSimple('Settings', 'Theme, density and system preferences.', 'Preferences persist per user.');
       document.getElementById('content').innerHTML = body;
       if (v.id === 'dashboard') loadStatusStats();
       if (v.id === 'storage') {
@@ -765,11 +772,16 @@
       }
       if (v.id === 'users') {
         document.getElementById('user-create').addEventListener('click', function () {
-          var username = prompt('Authentik username');
-          if (!username) return;
-          apiJSON('/users', { method: 'POST', body: JSON.stringify({ username: username, role: 'user', status: 'active' }) }).then(loadUsers).catch(showError);
+          var username = document.getElementById('user-username').value.trim();
+          if (!username) { showError({ error: { message: 'Authentik username is required.' } }); return; }
+          apiJSON('/users', { method: 'POST', body: JSON.stringify({ username: username, email: document.getElementById('user-email').value.trim(), role: document.getElementById('user-role').value, status: 'active' }) }).then(loadUsers).catch(showError);
         });
         loadUsers();
+      }
+      if (v.id === 'settings') {
+        var themeSelect = document.getElementById('settings-theme');
+        if (themeSelect) { themeSelect.value = document.documentElement.dataset.theme || 'dark'; themeSelect.addEventListener('change', function () { document.documentElement.dataset.theme = themeSelect.value; try { localStorage.setItem('onyx.theme', themeSelect.value); } catch (e) {} }); }
+        document.getElementById('settings-refresh-remotes').addEventListener('click', function () { apiJSON('/storage/remotes').then(function (data) { document.getElementById('settings-remotes').textContent = data.remotes.length ? data.remotes.join(', ') : 'No rclone remotes configured'; }).catch(showError); });
       }
       if (v.id === 'backups') {
         document.getElementById('backup-source-files').addEventListener('click', function () { location.hash = '#/files'; });
