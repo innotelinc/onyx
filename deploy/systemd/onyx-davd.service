@@ -1,0 +1,35 @@
+# onyx-davd — WebDAV for WebDAV-enabled shares (docs/design/05#6 WebDAV row).
+# HTTPS terminates at the gateway: davd listens on loopback and trusts the
+# identity header (X-Onyx-User) the gateway sets once it has authenticated the
+# session or app token, so this unit is only safe behind that gateway.
+[Unit]
+Description=Onyx WebDAV share service
+After=local-fs.target onyx-core.service
+Wants=onyx-core.service
+# The config is rendered by onyx-core; without it there is nothing to serve and
+# starting would fail-loop. onyx-privd brings the unit up with the first
+# WebDAV share (`systemctl reload-or-restart onyx-davd`).
+ConditionPathExists=/etc/onyx/conf.d/davd.conf
+
+[Service]
+Type=simple
+User=onyx-davd
+Group=onyx
+SupplementaryGroups=onyx
+ExecStart=/usr/local/lib/onyx/onyx-davd --socket-dir /run/onyx --config /etc/onyx/conf.d/davd.conf
+# SIGHUP re-reads davd.conf in place, so a share change costs no connections.
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=2
+UMask=0002
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# /mnt/onyx is writable because writable shares are served read-write; the
+# daemon writes nowhere else.
+ReadWritePaths=/run/onyx /mnt/onyx
+ReadOnlyPaths=/etc/onyx
+
+[Install]
+WantedBy=multi-user.target

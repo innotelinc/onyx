@@ -151,9 +151,10 @@ containers.
 
 ## 6. Platform daemons
 
-All six are gRPC services generated from `proto/onyx/v1/`, following the
-service conventions of docs/design/04. v0.1 ships compilable skeletons
-(contract + server + wiring); roadmap milestones implement the data plane.
+All of these are gRPC services generated from `proto/onyx/v1/`, following the
+service conventions of docs/design/04. The v0.4 "Jade" surfaces (§6.3, §6.4,
+§6.6) are implemented; `onyx-ai` (§6.5) is the v0.5 milestone, and its inputs
+are already assembled by `onyx-api`.
 
 ### 6.1 `onyx-snapd` — snapshots
 
@@ -179,14 +180,32 @@ Btrfs snapshot lifecycle on top of the fixed subvolume layout
 
 - VM inventory (`ListVMs`), lifecycle (`CreateVM`, `StartVM`, `StopVM`,
   `DeleteVM`), resources (vCPU/RAM/disk), and media attachment.
-- v0.4 milestone: libvirt/QEMU backend; disk images on the pool's
-  `@apps`/`@data` subvolumes.
+- Implemented on libvirt/QEMU: inventory and install records persist in SQLite,
+  disk images are qcow2 files on the pool (`/mnt/onyx/<pool>/@apps/vms`), and the
+  domains are defined and driven through `virsh` — never CGo bindings, so the
+  service runs unprivileged in the `libvirt` group. Creation defines a machine
+  **stopped**; deletion only removes the disk image when `delete_disk` is set.
+  The lifecycle rule is enforced against the hypervisor's live state, not the
+  recorded one, so a guest that shut itself down is still startable and a
+  still-running machine cannot be deleted.
 
 ### 6.4 `onyx-appd` — container management
 
 - App catalog (`ListApps`, `InstallApp`, `UninstallApp`), container lifecycle
   (`StartContainer`, `StopContainer`, `RestartContainer`), and compose
   manifests from the signed app store (docs/design/09).
+- Implemented with **persistent install records** (SQLite) and a container
+  runtime seam: the Docker API drives real containers where a socket is
+  available, and the same policy is testable without one. Installing renders the
+  app's manifest with the per-installation config the caller supplied (ports,
+  paths), so two installations of one app do not collide. Uninstall stops the
+  containers; `purge_data` deletes the app's volumes and `force` is required to
+  remove an app whose containers are still running.
+- Deployment: the composed stack grants onyx-appd the host's Docker socket (and
+  only that group) and binds the pool at the same path the host uses, so a
+  manifest's bind mount resolves to pool storage on both sides. App projects are
+  namespaced `onyx-app-<app>` so an app can never take the platform stack down
+  with a `down`.
 
 ### 6.5 `onyx-ai` — AI Storage Advisor + Backup Intelligence
 
@@ -221,8 +240,22 @@ Btrfs snapshot lifecycle on top of the fixed subvolume layout
 - **Hybrid cloud:** per-bucket lifecycle policies — `LOCAL`, `CLOUD` (primary
   in an external S3 provider), or `TIERED` (local hot tier, cloud cold tier,
   with sync/eviction rules). The cloud side is pluggable (AWS S3, Backblaze
-  B2, other S3-compatible endpoints) via `HYBRID_CLOUD_ENDPOINT` +
-  credentials.
+  B2, other S3-compatible endpoints).
+- The transport is **rclone against the shared remote catalog**
+  (`/etc/rclone/rclone.conf`, the same file the Shares page writes and
+  `onyx-backupd` reads), so a provider is configured once for tiering, clones
+  and backups. `HYBRID_CLOUD_ENDPOINT`/credentials remain the direct-endpoint
+  form of the same thing for a deployment that does not use the catalog.
+- A bucket's `cloud_target` is a remote (`b2-archive:` or `b2-archive:offsite`),
+  or an absolute directory on the pool for testing tiering without a cloud
+  account; each bucket is stored under `onyx-objectstore/<bucket>` inside it.
+  A bare name with no `:` is refused rather than read as a relative directory.
+- Per-tier semantics: `CLOUD` acknowledges a write only once the cloud holds it
+  (and keeps no local copy); `TIERED` acknowledges from the hot copy and mirrors
+  on sync. `SyncBucket` uploads, then runs `rclone check` over the whole bucket
+  and **only evicts when that verification passes**, releasing local copies older
+  than `evict_after_days`. A read of an evicted object is served from the cloud
+  and refetched into the cache, so eviction never removes access.
 
 ## 7. Release pipeline
 

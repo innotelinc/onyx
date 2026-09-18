@@ -341,6 +341,8 @@
       { id: 'backups',   label: 'Backups',   icon: ICONS.backups,   section: 'Data' },
       { id: 'scrub',     label: 'Scrub',     icon: ICONS.settings,  section: 'Data' },
       { id: 'apps',      label: 'Apps',      icon: ICONS.apps,      section: 'Platform' },
+      { id: 'vms',       label: 'VMs',       icon: ICONS.storage,   section: 'Platform' },
+      { id: 'objects',   label: 'Objects',   icon: ICONS.files,     section: 'Platform' },
       { id: 'shares',    label: 'Shares',    icon: ICONS.shares,    section: 'Platform', badge: '0' },
       { id: 'users',     label: 'Users',     icon: ICONS.users,     section: 'Platform' },
       { id: 'settings',  label: 'Settings',  icon: ICONS.settings,  section: 'Platform' }
@@ -397,16 +399,58 @@
     function viewFiles() {
       return '<div class="page-head"><div><h1>Files</h1><div id="file-breadcrumb" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="btn" type="button" data-file-nav="">Storage root</button></div></div>' +
         '<div><button class="btn" id="folder-create">New folder</button> <button class="btn" id="trash-empty">Empty trash</button> <button class="btn" id="backup-drive">Backup drive</button> <button class="btn primary" id="file-upload-button">Import file</button><input id="file-upload-input" type="file" hidden></div></div>' +
-        '<div class="grid" id="file-storage-summary" style="margin-bottom:16px"><div class="card"><h3>Storage</h3><div class="stat">—</div><div class="sub">Loading disk capacity…</div></div><div class="card"><h3>Trash</h3><div class="stat">—</div><div class="sub">Loading trash usage…</div></div></div>' +
+        '<div id="file-storage-warning"></div>' +
+        '<div class="grid" id="file-storage-summary" style="margin-bottom:16px"><div class="card" id="storage-card"><h3>Storage</h3><div class="stat">—</div><div class="sub">Loading pool capacity…</div></div><div class="card" id="trash-card"><h3>Trash</h3><div class="stat">—</div><div class="sub">Loading trash usage…</div></div></div>' +
         '<div class="card" id="file-list"><div class="empty"><b>Loading files…</b>Reading the storage root.</div></div>';
     }
 
+    // loadStorageOverview renders the capacity headline and the storage notice
+    // from GET /storage/overview. Capacity is the *pool's*, reported by the
+    // backend from the mounted filesystem — never the host disk the storage
+    // root happens to live on — and a pool the data plane has mounted but this
+    // container cannot reach is called out instead of being shown as "no
+    // storage".
+    function loadStorageOverview() {
+      var card = document.getElementById('storage-card');
+      var warn = document.getElementById('file-storage-warning') || document.getElementById('storage-warning');
+      if (!card && !warn) return Promise.resolve(null);
+      return apiJSON('/storage/overview').then(function (data) {
+        var entries = data.entries || [];
+        var visible = entries.filter(function (e) { return e.visible; });
+        if (card) {
+          var body;
+          var primary = data.primary;
+          if (primary) {
+            body = '<div class="stat">' + formatBytes(primary.total_bytes) + '</div><div class="sub">' +
+              esc(primary.name) + ' · ' + formatBytes(primary.free_bytes) + ' free' +
+              (visible.length > 1 ? ' · ' + visible.length + ' pools mounted' : '') + '</div>';
+          } else if (entries.length) {
+            body = '<div class="stat">Mounted</div><div class="sub">' + entries.length +
+              ' pool(s) mounted by the data plane but not reachable from onyx-api — see the notice above.</div>';
+          } else {
+            body = '<div class="stat">No pool mounted</div><div class="sub">Create a pool on the Storage page to start using Files.</div>';
+          }
+          card.innerHTML = '<h3>Storage</h3>' + body;
+        }
+        if (warn) {
+          warn.innerHTML = (data.warnings && data.warnings.length)
+            ? '<div class="card" style="border-color:var(--onyx-danger);margin-bottom:16px"><h3>Storage notice</h3>' +
+              data.warnings.map(function (w) { return '<div class="sub">' + esc(w) + '</div>'; }).join('') + '</div>'
+            : '';
+        }
+        return data;
+      }).catch(function (err) {
+        if (card) card.innerHTML = '<h3>Storage</h3><div class="stat">Unavailable</div><div class="sub">onyx-api could not read the storage view.</div>';
+        throw err;
+      });
+    }
+
     function loadTrash() {
-      var summary = document.getElementById('file-storage-summary');
+      var card = document.getElementById('trash-card');
       var empty = document.getElementById('trash-empty');
-      if (!summary) return;
+      if (!card) return;
       apiJSON('/files/trash').then(function (data) {
-        summary.innerHTML = '<div class="card"><h3>Storage</h3><div class="stat">' + formatBytes(data.storage_total_bytes) + '</div><div class="sub">' + formatBytes(data.storage_free_bytes) + ' available on the current filesystem</div></div><div class="card"><h3>Trash</h3><div class="stat">' + formatBytes(data.size_bytes) + '</div><div class="sub">' + data.items + ' item(s) across mounted storage</div></div>';
+        card.innerHTML = '<h3>Trash</h3><div class="stat">' + formatBytes(data.size_bytes) + '</div><div class="sub">' + data.items + ' item(s) across mounted storage</div>';
       }).catch(showError);
       if (empty) empty.addEventListener('click', function () {
         apiJSON('/files/trash').then(function (data) {
@@ -473,7 +517,7 @@
         list.innerHTML = rows.length ? '<div style="display:grid;gap:8px">' + rows.map(function (entry) {
           var action = entry.type === 'directory' ? ' data-file-dir="' + esc(entry.path) + '"' : ' data-file-content="' + esc(entry.path) + '"';
           return '<div class="event"' + action + ' style="align-items:center;border-bottom:1px solid var(--onyx-border);padding:8px;cursor:pointer"><span class="tag">' + (entry.type === 'directory' ? 'DIR' : 'FILE') + '</span><div style="flex:1"><b>' + esc(entry.name) + '</b><div class="sub">' + (entry.type === 'file' ? formatBytes(entry.size) + ' · ' + entry.modified_at : '<span data-file-size="' + esc(entry.path) + '">Calculating folder size…</span> · ' + entry.path) + '</div></div>' + (entry.type === 'directory' ? '<button class="btn" data-folder-download="' + esc(entry.path) + '">Download ZIP</button>' : '<button class="btn" data-file-download="' + esc(entry.path) + '">Download</button>') + '<button class="btn" data-file-backup="' + esc(entry.path) + '">Backup</button><button class="btn" data-file-rename="' + esc(entry.path) + '">Rename</button><button class="btn" data-file-delete="' + esc(entry.path) + '">Trash</button></div>';
-        }).join('') + '</div>' : '<div class="empty"><b>No storage is mounted</b>There are no visible files under /mnt/onyx. Attach an Onyx storage pool or device to browse files.</div>';
+        }).join('') + '</div>' : '<div class="empty"><b>Nothing to browse here yet</b>No files are visible under /mnt/onyx. Create a pool on the Storage page, or attach a device — and if a pool is already mounted, the notice above says why it is not listed here.</div>';
         Array.prototype.forEach.call(list.querySelectorAll('[data-file-dir]'), function (row) { row.addEventListener('click', function (event) { if (event.target.closest('button')) return; loadFiles(row.dataset.fileDir); }); });
         Array.prototype.forEach.call(list.querySelectorAll('[data-file-content]'), function (row) { row.addEventListener('click', function () { window.open(API + '/files/content?path=' + encodeURIComponent(row.dataset.fileContent), '_blank', 'noopener'); }); });
         Array.prototype.forEach.call(list.querySelectorAll('[data-file-backup]'), function (button) { button.addEventListener('click', function (event) { event.stopPropagation(); createBackup(button.dataset.fileBackup); }); });
@@ -492,7 +536,9 @@
 
     function viewStorage() {
       return '<div class="page-head"><div><h1>Storage</h1><p>Attach a device, inspect pools and make storage available to Files.</p></div>' +
-        '<button class="btn" id="storage-refresh">Refresh</button></div>' +
+        '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="sub" id="storage-updated"></span><button class="btn" id="storage-refresh">Refresh</button></div></div>' +
+        '<div id="storage-warning"></div>' +
+        '<div class="grid" style="margin-bottom:16px"><div class="card" id="storage-card"><h3>Storage</h3><div class="stat">—</div><div class="sub">Loading pool capacity…</div></div></div>' +
         '<div class="card" id="storage-pools"><div class="empty"><b>Loading pools…</b>Checking mounted storage.</div></div>' +
         '<div class="card" style="margin-top:16px" id="storage-devices"><div class="empty"><b>Loading devices…</b>Scanning block devices.</div></div>' +
         '<div class="card" style="margin-top:16px" id="storage-pool-setup"><h3>Create an Onyx storage pool</h3><p class="sub">Format a whole removable disk, then mount it automatically under /mnt/onyx. The defaults below — label <b>main-pool</b>, Btrfs, mounted at /mnt/onyx/main-pool, force unmount and erase — are ready to use; change any option before creating. Disks Onyx already mounted can be re-created in place.</p><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end"><label>Disk<select id="pool-device" class="search" style="width:100%;max-width:none"><option value="">Loading safe disks…</option></select></label><label>Pool label<input id="pool-name" class="search" style="width:100%;max-width:none" value="main-pool" placeholder="main-pool"></label><label>Filesystem<select id="pool-fs" class="search" style="width:100%;max-width:none"><option value="btrfs">Btrfs</option><option value="ext4">ext4</option></select></label><label>Mount directory<input id="pool-mount-name" class="search" style="width:100%;max-width:none" placeholder="Defaults to pool label"></label><label style="display:flex;gap:8px;align-items:center"><input id="pool-auto-mount" type="checkbox" checked> Auto-mount after format</label><label style="display:flex;gap:8px;align-items:center"><input id="pool-force" type="checkbox" checked> Force unmount &amp; erase</label><button class="btn" id="pool-preview">Review destructive operation</button><button class="btn" id="pool-defaults">Use defaults</button></div><div id="pool-warning" class="sub" style="margin-top:12px">A verified backup and final confirmation are required before any erase operation.</div></div>';
@@ -509,6 +555,9 @@
     function formatBytes(value) {
       var n = Number(value || 0);
       if (!n) return '0 MB';
+      // Terabytes matter here: a pool is routinely 1-20 TB, and "2048.00 GB"
+      // makes an operator do arithmetic to read a capacity headline.
+      if (n >= 1024 * 1024 * 1024 * 1024) return (n / (1024 * 1024 * 1024 * 1024)).toFixed(2) + ' TB';
       if (n >= 1024 * 1024 * 1024) return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
       if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(2) + ' MB';
       if (n >= 1024) return (n / 1024).toFixed(2) + ' KB';
@@ -560,8 +609,8 @@
     function loadStorage() {
       var pools = document.getElementById('storage-pools');
       var devices = document.getElementById('storage-devices');
-      if (!pools || !devices) return;
-      Promise.all([apiJSON('/pools'), apiJSON('/devices')]).then(function (parts) {
+      if (!pools || !devices) return Promise.resolve();
+      return Promise.all([apiJSON('/pools'), apiJSON('/devices')]).then(function (parts) {
         var poolRows = parts[0].pools || [], deviceRows = parts[1].devices || [];
         pools.innerHTML = poolRows.length ? '<h3>Mounted pools</h3><div style="display:grid;gap:10px">' + poolRows.map(function (pool) {
           return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(pool.name) + '</b><div class="sub">' + esc(pool.fsType || 'unknown') + ' · ' + formatBytes(pool.usedBytes) + ' used of ' + formatBytes(pool.totalBytes) + '</div></div><span class="tag">' + esc(pool.state || 'unknown') + '</span></div>';
@@ -581,6 +630,20 @@
           button.addEventListener('click', function () { if (!confirm('Detach this device and its shares?')) return; button.disabled = true; apiJSON('/devices/' + encodeURIComponent(button.dataset.deviceDetach) + '/detach', { method: 'POST' }).then(loadStorage).catch(showError); });
         });
       }).catch(showError);
+    }
+
+    // refreshStorage re-reads the whole storage view. The device read carries a
+    // live rescan on the data plane, so a drive or pool that appeared since the
+    // last look shows up here; the timestamp makes the button visibly do
+    // something even when nothing has changed.
+    function refreshStorage() {
+      var button = document.getElementById('storage-refresh');
+      if (button) { button.disabled = true; button.textContent = 'Refreshing…'; }
+      return Promise.all([loadStorageOverview(), loadStorage()]).catch(function () {}).then(function () {
+        if (button) { button.disabled = false; button.textContent = 'Refresh'; }
+        var stamp = document.getElementById('storage-updated');
+        if (stamp) stamp.textContent = 'Updated ' + new Date().toLocaleTimeString();
+      });
     }
 
     function viewSnapshots() {
@@ -662,6 +725,266 @@
       if (target) target.insertAdjacentHTML('afterbegin', '<div class="card" style="border-color:var(--onyx-danger);color:var(--onyx-danger)">' + esc(message) + '</div>');
     }
 
+    // --- Apps (v0.4 "Jade"): the app store and container lifecycle ----------
+    // The store and the installed list are one catalog filtered by status, so
+    // the page shows both sides of the same data: what can be installed, what
+    // is installed, and the containers the installed apps are running.
+
+    function viewApps() {
+      return '<div class="page-head"><div><h1>Apps</h1><p>Self-hosted applications from the app store, running as containers on this host.</p></div>' +
+        '<button class="btn" id="apps-refresh">Refresh</button></div>' +
+        '<div class="card" id="app-catalog"><div class="empty"><b>Loading the app store…</b>Reading the signed catalog.</div></div>' +
+        '<div class="card" style="margin-top:16px" id="app-installed"><div class="empty"><b>Loading installed apps…</b>Reading the install records.</div></div>' +
+        '<div class="card" style="margin-top:16px" id="app-containers"><div class="empty"><b>Loading containers…</b>Asking the container runtime.</div></div>';
+    }
+
+    // statusTag colours an app or container state. A running container and an
+    // installed app are the healthy states; error is the only red one.
+    function stateTag(state) {
+      var s = String(state || 'unknown');
+      var tone = s === 'running' || s === 'installed' ? 'var(--onyx-success)' : (s === 'error' ? 'var(--onyx-danger)' : 'var(--onyx-muted,#888)');
+      return '<span class="tag" style="border-color:' + tone + ';color:' + tone + '">' + esc(s.replace(/_/g, ' ')) + '</span>';
+    }
+
+    function loadApps() {
+      var catalog = document.getElementById('app-catalog');
+      var installed = document.getElementById('app-installed');
+      if (!catalog) return Promise.resolve();
+      return Promise.all([apiJSON('/apps'), apiJSON('/apps?status=installed')]).then(function (parts) {
+        var all = parts[0].apps || [], have = parts[1].apps || [];
+        var installedIDs = {};
+        have.forEach(function (a) { installedIDs[a.id] = true; });
+
+        catalog.innerHTML = '<h3>App store</h3>' + (all.length ? '<div style="display:grid;gap:10px">' + all.map(function (app) {
+          var done = installedIDs[app.id];
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(app.name) + '</b>' + stateTag(app.status) + '<div class="sub">' + esc(app.id) + ' · v' + esc(app.version) + ' · ' + esc(app.description || 'no description') + '</div></div>' +
+            (done ? '<span class="sub">installed</span>' : '<button class="btn primary" data-app-install="' + esc(app.id) + '" data-app-version="' + esc(app.version) + '">Install</button>') + '</div>';
+        }).join('') + '</div>' : '<div class="empty"><b>The catalog is empty</b>onyx-appd reported no apps. Check that onyx-appd is deployed and its catalog is mounted.</div>');
+
+        installed.innerHTML = '<h3>Installed</h3>' + (have.length ? '<div style="display:grid;gap:10px">' + have.map(function (app) {
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(app.name) + '</b>' + stateTag(app.status) + '<div class="sub">' + esc(app.id) + ' · v' + esc(app.version) + (app.installedAt ? ' · installed ' + esc(app.installedAt) : '') + '</div></div>' +
+            '<div><button class="btn" data-app-uninstall="' + esc(app.id) + '">Uninstall</button> <button class="btn" data-app-purge="' + esc(app.id) + '">Uninstall &amp; erase data</button></div></div>';
+        }).join('') + '</div>' : '<div class="empty"><b>No apps installed</b>Install one from the catalog above.</div>');
+
+        Array.prototype.forEach.call(catalog.querySelectorAll('[data-app-install]'), function (button) {
+          button.addEventListener('click', function () {
+            button.disabled = true; button.textContent = 'Installing…';
+            apiJSON('/apps', { method: 'POST', body: JSON.stringify({ app_id: button.dataset.appInstall, version: button.dataset.appVersion }) })
+              .then(function () { return refreshApps(); })
+              .catch(function (err) { button.disabled = false; button.textContent = 'Install'; showError(err); });
+          });
+        });
+        Array.prototype.forEach.call(installed.querySelectorAll('[data-app-uninstall]'), function (button) {
+          button.addEventListener('click', function () { uninstallApp(button.dataset.appUninstall, false, button); });
+        });
+        Array.prototype.forEach.call(installed.querySelectorAll('[data-app-purge]'), function (button) {
+          button.addEventListener('click', function () {
+            if (!window.confirm('Uninstall ' + button.dataset.appPurge + ' and permanently erase its data volumes? This cannot be undone.')) return;
+            uninstallApp(button.dataset.appPurge, true, button);
+          });
+        });
+      }).catch(function (err) {
+        if (catalog) catalog.innerHTML = '<h3>App store</h3><div class="empty"><b>onyx-appd is unavailable</b>' + esc(err && err.error && err.error.message ? err.error.message : 'The app service did not answer.') + '</div>';
+      });
+    }
+
+    function uninstallApp(appID, purge, button) {
+      button.disabled = true; button.textContent = 'Removing…';
+      apiJSON('/apps/' + encodeURIComponent(appID) + '?purge_data=' + (purge ? 'true' : 'false') + '&force=true', { method: 'DELETE' })
+        .then(function () { return refreshApps(); })
+        .catch(function (err) { button.disabled = false; button.textContent = purge ? 'Uninstall & erase data' : 'Uninstall'; showError(err); });
+    }
+
+    function loadContainers() {
+      var card = document.getElementById('app-containers');
+      if (!card) return Promise.resolve();
+      return apiJSON('/containers').then(function (data) {
+        var rows = data.containers || [];
+        card.innerHTML = '<h3>Containers</h3>' + (rows.length ? '<div style="display:grid;gap:10px">' + rows.map(function (ct) {
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(ct.service || ct.name) + '</b>' + stateTag(ct.status) + '<div class="sub">' + esc(ct.id) + ' · ' + esc(ct.image) + (ct.appId ? ' · app ' + esc(ct.appId) : '') + '</div></div>' +
+            '<div><button class="btn" data-container-start="' + esc(ct.id) + '">Start</button> <button class="btn" data-container-stop="' + esc(ct.id) + '">Stop</button> <button class="btn" data-container-restart="' + esc(ct.id) + '">Restart</button></div></div>';
+        }).join('') + '</div>' : '<div class="empty"><b>No containers</b>Installing an app brings its containers up here.</div>');
+        ['start', 'stop', 'restart'].forEach(function (action) {
+          Array.prototype.forEach.call(card.querySelectorAll('[data-container-' + action + ']'), function (button) {
+            button.addEventListener('click', function () {
+              button.disabled = true;
+              apiJSON('/containers/' + encodeURIComponent(button.dataset['container' + action.charAt(0).toUpperCase() + action.slice(1)]) + '/' + action, { method: 'POST' })
+                .then(function () { return loadContainers(); })
+                .catch(function (err) { button.disabled = false; showError(err); });
+            });
+          });
+        });
+      }).catch(function (err) {
+        card.innerHTML = '<h3>Containers</h3><div class="empty"><b>The container runtime is unavailable</b>' + esc(err && err.error && err.error.message ? err.error.message : 'onyx-appd did not answer.') + '</div>';
+      });
+    }
+
+    function refreshApps() {
+      var button = document.getElementById('apps-refresh');
+      if (button) { button.disabled = true; button.textContent = 'Refreshing…'; }
+      return Promise.all([loadApps(), loadContainers()]).catch(function () {}).then(function () {
+        if (button) { button.disabled = false; button.textContent = 'Refresh'; }
+      });
+    }
+
+    // --- VMs (v0.4 "Jade"): libvirt/QEMU machines on the pool ---------------
+
+    function viewVMs() {
+      return '<div class="page-head"><div><h1>Virtual machines</h1><p>Machines run on KVM through libvirt; their disk images live on the pool, so snapshots and backups cover them too.</p></div>' +
+        '<button class="btn" id="vms-refresh">Refresh</button></div>' +
+        '<div class="card" style="margin-bottom:16px"><h3>Create a virtual machine</h3><p class="sub">A machine is defined stopped: review it, then boot it. The disk image is created on the pool and is never overwritten.</p>' +
+        '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));align-items:end">' +
+        '<label>Name<input id="vm-name" class="search" style="width:100%;max-width:none" placeholder="debian"></label>' +
+        '<label>vCPUs<input id="vm-vcpus" class="search" style="width:100%;max-width:none" type="number" min="1" value="2"></label>' +
+        '<label>Memory (MiB)<input id="vm-memory" class="search" style="width:100%;max-width:none" type="number" min="64" value="2048"></label>' +
+        '<label>Disk (MiB)<input id="vm-disk" class="search" style="width:100%;max-width:none" type="number" min="1024" value="20480"></label>' +
+        '<label>OS label<input id="vm-os" class="search" style="width:100%;max-width:none" placeholder="debian-12"></label>' +
+        '<label>Install ISO (optional)<input id="vm-iso" class="search" style="width:100%;max-width:none" placeholder="/mnt/onyx/main-pool/@apps/iso/debian.iso"></label>' +
+        '<button class="btn primary" id="vm-create">Create machine</button></div><div id="vm-warning" class="sub" style="margin-top:12px"></div></div>' +
+        '<div class="card" id="vm-list"><div class="empty"><b>Loading virtual machines…</b>Asking the hypervisor.</div></div>';
+    }
+
+    function loadVMs() {
+      var list = document.getElementById('vm-list');
+      if (!list) return Promise.resolve();
+      return apiJSON('/vms').then(function (data) {
+        var rows = data.vms || [];
+        list.innerHTML = '<h3>Machines</h3>' + (rows.length ? '<div style="display:grid;gap:10px">' + rows.map(function (vm) {
+          var running = vm.status === 'running';
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(vm.name) + '</b>' + stateTag(vm.status) + '<div class="sub">' + esc(vm.id) + ' · ' + vm.vcpus + ' vCPU · ' + formatBytes(vm.memoryMb * 1024 * 1024) + ' RAM' + (vm.disk ? ' · ' + esc(vm.disk) : '') + '</div></div>' +
+            '<div><button class="btn" data-vm-start="' + esc(vm.id) + '"' + (running ? ' disabled' : '') + '>Start</button> <button class="btn" data-vm-stop="' + esc(vm.id) + '"' + (running ? '' : ' disabled') + '>Stop</button> <button class="btn" data-vm-delete="' + esc(vm.id) + '"' + (running ? ' disabled' : '') + '>Delete</button></div></div>';
+        }).join('') + '</div>' : '<div class="empty"><b>No virtual machines</b>Create one above. The machine is defined stopped and stays that way until you start it.</div>');
+
+        ['start', 'stop'].forEach(function (action) {
+          Array.prototype.forEach.call(list.querySelectorAll('[data-vm-' + action + ']'), function (button) {
+            button.addEventListener('click', function () {
+              button.disabled = true;
+              var id = button.dataset['vm' + action.charAt(0).toUpperCase() + action.slice(1)];
+              var request = action === 'stop'
+                ? apiJSON('/vms/' + encodeURIComponent(id) + '/stop', { method: 'POST', body: JSON.stringify({ graceful: true }) })
+                : apiJSON('/vms/' + encodeURIComponent(id) + '/start', { method: 'POST' });
+              request.then(function () { return loadVMs(); }).catch(function (err) { button.disabled = false; showError(err); });
+            });
+          });
+        });
+        Array.prototype.forEach.call(list.querySelectorAll('[data-vm-delete]'), function (button) {
+          button.addEventListener('click', function () {
+            var id = button.dataset.vmDelete;
+            // The disk image is deleted too: this is the one irreversible VM
+            // action, so it is spelled out in the confirmation.
+            if (!window.confirm('Delete ' + id + ' and its disk image? Everything on the machine is lost and cannot be recovered.')) return;
+            button.disabled = true;
+            apiJSON('/vms/' + encodeURIComponent(id) + '?delete_disk=true', { method: 'DELETE' })
+              .then(function () { return loadVMs(); })
+              .catch(function (err) { button.disabled = false; showError(err); });
+          });
+        });
+      }).catch(function (err) {
+        list.innerHTML = '<h3>Machines</h3><div class="empty"><b>onyx-vmm is unavailable</b>' + esc(err && err.error && err.error.message ? err.error.message : 'The virtualization service did not answer.') + '</div>';
+      });
+    }
+
+    function refreshVMs() {
+      var button = document.getElementById('vms-refresh');
+      if (button) { button.disabled = true; button.textContent = 'Refreshing…'; }
+      return loadVMs().catch(function () {}).then(function () {
+        if (button) { button.disabled = false; button.textContent = 'Refresh'; }
+      });
+    }
+
+    // --- Objects (v0.4 "Jade"): S3 buckets and hybrid-cloud tiering --------
+
+    function viewObjects() {
+      return '<div class="page-head"><div><h1>Objects</h1><p>S3-compatible buckets for application data — local, cloud-primary, or tiered with the pool as the hot copy and a remote as the cold tier.</p></div>' +
+        '<button class="btn" id="objects-refresh">Refresh</button></div>' +
+        '<div class="card" style="margin-bottom:16px"><h3>Create a bucket</h3><p class="sub">A <b>local</b> bucket stays on the pool. A <b>cloud</b> or <b>tiered</b> bucket targets a remote configured on the Shares page (for example <code>b2-archive:</code>); tiered buckets mirror to it on sync and can release local copies once the cloud copy is verified.</p>' +
+        '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));align-items:end">' +
+        '<label>Bucket name<input id="bucket-name" class="search" style="width:100%;max-width:none" placeholder="documents"></label>' +
+        '<label>Tier<select id="bucket-tier" class="search" style="width:100%;max-width:none"><option value="local">Local (pool only)</option><option value="tiered">Tiered (hot pool, cold cloud)</option><option value="cloud">Cloud-primary</option></select></label>' +
+        '<label>Cloud target<input id="bucket-target" class="search" style="width:100%;max-width:none" list="bucket-remotes" placeholder="b2-archive:"></label>' +
+        '<label>Evict local copies after (days)<input id="bucket-evict" class="search" style="width:100%;max-width:none" type="number" min="0" value="0"></label>' +
+        '<button class="btn primary" id="bucket-create">Create bucket</button></div>' +
+        '<datalist id="bucket-remotes"></datalist><div id="bucket-warning" class="sub" style="margin-top:12px"></div></div>' +
+        '<div class="card" id="bucket-list"><div class="empty"><b>Loading buckets…</b>Reading the object store.</div></div>';
+    }
+
+    function loadBuckets() {
+      var list = document.getElementById('bucket-list');
+      var remotes = document.getElementById('bucket-remotes');
+      if (!list) return Promise.resolve();
+      if (remotes) {
+        apiJSON('/storage/remotes').then(function (data) {
+          remotes.innerHTML = (data.remotes || []).map(function (name) {
+            return '<option value="' + esc(name) + ':"></option>';
+          }).join('');
+        }).catch(function () {});
+      }
+      return apiJSON('/buckets').then(function (data) {
+        var rows = data.buckets || [];
+        list.innerHTML = '<h3>Buckets</h3>' + (rows.length ? '<div style="display:grid;gap:10px">' + rows.map(function (b) {
+          var tier = String(b.tier || 'LOCAL').toLowerCase();
+          var cloudTier = tier === 'cloud' || tier === 'tiered';
+          var last = b.lastSyncAt ? ' · last sync ' + esc(b.lastSyncAt) : '';
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(b.name) + '</b><span class="tag">' + esc(tier) + '</span><div class="sub">' + (cloudTier ? esc(b.cloudTarget) + ' · ' : '') + nObjects(b.localObjects) + ' local' + (cloudTier ? ' · ' + nObjects(b.cloudObjects) + ' in the cloud' + (b.evictAfterDays ? ' · evict after ' + b.evictAfterDays + ' days' : '') : '') + last + '</div>' +
+            (b.syncError ? '<div class="sub" style="color:var(--onyx-danger)">' + esc(b.syncError) + '</div>' : '') + '</div>' +
+            '<div>' + (cloudTier ? '<button class="btn" data-bucket-sync="' + esc(b.name) + '">Sync</button> <button class="btn" data-bucket-evict="' + esc(b.name) + '">Sync &amp; evict</button> ' : '') + '<button class="btn" data-bucket-delete="' + esc(b.name) + '">Delete</button></div></div>';
+        }).join('') + '</div>' : '<div class="empty"><b>No buckets</b>Create one above. Anything S3-compatible can then use the endpoint with the storage access key.</div>');
+
+        Array.prototype.forEach.call(list.querySelectorAll('[data-bucket-sync]'), function (button) {
+          button.addEventListener('click', function () { syncBucket(button.dataset.bucketSync, false, button); });
+        });
+        Array.prototype.forEach.call(list.querySelectorAll('[data-bucket-evict]'), function (button) {
+          button.addEventListener('click', function () {
+            if (!window.confirm('Sync ' + button.dataset.bucketEvict + ' and release local copies the cloud has verified? Local reads will refetch from the cloud afterwards.')) return;
+            syncBucket(button.dataset.bucketEvict, true, button);
+          });
+        });
+        Array.prototype.forEach.call(list.querySelectorAll('[data-bucket-delete]'), function (button) {
+          button.addEventListener('click', function () {
+            var name = button.dataset.bucketDelete;
+            if (!window.confirm('Delete bucket ' + name + ' and everything in it (including its cloud target)? This cannot be undone.')) return;
+            button.disabled = true;
+            apiJSON('/buckets/' + encodeURIComponent(name) + '?force=true', { method: 'DELETE' })
+              .then(function () { return loadBuckets(); })
+              .catch(function (err) { button.disabled = false; showError(err); });
+          });
+        });
+      }).catch(function (err) {
+        list.innerHTML = '<h3>Buckets</h3><div class="empty"><b>onyx-objectstore is unavailable</b>' + esc(err && err.error && err.error.message ? err.error.message : 'The object store did not answer.') + '</div>';
+      });
+    }
+
+    // nObjects renders an object count without pretending an unknown one is
+    // zero: before a bucket has been synced its cloud count is genuinely
+    // unknown, not empty.
+    function nObjects(count) {
+      var n = Number(count || 0);
+      return n + (n === 1 ? ' object' : ' objects');
+    }
+
+    function syncBucket(name, evict, button) {
+      button.disabled = true; button.textContent = evict ? 'Syncing & evicting…' : 'Syncing…';
+      var stamp = document.getElementById('bucket-warning');
+      if (stamp) stamp.textContent = 'Syncing ' + name + '…';
+      apiJSON('/buckets/' + encodeURIComponent(name) + '/sync?evict=' + (evict ? 'true' : 'false'), { method: 'POST' })
+        .then(function (result) {
+          if (stamp) {
+            var warnings = (result.warnings || []).join(' ');
+            stamp.textContent = 'Synced ' + name + ': ' + result.uploaded + ' uploaded, ' + result.evicted + ' evicted.' + (warnings ? ' ' + warnings : '');
+          }
+          return loadBuckets();
+        })
+        .catch(function (err) { button.disabled = false; button.textContent = evict ? 'Sync & evict' : 'Sync'; showError(err); });
+    }
+
+    function refreshObjects() {
+      var button = document.getElementById('objects-refresh');
+      if (button) { button.disabled = true; button.textContent = 'Refreshing…'; }
+      return loadBuckets().catch(function () {}).then(function () {
+        if (button) { button.disabled = false; button.textContent = 'Refresh'; }
+      });
+    }
+
     function viewShares() {
       return '<div class="page-head"><div><h1>Shares</h1><p>Pick a storage folder, choose protocols, and publish it safely.</p></div></div>' +
         '<div class="card" style="margin-bottom:16px"><h3>Create a share</h3>' +
@@ -681,11 +1004,13 @@
         '<label><input type="checkbox" id="share-readonly"> Read-only</label>' +
         '<button class="btn primary" id="share-create">Create share</button>' +
         '</div><p class="sub" style="margin-bottom:0">Only folders under the mounted Onyx storage root can be shared. No disk formatting is performed here.</p></div>' +
-        '<div class="card" id="share-list"><div class="empty"><b>Loading shares…</b>Reading the share catalog.</div></div>' +
         // Cloud/remote storage (docs/design/05#6): configure a provider once,
         // then clone a storage folder to it or use it as a backup target. The
         // remote catalog is the shared rclone config the API writes and
-        // backupd reads.
+        // backupd reads. It sits directly under the create-share form because
+        // it is page-level configuration, not one share's property — and it is
+        // what an operator needs when the storage they want to share is not on
+        // this box at all.
         '<div class="card" style="margin-top:16px" id="share-remote"><h3>Cloud &amp; remote storage</h3>' +
         '<p class="sub">Register a provider once — each configured target can then receive a clone of a storage folder and serve as a backup destination.</p>' +
         '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end">' +
@@ -702,7 +1027,8 @@
         '<button class="btn" id="remote-clone">Clone to target</button>' +
         '</div>' +
         '<div id="remote-list" class="sub" style="margin-top:12px">Loading targets…</div>' +
-        '<div id="remote-status" class="sub" style="margin-top:8px"></div></div>';
+        '<div id="remote-status" class="sub" style="margin-top:8px"></div></div>' +
+        '<div class="card" style="margin-top:16px" id="share-list"><div class="empty"><b>Loading shares…</b>Reading the share catalog.</div></div>';
     }
 
     // copyText writes a connection string to the clipboard, falling back to a
@@ -894,7 +1220,9 @@
       else if (v.id === 'snapshots') body = viewSnapshots();
       else if (v.id === 'backups') body = viewBackups();
       else if (v.id === 'scrub') body = viewScrub();
-      else if (v.id === 'apps') body = viewSimple('Apps', 'Self-hosted apps on this host.', 'The app store and sandboxing land in v0.4 “Jade”.');
+      else if (v.id === 'apps') body = viewApps();
+      else if (v.id === 'vms') body = viewVMs();
+      else if (v.id === 'objects') body = viewObjects();
       else if (v.id === 'shares') body = viewShares();
       else if (v.id === 'users') body = viewUsers();
       else if (v.id === 'settings') body = viewSettings();
@@ -902,8 +1230,8 @@
       document.getElementById('content').innerHTML = body;
       if (v.id === 'dashboard') loadStatusStats();
       if (v.id === 'storage') {
-        document.getElementById('storage-refresh').addEventListener('click', loadStorage);
-        loadStorage();
+        document.getElementById('storage-refresh').addEventListener('click', refreshStorage);
+        refreshStorage();
         // Disks offered for pool creation: unused ones plus disks Onyx already
         // mounted (re-creating a pool unmounts them, erases them and mounts
         // them again in place). Anything the host mounted outside /mnt/onyx is
@@ -952,9 +1280,9 @@
             button.disabled = true;
             button.textContent = 'Creating…';              apiJSON('/pools', { method: 'POST', body: JSON.stringify({ device: device, name: name, fs_type: fsType, force: force, auto_mount: autoMount, mount_name: mountName }) })
               .then(function (pool) {
-                warning.innerHTML = '<b>Pool created:</b> ' + esc(pool.name || name) + '. It is mounted and ready for Files.';
+                warning.innerHTML = '<b>Pool created:</b> ' + esc(pool.name || name) + '. It is mounted at /mnt/onyx/' + esc(mountName) + ' and ready for Files.';
                 button.textContent = 'Pool created';
-                loadStorage();
+                refreshStorage();
               })
               .catch(function (err) {
                 button.disabled = false;
@@ -970,6 +1298,7 @@
         document.getElementById('file-upload-button').addEventListener('click', function () { document.getElementById('file-upload-input').click(); });
         document.getElementById('file-upload-input').addEventListener('change', function (event) { var file = event.target.files[0]; if (!file) return; var form = new FormData(); form.append('file', file); var path = window.__onyxFilePath || ''; fetch(API + '/files/upload' + (path ? '?path=' + encodeURIComponent(path) : ''), { method: 'POST', body: form, credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : r.json().then(function (e) { return Promise.reject(e); }); }).then(function () { loadFiles(path); event.target.value = ''; }).catch(showError); });
         loadFiles('');
+        loadStorageOverview().catch(function () {});
         loadTrash();
       }
       if (v.id === 'snapshots') {
@@ -1049,6 +1378,57 @@
             if (status) status.textContent = 'Cloned ' + result.source + ' to ' + result.target + '. ' + (result.detail || '');
           }).catch(showError);
         });
+      }
+      if (v.id === 'apps') {
+        document.getElementById('apps-refresh').addEventListener('click', refreshApps);
+        refreshApps();
+      }
+      if (v.id === 'vms') {
+        document.getElementById('vms-refresh').addEventListener('click', refreshVMs);
+        document.getElementById('vm-create').addEventListener('click', function () {
+          var button = document.getElementById('vm-create');
+          var warning = document.getElementById('vm-warning');
+          var name = document.getElementById('vm-name').value.trim();
+          if (!name) { warning.textContent = 'A machine name is required.'; return; }
+          var payload = {
+            name: name,
+            vcpus: Number(document.getElementById('vm-vcpus').value) || 1,
+            memory_mb: Number(document.getElementById('vm-memory').value) || 2048,
+            disk_mb: Number(document.getElementById('vm-disk').value) || 0,
+            os: document.getElementById('vm-os').value.trim(),
+            iso: document.getElementById('vm-iso').value.trim()
+          };
+          button.disabled = true; button.textContent = 'Creating the image…';
+          apiJSON('/vms', { method: 'POST', body: JSON.stringify(payload) })
+            .then(function (vm) {
+              warning.textContent = 'Created ' + (vm.name || name) + ' (' + (vm.status || 'stopped') + '). Start it when the install media is attached.';
+              button.disabled = false; button.textContent = 'Create machine';
+              return loadVMs();
+            })
+            .catch(function (err) { button.disabled = false; button.textContent = 'Create machine'; warning.textContent = ''; showError(err); });
+        });
+        refreshVMs();
+      }
+      if (v.id === 'objects') {
+        document.getElementById('objects-refresh').addEventListener('click', refreshObjects);
+        document.getElementById('bucket-create').addEventListener('click', function () {
+          var button = document.getElementById('bucket-create');
+          var warning = document.getElementById('bucket-warning');
+          var name = document.getElementById('bucket-name').value.trim();
+          var tier = document.getElementById('bucket-tier').value;
+          var target = document.getElementById('bucket-target').value.trim();
+          if (!name) { warning.textContent = 'A bucket name is required (3-63 lowercase characters).'; return; }
+          if (tier !== 'local' && !target) { warning.textContent = 'A cloud target is required for a ' + tier + ' bucket — configure one on the Shares page first.'; return; }
+          button.disabled = true; button.textContent = 'Creating…';
+          apiJSON('/buckets', { method: 'POST', body: JSON.stringify({ name: name, tier: tier, cloud_target: target, evict_after_days: Number(document.getElementById('bucket-evict').value) || 0 }) })
+            .then(function (bucket) {
+              warning.textContent = 'Created ' + (bucket.name || name) + ' (' + String(bucket.tier || tier).toLowerCase() + ').' + (tier === 'local' ? '' : ' Run Sync to mirror it to ' + target + ' when your data is in place.');
+              button.disabled = false; button.textContent = 'Create bucket';
+              return loadBuckets();
+            })
+            .catch(function (err) { button.disabled = false; button.textContent = 'Create bucket'; warning.textContent = ''; showError(err); });
+        });
+        refreshObjects();
       }
       if (v.id === 'users') {
         document.getElementById('user-create').addEventListener('click', function () {

@@ -67,13 +67,19 @@ LIB="$PREFIX/lib/onyx"
 BINCLI="$PREFIX/bin"
 UNITDIR="$PREFIX/lib/systemd/system"
 TMPFILES="$PREFIX/lib/tmpfiles.d"
-SYSTEM_USERS=(onyx-core onyx-api onyx-shared onyx-storaged onyx-snapd onyx-backupd onyx-vmm onyx-appd onyx-ai onyx-objectstore)
+SYSTEM_USERS=(onyx-core onyx-api onyx-shared onyx-storaged onyx-snapd onyx-backupd onyx-vmm onyx-appd onyx-ai onyx-objectstore onyx-davd)
 # onyx-pool and onyx-firstboot are image/system units: pool auto-mount is
 # useful on hosts too (enable with --enable-pool), firstboot only makes sense
 # with --enable-firstboot (it prompts on the console). bootcheck/updated are
 # A/B-appliance units and stay disabled on script-installed hosts.
-DAEMONS=(onyx-privd onyx-storaged onyx-shared onyx-core onyx-api onyx-snapd onyx-backupd onyx-vmm onyx-appd onyx-ai onyx-objectstore)
-UNITS=("${DAEMONS[@]}")
+DAEMONS=(onyx-privd onyx-storaged onyx-shared onyx-core onyx-api onyx-snapd onyx-backupd onyx-vmm onyx-appd onyx-ai onyx-objectstore onyx-davd)
+# Units with no Onyx binary of their own: onyx-sftp is the dedicated sshd
+# instance from the distribution's openssh-server (docs/design/05#6 SFTP row).
+EXTRA_UNITS=(onyx-sftp)
+# Drop-ins installed over distribution units so they serve the Onyx-rendered
+# config: vsftpd (FTP) and rsync (rsyncd modules).
+UNIT_DROPINS=(vsftpd rsyncd)
+UNITS=("${DAEMONS[@]}" "${EXTRA_UNITS[@]}")
 BINARIES=("${DAEMONS[@]}" onyx)
 ENABLE_FIRSTBOOT=0
 ENABLE_POOL=0
@@ -102,6 +108,7 @@ if [ "$UNINSTALL" = 1 ]; then
   fi
   run rm -f "$DESTDIR$TMPFILES/onyx.conf"
   for u in "${UNITS[@]}"; do run rm -f "$DESTDIR$UNITDIR/$u.service"; done
+  for d in "${UNIT_DROPINS[@]}"; do run rm -f "$DESTDIR$UNITDIR/$d.service.d/onyx.conf"; done
   run rm -f "$DESTDIR$UNITDIR/onyx-pool.service" "$DESTDIR$UNITDIR/onyx-firstboot.service"
   run rm -rf "$DESTDIR$LIB"
   run rm -f "$DESTDIR$BINCLI/onyx"
@@ -138,6 +145,10 @@ if [ -z "$DESTDIR" ] || [ "$DRY_RUN" = 1 ]; then
     run useradd --system --gid onyx --no-create-home --home-dir /nonexistent \
       --shell /usr/sbin/nologin "$u" 2>/dev/null || true
   done
+  # The dedicated sftp sshd only accepts this group (AllowGroups onyx-sftp in
+  # the rendered config), so an enabled SFTP share with no member denies
+  # everyone rather than falling back to the host's SSH rules.
+  run groupadd --system onyx-sftp 2>/dev/null || true
 fi
 
 # --- 3. runtime + state dirs -------------------------------------------------
@@ -157,8 +168,10 @@ if [ -z "$DESTDIR" ]; then
          run install -d -m 0750 -o onyx-appd -g onyx /var/lib/onyx/appd
          run install -d -m 0750 -o onyx-ai -g onyx /var/lib/onyx/ai
          run install -d -m 0750 -o onyx-objectstore -g onyx /var/lib/onyx/objectstore
-         run install -d -m 0750 -o root -g onyx /etc/onyx
-         run install -d -m 0755 -o root -g onyx /etc/onyx/conf.d; }
+         run install -d -m 0751 -o root -g onyx /etc/onyx
+         run install -d -m 0755 -o root -g onyx /etc/onyx/conf.d
+         run install -d -m 0755 -o root -g root /etc/onyx/conf.d/sftp
+         run install -d -m 0755 -o root -g root /etc/onyx/conf.d/sftp/authorized_keys; }
 fi
 
 # --- 4. files ----------------------------------------------------------------
@@ -177,6 +190,10 @@ done
 run install -m 0644 "$ROOT/deploy/tmpfiles.d/onyx.conf" "$DESTDIR$TMPFILES/onyx.conf"
 for u in "${UNITS[@]}"; do
   run install -m 0644 "$ROOT/deploy/systemd/$u.service" "$DESTDIR$UNITDIR/$u.service"
+done
+for d in "${UNIT_DROPINS[@]}"; do
+  run install -d -m 0755 "$DESTDIR$UNITDIR/$d.service.d"
+  run install -m 0644 "$ROOT/deploy/systemd/$d.service.d/onyx.conf" "$DESTDIR$UNITDIR/$d.service.d/onyx.conf"
 done
 if [ "$ENABLE_POOL" = 1 ] || [ "$ENABLE_FIRSTBOOT" = 1 ]; then
   run install -m 0644 "$ROOT/deploy/systemd/onyx-pool.service" "$DESTDIR$UNITDIR/onyx-pool.service"
@@ -198,6 +215,11 @@ if [ -z "$DESTDIR" ] && [ "$DRY_RUN" = 0 ]; then
   run systemctl daemon-reload
   run systemctl enable "${UNITS[@]}"
   run systemctl start "${UNITS[@]}"
+  # vsftpd/rsyncd are distribution units with an Onyx drop-in; they are enabled
+  # but not started: their unit condition only passes once a share has been
+  # rendered into /etc/onyx/conf.d, and onyx-privd starts them with the first
+  # share that enables the protocol.
+  for d in "${UNIT_DROPINS[@]}"; do run systemctl enable "$d" 2>/dev/null || true; done
   if [ "$ENABLE_POOL" = 1 ]; then
     run systemctl enable onyx-pool.service
     run systemctl start onyx-pool.service || true   # no pool yet is fine

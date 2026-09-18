@@ -22,7 +22,33 @@ type server struct {
 	privdHealth    onyxv1.HealthClient
 	snapdHealth    onyxv1.HealthClient
 	backupdHealth  onyxv1.HealthClient
+	vmmHealth      onyxv1.HealthClient
+	appdHealth     onyxv1.HealthClient
+	aiHealth       onyxv1.HealthClient
+	objstoreHealth onyxv1.HealthClient
 	config         *configApplier
+}
+
+// serviceHealth pairs a health client with the service name it reports as, in
+// the order SystemStatus lists them (docs/design/04#1-service-inventory).
+func (s *server) serviceHealth() []struct {
+	name   string
+	client onyxv1.HealthClient
+} {
+	return []struct {
+		name   string
+		client onyxv1.HealthClient
+	}{
+		{"onyx-storaged", s.storagedHealth},
+		{"onyx-shared", s.sharedHealth},
+		{"onyx-privd", s.privdHealth},
+		{"onyx-snapd", s.snapdHealth},
+		{"onyx-backupd", s.backupdHealth},
+		{"onyx-vmm", s.vmmHealth},
+		{"onyx-appd", s.appdHealth},
+		{"onyx-ai", s.aiHealth},
+		{"onyx-objectstore", s.objstoreHealth},
+	}
 }
 
 var _ onyxv1.HealthServer = (*server)(nil)
@@ -37,25 +63,24 @@ func (s *server) Check(_ context.Context, _ *onyxv1.HealthCheckRequest) (*onyxv1
 }
 
 // SystemStatus aggregates core itself plus every registered service, queried
-// via each service's Health RPC (docs/design/04#8-observability).
+// via each service's Health RPC (docs/design/04#8-observability). Every service
+// in the compose/systemd set is listed, so `onyx status` reports the whole
+// platform rather than just the storage path.
 func (s *server) SystemStatus(ctx context.Context, _ *onyxv1.SystemStatusRequest) (*onyxv1.SystemStatusResponse, error) {
 	services := []*onyxv1.ServiceStatus{
 		{Name: "onyx-core", Version: version, Status: onyxv1.HealthCheckResponse_SERVING},
 	}
-	if st := healthOf(ctx, s.storagedHealth, "onyx-storaged", 2*time.Second); st != nil {
-		services = append(services, st)
-	}
-	if st := healthOf(ctx, s.sharedHealth, "onyx-shared", 2*time.Second); st != nil {
-		services = append(services, st)
-	}
-	if st := healthOf(ctx, s.privdHealth, "onyx-privd", 2*time.Second); st != nil {
-		services = append(services, st)
-	}
-	if st := healthOf(ctx, s.snapdHealth, "onyx-snapd", 2*time.Second); st != nil {
-		services = append(services, st)
-	}
-	if st := healthOf(ctx, s.backupdHealth, "onyx-backupd", 2*time.Second); st != nil {
-		services = append(services, st)
+	// One shared deadline for the whole fan-out rather than a per-service
+	// timeout: status must stay fast even when several daemons are down.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for _, h := range s.serviceHealth() {
+		if h.client == nil {
+			continue // not configured in this deployment
+		}
+		if st := healthOf(ctx, h.client, h.name, 2*time.Second); st != nil {
+			services = append(services, st)
+		}
 	}
 	return &onyxv1.SystemStatusResponse{CoreVersion: version, Services: services}, nil
 }

@@ -24,8 +24,12 @@ message App {
   string description = 4;
   // Compose manifest (signed, from the store).
   string manifest = 5;
-  string status = 6; // not_installed | installed | updating
+  string status = 6; // not_installed | installed | updating | error
   string installed_at = 7;
+  // Per-installation settings chosen at install time (ports, paths, …). The
+  // manifest templates these in as ${key}; unset values fall back to the
+  // manifest's own defaults.
+  map<string, string> config = 8;
 }
 
 message ListAppsRequest {}
@@ -36,13 +40,20 @@ message ListAppsResponse {
 
 message InstallAppRequest {
   string app_id = 1;
+  // Optional pinned version; empty = the catalog's current version.
   string version = 2;
+  // Per-installation settings injected into the manifest as ${key}.
+  map<string, string> config = 3;
 }
 
 message UninstallAppRequest {
   string app_id = 1;
-  // Also remove the app's data volumes.
+  // Also remove the app's data volumes (irreversible).
   bool purge_data = 2;
+  // Remove the app even when its containers are still running: they are stopped
+  // first. Off by default — an uninstall must not surprise an operator by
+  // killing a service that is in use.
+  bool force = 3;
 }
 
 message UninstallAppResponse {
@@ -55,6 +66,8 @@ message Container {
   string image = 3;
   string status = 4; // created | running | paused | exited | error
   string app_id = 5;
+  // Compose service this container belongs to; the unit onyx-appd acts on.
+  string service = 6;
 }
 
 message ListContainersRequest {

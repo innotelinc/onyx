@@ -50,6 +50,20 @@ Commands:
   storage rm         remove a target (<name>)
   storage check      probe a target (<name>)
   storage clone      copy a storage folder to a target (<folder> <remote> [dest])
+  app store     list the app catalog (--installed for the installed apps)
+  app install   install an app (<app-id>) [--version V] [--set key=value ...]
+  app rm        uninstall an app (<app-id>) [--purge-data] [--force]
+  app containers  list containers [--app <app-id>]
+  app start|stop|restart  act on a container (<container-id>)
+  vm list       list virtual machines
+  vm create     define a machine (<name>) [--vcpus N] [--memory-mb N] [--disk-mb N] [--iso PATH]
+  vm start      boot a machine (<id>)
+  vm stop       shut a machine down (<id>) [--no-graceful]
+  vm delete     remove a machine (<id>) [--delete-disk]
+  bucket list   list object-storage buckets
+  bucket create create one (<name>) [--tier local|cloud|tiered] [--cloud-target REMOTE[:PATH]] [--evict-after-days N]
+  bucket sync   mirror a cloud/tiered bucket out (<name>) [--evict]
+  bucket delete remove one (<name>) [--force]
   help        show this help
 
 Flags:
@@ -108,6 +122,12 @@ func run(args []string) int {
 		err = cmdShare(ctx, c, jsonMode, fs.Args()[1:])
 	case "storage":
 		err = cmdStorage(ctx, c, jsonMode, fs.Args()[1:])
+	case "app", "apps":
+		err = cmdApp(ctx, c, jsonMode, fs.Args()[1:])
+	case "vm", "vms":
+		err = cmdVM(ctx, c, jsonMode, fs.Args()[1:])
+	case "bucket", "buckets":
+		err = cmdBucket(ctx, c, jsonMode, fs.Args()[1:])
 	case "help", "-h", "--help":
 		fs.Usage()
 		return 0
@@ -687,6 +707,432 @@ func cmdStorage(ctx context.Context, c *client.Client, jsonOut bool, args []stri
 	default:
 		return fmt.Errorf("unknown storage command %q (usage: onyx storage remotes|providers|add|rm|check|clone)", args[0])
 	}
+}
+
+// cmdApp covers the app store and container lifecycle (onyx-appd,
+// docs/design/09). `app store` is the catalog; `app list` is the installed
+// subset of it, which is how an operator asks "what is running here".
+func cmdApp(ctx context.Context, c *client.Client, jsonOut bool, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: onyx app store|list|install|rm|containers|start|stop|restart [args] [--json]")
+	}
+	switch args[0] {
+	case "store", "catalog":
+		apps, err := c.ListApps(ctx, "")
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(apps)
+		}
+		return printApps(apps.Apps)
+	case "list", "installed":
+		apps, err := c.ListApps(ctx, "installed")
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(apps)
+		}
+		if len(apps.Apps) == 0 {
+			fmt.Println("no apps installed")
+			return nil
+		}
+		return printApps(apps.Apps)
+	case "install", "add":
+		appID, version, config, err := parseInstallArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		app, err := c.InstallApp(ctx, &client.InstallAppRequest{AppID: appID, Version: version, Config: config})
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(app)
+		}
+		fmt.Printf("installed %s %s (%s)\n", app.Name, app.Version, app.Status)
+		return nil
+	case "rm", "remove", "uninstall":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: onyx app rm <app-id> [--purge-data] [--force]")
+		}
+		purge, force := false, false
+		for _, a := range args[2:] {
+			switch a {
+			case "--purge-data", "--purge_data":
+				purge = true
+			case "--force":
+				force = true
+			default:
+				return fmt.Errorf("unknown app rm flag %q", a)
+			}
+		}
+		if err := c.UninstallApp(ctx, args[1], purge, force); err != nil {
+			return err
+		}
+		fmt.Printf("uninstalled %s\n", args[1])
+		return nil
+	case "containers", "ps":
+		appID := ""
+		if len(args) > 1 {
+			if args[1] != "--app" || len(args) < 3 {
+				return fmt.Errorf("usage: onyx app containers [--app <app-id>] [--json]")
+			}
+			appID = args[2]
+		}
+		containers, err := c.ListContainers(ctx, appID)
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(containers)
+		}
+		if len(containers.Containers) == 0 {
+			fmt.Println("no containers")
+			return nil
+		}
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "ID\tSERVICE\tSTATUS\tIMAGE")
+		for _, ct := range containers.Containers {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", ct.ID, ct.Service, ct.Status, ct.Image)
+		}
+		return w.Flush()
+	case "start", "stop", "restart":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: onyx app %s <container-id> [--json]", args[0])
+		}
+		container, err := c.ContainerAction(ctx, args[1], args[0])
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(container)
+		}
+		fmt.Printf("%s %s is %s\n", container.Service, container.ID, container.Status)
+		return nil
+	default:
+		return fmt.Errorf("unknown app command %q (usage: onyx app store|list|install|rm|containers|start|stop|restart)", args[0])
+	}
+}
+
+func printApps(apps []client.App) error {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tNAME\tVERSION\tSTATUS\tDESCRIPTION")
+	for _, a := range apps {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", a.ID, a.Name, a.Version, a.Status, a.Description)
+	}
+	return w.Flush()
+}
+
+// parseInstallArgs reads the app id plus --version and --set key=value options
+// for `onyx app install`.
+func parseInstallArgs(args []string) (string, string, map[string]string, error) {
+	if len(args) == 0 {
+		return "", "", nil, fmt.Errorf("usage: onyx app install <app-id> [--version V] [--set key=value ...] [--json]")
+	}
+	appID := args[0]
+	version := ""
+	config := map[string]string{}
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "--version":
+			if i+1 >= len(args) {
+				return "", "", nil, fmt.Errorf("--version needs a value")
+			}
+			i++
+			version = args[i]
+		case "--set":
+			if i+1 >= len(args) {
+				return "", "", nil, fmt.Errorf("--set needs key=value")
+			}
+			i++
+			key, value, found := strings.Cut(args[i], "=")
+			if !found || key == "" {
+				return "", "", nil, fmt.Errorf("--set takes key=value (got %q)", args[i])
+			}
+			config[key] = value
+		default:
+			return "", "", nil, fmt.Errorf("unknown app install flag %q", args[i])
+		}
+	}
+	return appID, version, config, nil
+}
+
+// cmdVM covers the virtualization surface (onyx-vmm, docs/design/11 §6.3).
+func cmdVM(ctx context.Context, c *client.Client, jsonOut bool, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: onyx vm list|create|start|stop|delete [args] [--json]")
+	}
+	switch args[0] {
+	case "list", "ls":
+		vms, err := c.ListVMs(ctx)
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(vms)
+		}
+		if len(vms.VMs) == 0 {
+			fmt.Println("no virtual machines")
+			return nil
+		}
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "ID\tNAME\tSTATUS\tVCPUS\tMEMORY\tDISK")
+		for _, v := range vms.VMs {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d MiB\t%s\n", v.ID, v.Name, v.Status, v.VCPUs, v.MemoryMB, v.Disk)
+		}
+		return w.Flush()
+	case "create":
+		req, err := parseVMCreate(args[1:])
+		if err != nil {
+			return err
+		}
+		vm, err := c.CreateVM(ctx, req)
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(vm)
+		}
+		fmt.Printf("created %s (%s), %s — start it with `onyx vm start %s`\n", vm.Name, vm.ID, vm.Status, vm.ID)
+		return nil
+	case "start":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: onyx vm start <id> [--json]")
+		}
+		vm, err := c.StartVM(ctx, args[1])
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(vm)
+		}
+		fmt.Printf("%s is %s\n", vm.Name, vm.Status)
+		return nil
+	case "stop":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: onyx vm stop <id> [--no-graceful] [--json]")
+		}
+		graceful := true
+		for _, a := range args[2:] {
+			switch a {
+			case "--no-graceful", "--hard":
+				graceful = false
+			default:
+				return fmt.Errorf("unknown vm stop flag %q", a)
+			}
+		}
+		vm, err := c.StopVM(ctx, args[1], graceful)
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(vm)
+		}
+		fmt.Printf("%s is %s\n", vm.Name, vm.Status)
+		return nil
+	case "delete", "rm":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: onyx vm delete <id> [--delete-disk]")
+		}
+		deleteDisk := false
+		for _, a := range args[2:] {
+			switch a {
+			case "--delete-disk", "--delete_disk":
+				deleteDisk = true
+			default:
+				return fmt.Errorf("unknown vm delete flag %q", a)
+			}
+		}
+		if err := c.DeleteVM(ctx, args[1], deleteDisk); err != nil {
+			return err
+		}
+		if deleteDisk {
+			fmt.Printf("deleted %s and its disk image\n", args[1])
+			return nil
+		}
+		fmt.Printf("deleted %s (disk image kept)\n", args[1])
+		return nil
+	default:
+		return fmt.Errorf("unknown vm command %q (usage: onyx vm list|create|start|stop|delete)", args[0])
+	}
+}
+
+func parseVMCreate(args []string) (*client.CreateVMRequest, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("usage: onyx vm create <name> [--vcpus N] [--memory-mb N] [--disk-mb N] [--os NAME] [--iso PATH]")
+	}
+	req := &client.CreateVMRequest{Name: args[0], VCPUs: 1, MemoryMB: 2048}
+	for i := 1; i < len(args); i++ {
+		if i+1 >= len(args) {
+			return nil, fmt.Errorf("%s needs a value", args[i])
+		}
+		value := args[i+1]
+		switch args[i] {
+		case "--vcpus":
+			n, err := strconv.ParseInt(value, 10, 32)
+			if err != nil {
+				return nil, fmt.Errorf("--vcpus must be a number")
+			}
+			req.VCPUs = int32(n)
+		case "--memory-mb", "--memory":
+			n, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("--memory-mb must be a number")
+			}
+			req.MemoryMB = n
+		case "--disk-mb", "--disk":
+			n, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("--disk-mb must be a number")
+			}
+			req.DiskMB = n
+		case "--os":
+			req.OS = value
+		case "--iso":
+			req.ISO = value
+		default:
+			return nil, fmt.Errorf("unknown vm create flag %q", args[i])
+		}
+		i++
+	}
+	return req, nil
+}
+
+// cmdBucket covers object storage and hybrid-cloud tiering (onyx-objectstore,
+// docs/design/11 §6.6).
+func cmdBucket(ctx context.Context, c *client.Client, jsonOut bool, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: onyx bucket list|create|sync|delete [args] [--json]")
+	}
+	switch args[0] {
+	case "list", "ls":
+		buckets, err := c.ListBuckets(ctx)
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(buckets)
+		}
+		if len(buckets.Buckets) == 0 {
+			fmt.Println("no buckets")
+			return nil
+		}
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "NAME\tTIER\tTARGET\tLOCAL\tCLOUD\tLAST SYNC")
+		for _, b := range buckets.Buckets {
+			target := b.CloudTarget
+			if target == "" {
+				target = "-"
+			}
+			last := b.LastSyncAt
+			if last == "" {
+				last = "never"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\t%s\n", b.Name, strings.ToLower(b.Tier), target, b.LocalObjects, b.CloudObjects, last)
+			if b.SyncError != "" {
+				fmt.Fprintf(w, "\t\tsync error: %s\n", b.SyncError)
+			}
+		}
+		return w.Flush()
+	case "create":
+		req, err := parseBucketCreate(args[1:])
+		if err != nil {
+			return err
+		}
+		bucket, err := c.CreateBucket(ctx, req)
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(bucket)
+		}
+		if bucket.Tier == "LOCAL" || bucket.Tier == "local" {
+			fmt.Printf("created bucket %s (local)\n", bucket.Name)
+			return nil
+		}
+		fmt.Printf("created bucket %s (%s → %s); run `onyx bucket sync %s` to mirror it out\n",
+			bucket.Name, strings.ToLower(bucket.Tier), bucket.CloudTarget, bucket.Name)
+		return nil
+	case "sync":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: onyx bucket sync <name> [--evict] [--json]")
+		}
+		evict := false
+		for _, a := range args[2:] {
+			switch a {
+			case "--evict":
+				evict = true
+			default:
+				return fmt.Errorf("unknown bucket sync flag %q", a)
+			}
+		}
+		result, err := c.SyncBucket(ctx, args[1], evict)
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(result)
+		}
+		fmt.Printf("synced %s: %d uploaded, %d evicted\n", result.Bucket.Name, result.Uploaded, result.Evicted)
+		for _, warning := range result.Warnings {
+			fmt.Printf("warning: %s\n", warning)
+		}
+		return nil
+	case "delete", "rm":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: onyx bucket delete <name> [--force]")
+		}
+		force := false
+		for _, a := range args[2:] {
+			switch a {
+			case "--force":
+				force = true
+			default:
+				return fmt.Errorf("unknown bucket delete flag %q", a)
+			}
+		}
+		if err := c.DeleteBucket(ctx, args[1], force); err != nil {
+			return err
+		}
+		fmt.Printf("deleted bucket %s\n", args[1])
+		return nil
+	default:
+		return fmt.Errorf("unknown bucket command %q (usage: onyx bucket list|create|sync|delete)", args[0])
+	}
+}
+
+func parseBucketCreate(args []string) (*client.CreateBucketRequest, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("usage: onyx bucket create <name> [--tier local|cloud|tiered] [--cloud-target REMOTE[:PATH]] [--evict-after-days N]")
+	}
+	req := &client.CreateBucketRequest{Name: args[0], Tier: "local"}
+	for i := 1; i < len(args); i++ {
+		if i+1 >= len(args) {
+			return nil, fmt.Errorf("%s needs a value", args[i])
+		}
+		value := args[i+1]
+		switch args[i] {
+		case "--tier":
+			req.Tier = value
+		case "--cloud-target", "--target":
+			req.CloudTarget = value
+		case "--evict-after-days":
+			n, err := strconv.ParseInt(value, 10, 32)
+			if err != nil {
+				return nil, fmt.Errorf("--evict-after-days must be a number")
+			}
+			req.EvictAfterDays = int32(n)
+		default:
+			return nil, fmt.Errorf("unknown bucket create flag %q", args[i])
+		}
+		i++
+	}
+	if req.Tier != "local" && req.CloudTarget == "" {
+		return nil, fmt.Errorf("a %s bucket needs --cloud-target (a configured remote, e.g. b2-archive:)", req.Tier)
+	}
+	return req, nil
 }
 
 func printJSON(v any) error {

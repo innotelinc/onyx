@@ -39,13 +39,17 @@ var version = releaseversion.Version
 
 func main() {
 	var (
-		listen      = flag.String("listen", "127.0.0.1:8080", "HTTP listen address")
-		socketDir   = flag.String("socket-dir", "/run/onyx", "directory for onyx unix sockets")
-		coreSock    = flag.String("core-socket", "", "onyx-core socket (default: <socket-dir>/onyx-core.sock)")
-		snapdSock   = flag.String("snapd-socket", "", "onyx-snapd socket (default: <socket-dir>/onyx-snapd.sock)")
-		backupdSock = flag.String("backupd-socket", "", "onyx-backupd socket (default: <socket-dir>/onyx-backupd.sock)")
-		stateDir    = flag.String("state-dir", "/var/lib/onyx/api", "API metadata state directory")
-		filesRoot   = flag.String("files-root", "/mnt/onyx", "root directory exposed by the read-only file explorer")
+		listen       = flag.String("listen", "127.0.0.1:8080", "HTTP listen address")
+		socketDir    = flag.String("socket-dir", "/run/onyx", "directory for onyx unix sockets")
+		coreSock     = flag.String("core-socket", "", "onyx-core socket (default: <socket-dir>/onyx-core.sock)")
+		snapdSock    = flag.String("snapd-socket", "", "onyx-snapd socket (default: <socket-dir>/onyx-snapd.sock)")
+		backupdSock  = flag.String("backupd-socket", "", "onyx-backupd socket (default: <socket-dir>/onyx-backupd.sock)")
+		vmmSock      = flag.String("vmm-socket", "", "onyx-vmm socket (default: <socket-dir>/onyx-vmm.sock)")
+		appdSock     = flag.String("appd-socket", "", "onyx-appd socket (default: <socket-dir>/onyx-appd.sock)")
+		aiSock       = flag.String("ai-socket", "", "onyx-ai socket (default: <socket-dir>/onyx-ai.sock)")
+		objstoreSock = flag.String("objectstore-socket", "", "onyx-objectstore socket (default: <socket-dir>/onyx-objectstore.sock)")
+		stateDir     = flag.String("state-dir", "/var/lib/onyx/api", "API metadata state directory")
+		filesRoot    = flag.String("files-root", "/mnt/onyx", "root directory exposed by the read-only file explorer")
 	)
 	flag.Parse()
 
@@ -57,6 +61,18 @@ func main() {
 	}
 	if *backupdSock == "" {
 		*backupdSock = absSocketPath(*socketDir, "onyx-backupd.sock")
+	}
+	if *vmmSock == "" {
+		*vmmSock = absSocketPath(*socketDir, "onyx-vmm.sock")
+	}
+	if *appdSock == "" {
+		*appdSock = absSocketPath(*socketDir, "onyx-appd.sock")
+	}
+	if *aiSock == "" {
+		*aiSock = absSocketPath(*socketDir, "onyx-ai.sock")
+	}
+	if *objstoreSock == "" {
+		*objstoreSock = absSocketPath(*socketDir, "onyx-objectstore.sock")
 	}
 	if err := os.MkdirAll(*socketDir, 0o750); err != nil {
 		fatal("create socket dir", err)
@@ -97,6 +113,47 @@ func main() {
 	}
 	defer backupdConn.Close()
 
+	// Platform services (v0.4) are reached directly by the gateway, the same
+	// way snapd/backupd already are: their contracts are self-contained
+	// management surfaces, while core owns the storage path and the audit
+	// trail. Each dial is lazy, so an undeployed service surfaces as a 503 on
+	// its own routes rather than a startup failure.
+	vmmConn, err := grpc.NewClient(
+		"unix://"+*vmmSock,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		fatal("dial vmm", err)
+	}
+	defer vmmConn.Close()
+
+	appdConn, err := grpc.NewClient(
+		"unix://"+*appdSock,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		fatal("dial appd", err)
+	}
+	defer appdConn.Close()
+
+	aiConn, err := grpc.NewClient(
+		"unix://"+*aiSock,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		fatal("dial ai", err)
+	}
+	defer aiConn.Close()
+
+	objstoreConn, err := grpc.NewClient(
+		"unix://"+*objstoreSock,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		fatal("dial objectstore", err)
+	}
+	defer objstoreConn.Close()
+
 	core := onyxv1.NewCoreClient(coreConn)
 	coreShares := onyxv1.NewCoreSharesClient(coreConn)
 
@@ -104,6 +161,10 @@ func main() {
 		core: core, coreShares: coreShares,
 		snapd:   onyxv1.NewSnapdClient(snapdConn),
 		backupd: onyxv1.NewBackupdClient(backupdConn),
+		vmm:     onyxv1.NewVmmClient(vmmConn),
+		appd:    onyxv1.NewAppdClient(appdConn),
+		ai:      onyxv1.NewAiClient(aiConn),
+		objects: onyxv1.NewObjectStoreClient(objstoreConn),
 		users:   users, scrub: scrub, filesRoot: *filesRoot,
 		deviceTrust: loadDeviceTrustConfig(), version: version,
 	}
@@ -151,12 +212,17 @@ func fatal(what string, err error) {
 	os.Exit(1)
 }
 
-// server is the HTTP handler; it forwards to onyx-core.
+// server is the HTTP handler; it forwards orchestration to onyx-core and
+// management calls to the owning service.
 type server struct {
 	core        onyxv1.CoreClient
 	coreShares  onyxv1.CoreSharesClient
 	snapd       onyxv1.SnapdClient
 	backupd     onyxv1.BackupdClient
+	vmm         onyxv1.VmmClient
+	appd        onyxv1.AppdClient
+	ai          onyxv1.AiClient
+	objects     onyxv1.ObjectStoreClient
 	users       *userStore
 	scrub       *scrubStore
 	filesRoot   string
@@ -190,6 +256,9 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("POST /api/v1/files/rename", s.handleFileRename)
 	mux.HandleFunc("POST /api/v1/files/delete", s.handleFileDelete)
 	mux.HandleFunc("GET /api/v1/files/trash", s.handleTrash)
+	// Mounted-pool reality behind the Files page's storage card: capacity per
+	// pool plus the reason nothing shows when the API cannot see a mount.
+	mux.HandleFunc("GET /api/v1/storage/overview", s.handleStorageOverview)
 	mux.HandleFunc("DELETE /api/v1/files/trash", s.handleEmptyTrash)
 	mux.HandleFunc("GET /api/v1/pools", s.handlePools)
 	mux.HandleFunc("POST /api/v1/pools", s.handleCreatePool)
@@ -219,6 +288,30 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("GET /api/v1/backup-jobs/{id}/history", s.handleBackupHistory)
 	mux.HandleFunc("POST /api/v1/backups/{id}/restore", s.handleRestoreBackup)
 	mux.HandleFunc("GET /api/v1/backup-report", s.handleBackupReport)
+	// v0.4 Jade platform surfaces (docs/design/11 §6.3-§6.6). Each forwards to
+	// the service that owns the resource; the gateway only validates input and
+	// maps the gRPC status onto the error envelope.
+	mux.HandleFunc("GET /api/v1/apps", s.handleApps)
+	// The store catalog and the installed inventory are the same onyx-appd
+	// list seen through different filters (docs/design/06#5).
+	mux.HandleFunc("GET /api/v1/app-store", s.handleApps)
+	mux.HandleFunc("POST /api/v1/apps", s.handleInstallApp)
+	mux.HandleFunc("DELETE /api/v1/apps/{id}", s.handleUninstallApp)
+	mux.HandleFunc("GET /api/v1/containers", s.handleContainers)
+	mux.HandleFunc("POST /api/v1/containers/{id}/start", s.handleContainerStart)
+	mux.HandleFunc("POST /api/v1/containers/{id}/stop", s.handleContainerStop)
+	mux.HandleFunc("POST /api/v1/containers/{id}/restart", s.handleContainerRestart)
+	mux.HandleFunc("GET /api/v1/vms", s.handleVMs)
+	mux.HandleFunc("POST /api/v1/vms", s.handleCreateVM)
+	mux.HandleFunc("POST /api/v1/vms/{id}/start", s.handleVMStart)
+	mux.HandleFunc("POST /api/v1/vms/{id}/stop", s.handleVMStop)
+	mux.HandleFunc("DELETE /api/v1/vms/{id}", s.handleDeleteVM)
+	mux.HandleFunc("GET /api/v1/buckets", s.handleBuckets)
+	mux.HandleFunc("POST /api/v1/buckets", s.handleCreateBucket)
+	mux.HandleFunc("DELETE /api/v1/buckets/{name}", s.handleDeleteBucket)
+	mux.HandleFunc("POST /api/v1/buckets/{name}/sync", s.handleSyncBucket)
+	mux.HandleFunc("GET /api/v1/ai/advisor", s.handleAdvisor)
+	mux.HandleFunc("GET /api/v1/ai/backup-advice", s.handleBackupAdvice)
 	// v0.2 Flint access metadata. Authentication remains delegated to Authentik;
 	// this store contains ONYX roles and share grants only, never passwords.
 	mux.HandleFunc("GET /api/v1/users", s.handleUsers)
