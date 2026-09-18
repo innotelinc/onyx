@@ -70,6 +70,11 @@ const (
 	PrivOp_FORMAT_FILESYSTEM PrivOp = 9
 	// Backward-compatible alias for the original Btrfs-only operation.
 	PrivOp_CREATE_BTRFS_POOL PrivOp = 10
+	// `rmdir <mountpoint>` — remove the empty mountpoint directory left behind
+	// after a pool/device unmount, so the file explorer never lists a stale
+	// directory. The path must resolve under /mnt/onyx/. rmdir semantics: a
+	// directory that still holds anything is never removed.
+	PrivOp_REMOVE_MOUNTPOINT PrivOp = 11
 )
 
 // Enum value maps for PrivOp.
@@ -86,6 +91,7 @@ var (
 		8:  "RELOAD_DAEMONS",
 		9:  "FORMAT_FILESYSTEM",
 		10: "CREATE_BTRFS_POOL",
+		11: "REMOVE_MOUNTPOINT",
 	}
 	PrivOp_value = map[string]int32{
 		"PRIV_OP_UNSPECIFIED":        0,
@@ -99,6 +105,7 @@ var (
 		"RELOAD_DAEMONS":             8,
 		"FORMAT_FILESYSTEM":          9,
 		"CREATE_BTRFS_POOL":          10,
+		"REMOVE_MOUNTPOINT":          11,
 	}
 )
 
@@ -254,7 +261,7 @@ const file_onyx_v1_privd_proto_rawDesc = "" +
 	"\fPrivResponse\x12\x1b\n" +
 	"\texit_code\x18\x01 \x01(\x05R\bexitCode\x12\x16\n" +
 	"\x06stdout\x18\x02 \x01(\fR\x06stdout\x12\x16\n" +
-	"\x06stderr\x18\x03 \x01(\fR\x06stderr*\x82\x02\n" +
+	"\x06stderr\x18\x03 \x01(\fR\x06stderr*\x99\x02\n" +
 	"\x06PrivOp\x12\x17\n" +
 	"\x13PRIV_OP_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19BTRFS_FILESYSTEM_SHOW_RAW\x10\x01\x12\x1e\n" +
@@ -267,7 +274,8 @@ const file_onyx_v1_privd_proto_rawDesc = "" +
 	"\x0eRELOAD_DAEMONS\x10\b\x12\x15\n" +
 	"\x11FORMAT_FILESYSTEM\x10\t\x12\x15\n" +
 	"\x11CREATE_BTRFS_POOL\x10\n" +
-	"2;\n" +
+	"\x12\x15\n" +
+	"\x11REMOVE_MOUNTPOINT\x10\v2;\n" +
 	"\x05Privd\x122\n" +
 	"\x03Run\x12\x14.onyx.v1.PrivRequest\x1a\x15.onyx.v1.PrivResponseB8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 

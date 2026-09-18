@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -27,6 +28,45 @@ type fileListing struct {
 	Path       string      `json:"path"`
 	Entries    []fileEntry `json:"entries"`
 	NextCursor string      `json:"next_cursor,omitempty"`
+}
+
+// isMountPoint reports whether dir lives on a different device than its parent
+// — the standard Linux mount-point test. Onyx mounts every pool and hotplug
+// device as a child of the storage root (docs/design/05#2), so a child that
+// shares the root's device is a plain directory.
+func isMountPoint(dir, parent string) bool {
+	di, err := os.Stat(dir)
+	if err != nil {
+		return false
+	}
+	pi, err := os.Stat(parent)
+	if err != nil {
+		return false
+	}
+	dstat, ok := di.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false
+	}
+	pstat, ok := pi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false
+	}
+	return dstat.Dev != pstat.Dev
+}
+
+// staleMountDir reports whether a direct child of the storage root is a
+// leftover mountpoint: an empty directory that is not currently mounted.
+// Unmounting (or re-creating with a different name) leaves the old mountpoint
+// behind, and Files must list only what is mounted right now.
+func staleMountDir(path string, entry os.DirEntry) bool {
+	if !entry.IsDir() {
+		return false
+	}
+	if isMountPoint(path, filepath.Dir(path)) {
+		return false
+	}
+	entries, err := os.ReadDir(path)
+	return err == nil && len(entries) == 0
 }
 
 func resolveFilePath(root, requested string) (string, string, error) {
@@ -101,6 +141,19 @@ func (s *server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeEnvelope(w, 500, apiError{Code: "internal", Message: "read directory: " + err.Error()})
 		return
+	}
+	// The storage root holds one directory per mounted pool/device; a detached
+	// or re-created pool leaves its empty mountpoint behind. Drop those so Files
+	// lists only the current mounts (docs/design/05#2).
+	if rel == "" {
+		kept := entries[:0]
+		for _, entry := range entries {
+			if staleMountDir(filepath.Join(path, entry.Name()), entry) {
+				continue
+			}
+			kept = append(kept, entry)
+		}
+		entries = kept
 	}
 	needle := strings.ToLower(r.URL.Query().Get("q"))
 	filtered := entries[:0]

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -64,6 +65,49 @@ func TestHandleFilesListsAndPages(t *testing.T) {
 		if got.Path != tc.wantPath || len(got.Entries) != tc.wantEntries || got.NextCursor != tc.wantCursor {
 			t.Fatalf("listing = %+v", got)
 		}
+	}
+}
+
+func TestHandleFilesHidesStaleMountpoints(t *testing.T) {
+	root := t.TempDir()
+	// A detached or re-created pool leaves its empty mountpoint behind.
+	if err := os.Mkdir(filepath.Join(root, "stale-pool"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A current pool has content and stays listed.
+	if err := os.MkdirAll(filepath.Join(root, "live-pool", "@data"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// The rule is root-only: an empty folder inside a pool is real user data.
+	if err := os.Mkdir(filepath.Join(root, "live-pool", "@data", "empty"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	s := &server{filesRoot: root}
+
+	list := func(query string) []string {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/files"+query, nil)
+		w := httptest.NewRecorder()
+		s.handleFiles(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+		}
+		var got fileListing
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		names := make([]string, 0, len(got.Entries))
+		for _, e := range got.Entries {
+			names = append(names, e.Name)
+		}
+		return names
+	}
+
+	if got := list(""); strings.Join(got, ",") != "live-pool" {
+		t.Fatalf("root listing = %v, want only live-pool", got)
+	}
+	if got := list("?path=live-pool/@data"); strings.Join(got, ",") != "empty" {
+		t.Fatalf("nested listing = %v, want empty", got)
 	}
 }
 

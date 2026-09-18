@@ -69,6 +69,12 @@ enum PrivOp {
   FORMAT_FILESYSTEM = 9;
   // Backward-compatible alias for the original Btrfs-only operation.
   CREATE_BTRFS_POOL = 10;
+
+  // `rmdir <mountpoint>` — remove the empty mountpoint directory left behind
+  // after a pool/device unmount, so the file explorer never lists a stale
+  // directory. The path must resolve under /mnt/onyx/. rmdir semantics: a
+  // directory that still holds anything is never removed.
+  REMOVE_MOUNTPOINT = 11;
 }
 
 message PrivRequest {

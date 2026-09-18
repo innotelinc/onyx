@@ -414,6 +414,25 @@ impl DeviceManager {
             let stderr = String::from_utf8_lossy(&resp.stderr);
             return Err(format!("umount {mountpoint} failed: {}", stderr.trim()));
         }
+        // The mountpoint directory outlives the mount. Remove it (rmdir refuses
+        // anything non-empty) so the file explorer never lists a stale, no
+        // longer mounted pool directory. Best effort: a directory something
+        // else refilled simply stays.
+        if let Err(e) = self.rmdir_mountpoint(mountpoint).await {
+            tracing::debug!(mountpoint, error = %e, "mountpoint cleanup skipped");
+        }
+        Ok(())
+    }
+
+    /// Remove an empty mountpoint directory through privd (rmdir semantics).
+    async fn rmdir_mountpoint(&self, mountpoint: &str) -> Result<(), String> {
+        let resp = self
+            .run_op(PrivOp::RemoveMountpoint, vec![mountpoint.to_string()])
+            .await?;
+        if resp.exit_code != 0 {
+            let stderr = String::from_utf8_lossy(&resp.stderr);
+            return Err(format!("rmdir {mountpoint} failed: {}", stderr.trim()));
+        }
         Ok(())
     }
 
