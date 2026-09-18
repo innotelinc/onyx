@@ -25,6 +25,7 @@ const (
 	ObjectStore_PutObject_FullMethodName    = "/onyx.v1.ObjectStore/PutObject"
 	ObjectStore_GetObject_FullMethodName    = "/onyx.v1.ObjectStore/GetObject"
 	ObjectStore_DeleteObject_FullMethodName = "/onyx.v1.ObjectStore/DeleteObject"
+	ObjectStore_SyncBucket_FullMethodName   = "/onyx.v1.ObjectStore/SyncBucket"
 )
 
 // ObjectStoreClient is the client API for ObjectStore service.
@@ -42,6 +43,9 @@ type ObjectStoreClient interface {
 	PutObject(ctx context.Context, in *PutObjectRequest, opts ...grpc.CallOption) (*ObjectMeta, error)
 	GetObject(ctx context.Context, in *GetObjectRequest, opts ...grpc.CallOption) (*GetObjectResponse, error)
 	DeleteObject(ctx context.Context, in *DeleteObjectRequest, opts ...grpc.CallOption) (*DeleteObjectResponse, error)
+	// SyncBucket mirrors a CLOUD/TIERED bucket's local objects into the cloud
+	// target and, when asked, evicts verified copies from the local hot tier.
+	SyncBucket(ctx context.Context, in *SyncBucketRequest, opts ...grpc.CallOption) (*SyncBucketResponse, error)
 }
 
 type objectStoreClient struct {
@@ -112,6 +116,16 @@ func (c *objectStoreClient) DeleteObject(ctx context.Context, in *DeleteObjectRe
 	return out, nil
 }
 
+func (c *objectStoreClient) SyncBucket(ctx context.Context, in *SyncBucketRequest, opts ...grpc.CallOption) (*SyncBucketResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SyncBucketResponse)
+	err := c.cc.Invoke(ctx, ObjectStore_SyncBucket_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ObjectStoreServer is the server API for ObjectStore service.
 // All implementations must embed UnimplementedObjectStoreServer
 // for forward compatibility.
@@ -127,6 +141,9 @@ type ObjectStoreServer interface {
 	PutObject(context.Context, *PutObjectRequest) (*ObjectMeta, error)
 	GetObject(context.Context, *GetObjectRequest) (*GetObjectResponse, error)
 	DeleteObject(context.Context, *DeleteObjectRequest) (*DeleteObjectResponse, error)
+	// SyncBucket mirrors a CLOUD/TIERED bucket's local objects into the cloud
+	// target and, when asked, evicts verified copies from the local hot tier.
+	SyncBucket(context.Context, *SyncBucketRequest) (*SyncBucketResponse, error)
 	mustEmbedUnimplementedObjectStoreServer()
 }
 
@@ -154,6 +171,9 @@ func (UnimplementedObjectStoreServer) GetObject(context.Context, *GetObjectReque
 }
 func (UnimplementedObjectStoreServer) DeleteObject(context.Context, *DeleteObjectRequest) (*DeleteObjectResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteObject not implemented")
+}
+func (UnimplementedObjectStoreServer) SyncBucket(context.Context, *SyncBucketRequest) (*SyncBucketResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SyncBucket not implemented")
 }
 func (UnimplementedObjectStoreServer) mustEmbedUnimplementedObjectStoreServer() {}
 func (UnimplementedObjectStoreServer) testEmbeddedByValue()                     {}
@@ -284,6 +304,24 @@ func _ObjectStore_DeleteObject_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ObjectStore_SyncBucket_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SyncBucketRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ObjectStoreServer).SyncBucket(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ObjectStore_SyncBucket_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ObjectStoreServer).SyncBucket(ctx, req.(*SyncBucketRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ObjectStore_ServiceDesc is the grpc.ServiceDesc for ObjectStore service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -314,6 +352,10 @@ var ObjectStore_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteObject",
 			Handler:    _ObjectStore_DeleteObject_Handler,
+		},
+		{
+			MethodName: "SyncBucket",
+			Handler:    _ObjectStore_SyncBucket_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -60,6 +60,11 @@ const PRIVD_CONNECT_DELAY: Duration = Duration::from_millis(200);
 /// hammering btrfs on every list call.
 const POOL_REFRESH_TTL: Duration = Duration::from_secs(60);
 
+/// A device rescan triggered by a read RPC (`GET /devices` — the Storage page's
+/// Refresh) scans lsblk through privd, so it is throttled: a burst of UI
+/// refreshes shares one scan instead of queueing several.
+const DEVICE_RESCAN_TTL: Duration = Duration::from_millis(1500);
+
 /// Kernel view of block devices (attach/detach detection).
 const SYSFS_BLOCK: &str = "/sys/class/block";
 
@@ -253,6 +258,8 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         privd,
         manager: manager.clone(),
         last_refresh: Mutex::new(Instant::now() - POOL_REFRESH_TTL),
+        sysfs_root: sysfs_root.clone(),
+        rescan: AsyncMutex::new(RescanState::new()),
     };
 
     // First refresh eagerly so we start with a warm registry. Failure is
@@ -325,14 +332,14 @@ async fn watch_loop(
         tokio::pin!(uevent_wait);
         tokio::select! {
             _ = &mut sleep => {
-                prev = manager.tick(&prev, &sysfs_root).await;
+                prev = manager.tick_serialized(&prev, &sysfs_root).await;
                 last_scan = Instant::now();
             }
             _ = uevent_wait => {
                 // A block uevent just landed: react now, but never faster
                 // than the throttle (a single plug fires many uevents).
                 if last_scan.elapsed() >= EVENT_SCAN_MIN_INTERVAL {
-                    prev = manager.tick(&prev, &sysfs_root).await;
+                    prev = manager.tick_serialized(&prev, &sysfs_root).await;
                     last_scan = Instant::now();
                 }
             }
@@ -408,6 +415,24 @@ struct RegistryBackend {
     privd: Arc<AsyncMutex<PrivdClient<Channel>>>,
     manager: Arc<DeviceManager>,
     last_refresh: Mutex<Instant>,
+    /// Where /sys is mounted, and the last scan's device snapshot: an
+    /// on-demand rescan needs the same inputs the watch loop reconciles on.
+    sysfs_root: PathBuf,
+    rescan: AsyncMutex<RescanState>,
+}
+
+/// The watch loop's scan state, mirrored for on-demand rescans. Sharing the
+/// snapshot keeps device add/remove detection correct across both callers.
+struct RescanState {
+    prev: HashSet<String>,
+    last: Instant,
+}
+
+impl RescanState {
+    fn new() -> Self {
+        // `last` starts far enough in the past that the first read rescans.
+        RescanState { prev: HashSet::new(), last: Instant::now() - DEVICE_RESCAN_TTL }
+    }
 }
 
 impl RegistryBackend {
@@ -425,6 +450,23 @@ impl RegistryBackend {
         let res = discovery::refresh_pools(&mut privd, &self.registry).await;
         *self.last_refresh.lock().unwrap() = Instant::now();
         res.map(|_| ())
+    }
+
+    /// Reconcile the device registry with the live kernel view, at most once
+    /// per DEVICE_RESCAN_TTL.
+    ///
+    /// Serving the registry alone is what made "Refresh" look broken: a disk
+    /// that appeared (or a mount that happened) since the last watcher tick was
+    /// simply absent from the response. Best effort — a failed scan leaves the
+    /// registry serving its last known view, exactly like the watch loop.
+    async fn rescan_if_due(&self) {
+        let mut state = self.rescan.lock().await;
+        if state.last.elapsed() < DEVICE_RESCAN_TTL {
+            return;
+        }
+        let prev = std::mem::take(&mut state.prev);
+        state.prev = self.manager.tick_serialized(&prev, &self.sysfs_root).await;
+        state.last = Instant::now();
     }
 }
 
@@ -493,6 +535,9 @@ impl Storaged for RegistryBackend {
         &self,
         _request: Request<ListDevicesRequest>,
     ) -> Result<Response<ListDevicesResponse>, Status> {
+        // Live, but throttled: reading the device list is the UI's refresh, so
+        // it has to reflect reality rather than the last watcher tick.
+        self.rescan_if_due().await;
         let devices = self
             .registry
             .list_devices()

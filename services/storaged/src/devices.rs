@@ -297,6 +297,9 @@ pub struct DeviceManager {
     /// persisted in the registry AND broadcast to WatchDevices subscribers.
     pub events: broadcast::Sender<DeviceEvent>,
     ops: Mutex<HashSet<String>>,
+    /// Serializes reconcile scans: the watch loop and an on-demand rescan must
+    /// never run two at once, or both would try to auto-mount the same device.
+    scan: AsyncMutex<()>,
 }
 
 /// Filesystem types that carry no POSIX ownership on disk; they are mounted
@@ -331,7 +334,22 @@ impl DeviceManager {
             fat_umask,
             events,
             ops: Mutex::new(HashSet::new()),
+            scan: AsyncMutex::new(()),
         }
+    }
+
+    /// Reconcile with the live kernel view, one scan at a time.
+    ///
+    /// Used by the background watch loop and by on-demand rescans (the gateway's
+    /// device refresh), so a read of the device list can catch up with reality
+    /// immediately instead of waiting for the next tick.
+    pub async fn tick_serialized(
+        &self,
+        prev: &HashSet<String>,
+        sysfs_root: &Path,
+    ) -> HashSet<String> {
+        let _scan = self.scan.lock().await;
+        self.tick(prev, sysfs_root).await
     }
 
     /// Persist an audit event and broadcast it to live subscribers.
@@ -1095,6 +1113,7 @@ mod tests {
                 fat_umask: umask,
                 events: broadcast::channel(1).0,
                 ops: Mutex::new(HashSet::new()),
+                scan: AsyncMutex::new(()),
             }
         };
         let mgr = m(1000, 100, 0o002);

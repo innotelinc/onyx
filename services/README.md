@@ -14,25 +14,27 @@ Small, single-purpose daemons (docs/design/04#1-service-inventory). Each service
 |---------|------|----------|--------------------|
 | `onyx-core` | Go | [`core/`](core/) | gRPC `Health` + `Core` + `CoreShares` (SystemStatus, pool/device forwarding, share CRUD in SQLite) + hotplug reconciler that auto-creates/removes shares for mounted drives; **config applier** — renders the full share set via onyx-shared and writes/reloads the daemon config through onyx-privd (change-guarded); SQLite state dir init |
 | `onyx-api`  | Go | [`api/`](api/) | HTTP gateway: `/api/v1/system/*`, `/api/v1/pools`, `/api/v1/shares`, `/api/v1/devices*`, `/healthz`; error envelope per docs/design/06 |
-| `onyx-shared` | Go | [`shared/`](shared/) | Share manager: renders per-protocol daemon config (smb.conf fragments, NFS exports) from the logical share model; `RenderAll` produces the complete smb.conf + exports files (deterministic, unique fsids) |
+| `onyx-shared` | Go | [`shared/`](shared/) | Share manager: renders per-protocol daemon config from the logical share model; `RenderAll` produces the complete smb.conf + exports, vsftpd.conf, the dedicated sftp sshd_config, davd.conf and rsyncd.conf (deterministic, unique fsids, so onyx-core can diff before writing) |
 | `onyx-storaged` | Rust | [`storaged/`](storaged/) | gRPC `Health` + `Storaged`; Btrfs pool discovery via `onyx-privd`, cached in a SQLite registry (TTL refresh); **hotplug watcher** — kernel uevent (netlink) driven, scans `lsblk`, auto-mounts removable drives under `/mnt/onyx/` via privd, unmounts on detach; slow periodic scan as fallback; SMART health sweep + persistent audit trail (ListEvents/WatchDevices) |
-| `onyx-privd` | Rust | [`privd/`](privd/) | Root privilege helper: allowlisted ops with per-op validation, no-shell exec, timeout — `btrfs` (`show --raw`, `usage -b`), block device ops (`lsblk` scan, `mount`/`umount` with allowlisted uid/gid/umask options), `smartctl -H -A` health probe, **atomic daemon-config write** (`WRITE_DAEMON_CONFIG`: smb.conf/exports under `--config-dir`) + **validated reloads** (`RELOAD_DAEMONS`: `testparm` → `systemctl reload smbd`, `exportfs -ra`) |
+| `onyx-privd` | Rust | [`privd/`](privd/) | Root privilege helper: allowlisted ops with per-op validation, no-shell exec, timeout — `btrfs` (`show --raw`, `usage -b`), block device ops (`lsblk` scan, `mount`/`umount` with allowlisted uid/gid/umask options, forced unmount, wipefs + mkfs), `smartctl -H -A` health probe, **atomic daemon-config write** (`WRITE_DAEMON_CONFIG`: smb.conf, exports, vsftpd.conf, sshd_config, davd.conf, rsyncd.conf under `--config-dir`) + **validated reloads** (`RELOAD_DAEMONS`: `testparm` → `systemctl reload smbd`, `exportfs -ra`, `sshd -t` → `reload-or-restart onyx-sftp`, `reload-or-restart` for vsftpd / onyx-davd / rsyncd) |
 
-## Platform daemons (v0.1 skeletons — docs/design/11)
+## Platform daemons (docs/design/11)
 
-The containerized platform adds six more daemons, each a compilable gRPC
-service skeleton (proto contract + server + wiring) that Dockerizes and ships
-in the compose stack. Full data-plane implementations land with their roadmap
-milestones; the interfaces are already the source of truth in `proto/`.
+The containerized platform adds these daemons, each a gRPC service (proto
+contract + server + wiring) that Dockerizes and ships in the compose stack. The
+v0.4 "Jade" surfaces are implemented; `onyx-ai` is the v0.5 milestone, and its
+advisor inputs (pool capacity, snapshot cadence, scrub status) are already
+assembled by `onyx-api`.
 
 | Service | Lang | Location | Contract (`proto/onyx/v1/`) | Platform surface |
 |---------|------|----------|-----------------------------|------------------|
 | `onyx-snapd` | Go | [`snapd/`](snapd/) | `snapd.proto` | Btrfs snapshots: create/list/delete/rollback (roadmap v0.3) |
 | `onyx-backupd` | Go | [`backupd/`](backupd/) | `backupd.proto` | Backup jobs, schedules, restore + Backup Intelligence hooks (v0.3) |
-| `onyx-vmm` | Go | [`vmm/`](vmm/) | `vmm.proto` | Virtualization: VM inventory + lifecycle (v0.4) |
-| `onyx-appd` | Go | [`appd/`](appd/) | `appd.proto` | Container/app management: catalog, deploy, lifecycle (v0.4) |
+| `onyx-vmm` | Go | [`vmm/`](vmm/) | `vmm.proto` | Virtualization: VM inventory in SQLite, images on the pool, libvirt/KVM lifecycle through `virsh` (v0.4) |
+| `onyx-appd` | Go | [`appd/`](appd/) | `appd.proto` | App store: persistent install records, per-install config, container lifecycle on Docker (v0.4) |
 | `onyx-ai` | Go | [`ai/`](ai/) | `ai.proto` | AI Storage Advisor + Backup Intelligence (v0.5) |
-| `onyx-objectstore` | Go | [`objectstore/`](objectstore/) | `objectstore.proto` | S3-compatible object storage + hybrid cloud sync (v0.4) |
+| `onyx-objectstore` | Go | [`objectstore/`](objectstore/) | `objectstore.proto` | S3-compatible object storage + hybrid cloud tiering: LOCAL, CLOUD and TIERED buckets over the shared rclone remote catalog (v0.4) |
+| `onyx-davd` | Go | [`davd/`](davd/) | — (HTTP: WebDAV, plus gRPC `Health`) | WebDAV endpoint for WebDAV-enabled shares: mounts the share table onyx-shared renders, trusts the gateway's identity header, SIGHUP reloads (v0.4) |
 
 ## Runtime helpers (v0.1, shell — `deploy/libexec/`, docs/design/10)
 
@@ -51,7 +53,7 @@ Not gRPC services but shipped with the stack and installed to
 
 | Service | Lang | Lands in |
 |---------|------|----------|
-| `onyx-netd` | Go | v0.4 |
+| `onyx-netd` | Go | v0.5 |
 | `onyx-agent` | Rust | v0.3 |
 | `onyx-updated` | Rust (from the shell helper) | v0.2 |
 | `onyx-bus` | Go | v0.2 |

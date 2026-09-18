@@ -30,8 +30,8 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// Vmm manages virtual machines (libvirt/QEMU backend lands in v0.4; the
-// contract is the source of truth now — docs/design/11-platform-and-cloud.md#63-onyx-vmm).
+// Vmm manages virtual machines (libvirt/QEMU backend —
+// docs/design/11-platform-and-cloud.md#63-onyx-vmm).
 type VmmClient interface {
 	ListVMs(ctx context.Context, in *ListVMsRequest, opts ...grpc.CallOption) (*ListVMsResponse, error)
 	CreateVM(ctx context.Context, in *CreateVMRequest, opts ...grpc.CallOption) (*VM, error)
@@ -102,8 +102,8 @@ func (c *vmmClient) DeleteVM(ctx context.Context, in *DeleteVMRequest, opts ...g
 // All implementations must embed UnimplementedVmmServer
 // for forward compatibility.
 //
-// Vmm manages virtual machines (libvirt/QEMU backend lands in v0.4; the
-// contract is the source of truth now — docs/design/11-platform-and-cloud.md#63-onyx-vmm).
+// Vmm manages virtual machines (libvirt/QEMU backend —
+// docs/design/11-platform-and-cloud.md#63-onyx-vmm).
 type VmmServer interface {
 	ListVMs(context.Context, *ListVMsRequest) (*ListVMsResponse, error)
 	CreateVM(context.Context, *CreateVMRequest) (*VM, error)

@@ -1,8 +1,10 @@
-# onyx-appd — application/container management (docs/design/11 §6.4). v0.1
-# skeleton; the signed app store + compose runtime land with v0.4.
+# onyx-appd — application/container management (docs/design/11 §6.4): the signed
+# app catalog, per-install configuration, and container lifecycle through the
+# Docker API. Install records persist in SQLite under the state directory.
 [Unit]
 Description=Onyx application service
-After=local-fs.target onyx-pool.service
+After=local-fs.target onyx-pool.service docker.service
+Wants=docker.service
 
 [Service]
 Type=simple

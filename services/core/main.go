@@ -33,6 +33,10 @@ func main() {
 		sharedSock     = flag.String("shared-socket", "", "onyx-shared socket (default: <socket-dir>/onyx-shared.sock)")
 		snapdSock      = flag.String("snapd-socket", "", "onyx-snapd socket (default: <socket-dir>/onyx-snapd.sock)")
 		backupdSock    = flag.String("backupd-socket", "", "onyx-backupd socket (default: <socket-dir>/onyx-backupd.sock)")
+		vmmSock        = flag.String("vmm-socket", "", "onyx-vmm socket (default: <socket-dir>/onyx-vmm.sock)")
+		appdSock       = flag.String("appd-socket", "", "onyx-appd socket (default: <socket-dir>/onyx-appd.sock)")
+		aiSock         = flag.String("ai-socket", "", "onyx-ai socket (default: <socket-dir>/onyx-ai.sock)")
+		objstoreSock   = flag.String("objectstore-socket", "", "onyx-objectstore socket (default: <socket-dir>/onyx-objectstore.sock)")
 		reconcileEvery = flag.Duration("device-reconcile-interval", 2*time.Second, "how often shares are reconciled with the hotplug device list")
 		mountRoot      = flag.String("device-mount-root", "/mnt/onyx", "only drives mounted under this root become auto shares")
 	)
@@ -58,6 +62,18 @@ func main() {
 	}
 	if *backupdSock == "" {
 		*backupdSock = absSocketPath(*socketDir, "onyx-backupd.sock")
+	}
+	if *vmmSock == "" {
+		*vmmSock = absSocketPath(*socketDir, "onyx-vmm.sock")
+	}
+	if *appdSock == "" {
+		*appdSock = absSocketPath(*socketDir, "onyx-appd.sock")
+	}
+	if *aiSock == "" {
+		*aiSock = absSocketPath(*socketDir, "onyx-ai.sock")
+	}
+	if *objstoreSock == "" {
+		*objstoreSock = absSocketPath(*socketDir, "onyx-objectstore.sock")
 	}
 
 	db, err := openDB(*stateDir)
@@ -115,6 +131,46 @@ func main() {
 	privdClient := onyxv1.NewPrivdClient(privdConn)
 	applier := newConfigApplier(db, sharedClient, privdClient)
 
+	// Platform services (v0.4): dialed eagerly like the storage path so health
+	// covers them, but only health is used here — the gateway calls their gRPC
+	// contract directly. gRPC clients are lazy, so a service that is not
+	// deployed yet just reports UNKNOWN instead of failing startup.
+	vmmConn, err := grpc.NewClient(
+		"unix://"+*vmmSock,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		fatal("dial vmm", err)
+	}
+	defer vmmConn.Close()
+
+	appdConn, err := grpc.NewClient(
+		"unix://"+*appdSock,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		fatal("dial appd", err)
+	}
+	defer appdConn.Close()
+
+	aiConn, err := grpc.NewClient(
+		"unix://"+*aiSock,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		fatal("dial ai", err)
+	}
+	defer aiConn.Close()
+
+	objstoreConn, err := grpc.NewClient(
+		"unix://"+*objstoreSock,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		fatal("dial objectstore", err)
+	}
+	defer objstoreConn.Close()
+
 	gs := grpc.NewServer()
 	srv := &server{
 		db:             db,
@@ -124,6 +180,10 @@ func main() {
 		privdHealth:    onyxv1.NewHealthClient(privdConn),
 		snapdHealth:    onyxv1.NewHealthClient(snapdConn),
 		backupdHealth:  onyxv1.NewHealthClient(backupdConn),
+		vmmHealth:      onyxv1.NewHealthClient(vmmConn),
+		appdHealth:     onyxv1.NewHealthClient(appdConn),
+		aiHealth:       onyxv1.NewHealthClient(aiConn),
+		objstoreHealth: onyxv1.NewHealthClient(objstoreConn),
 		config:         applier,
 	}
 	onyxv1.RegisterHealthServer(gs, srv)

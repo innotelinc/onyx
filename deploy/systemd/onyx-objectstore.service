@@ -1,6 +1,7 @@
 # onyx-objectstore — S3-compatible object storage + hybrid cloud
-# (docs/design/11 §6.6). v0.1 ships the local engine; the S3 gateway serves
-# storage.onyx.innotel.us in the containerized platform (loopback on hosts).
+# (docs/design/11 §6.6). Serves the S3 gateway (storage.onyx.innotel.us) and
+# tiers CLOUD/TIERED buckets through the shared rclone remote catalog that the
+# Shares page writes and onyx-backupd reads.
 [Unit]
 Description=Onyx object storage service
 After=local-fs.target onyx-pool.service
@@ -10,7 +11,7 @@ Type=simple
 User=onyx-objectstore
 Group=onyx
 SupplementaryGroups=onyx
-ExecStart=/usr/local/lib/onyx/onyx-objectstore --socket-dir /run/onyx --state-dir /var/lib/onyx/objectstore
+ExecStart=/usr/local/lib/onyx/onyx-objectstore --socket-dir /run/onyx --state-dir /var/lib/onyx/objectstore --rclone-config /etc/rclone/rclone.conf
 Restart=always
 RestartSec=2
 UMask=0002

@@ -15,6 +15,9 @@ service ObjectStore {
   rpc PutObject(PutObjectRequest) returns (ObjectMeta);
   rpc GetObject(GetObjectRequest) returns (GetObjectResponse);
   rpc DeleteObject(DeleteObjectRequest) returns (DeleteObjectResponse);
+  // SyncBucket mirrors a CLOUD/TIERED bucket's local objects into the cloud
+  // target and, when asked, evicts verified copies from the local hot tier.
+  rpc SyncBucket(SyncBucketRequest) returns (SyncBucketResponse);
 }
 
 enum BucketTier {
@@ -30,9 +33,23 @@ enum BucketTier {
 message Bucket {
   string name = 1;
   BucketTier tier = 2;
-  // External endpoint/prefix when tier is CLOUD or TIERED.
+  // External target when tier is CLOUD or TIERED: a configured rclone remote
+  // name, optionally with a path (`b2-archive` or `b2-archive:offsite`). Each
+  // bucket is stored under `onyx-objectstore/<bucket>` inside that target.
   string cloud_target = 3;
   string created_at = 4;
+  // Hybrid-cloud state, refreshed by SyncBucket. cloud_objects is what the
+  // last verified sync saw in the cloud target — it is a recorded observation,
+  // not a live count, because counting the cloud side means a network round
+  // trip and ListBuckets must stay cheap.
+  int64 local_objects = 5;
+  int64 cloud_objects = 6;
+  string last_sync_at = 7;
+  // evict_after_days is the TIERED age past which a locally cached object may
+  // be released once its cloud copy is verified (0 = never evict).
+  int32 evict_after_days = 8;
+  // sync_error is the last sync failure for this bucket, empty when healthy.
+  string sync_error = 9;
 }
 
 message ListBucketsRequest {}
@@ -45,6 +62,8 @@ message CreateBucketRequest {
   string name = 1;
   BucketTier tier = 2;
   string cloud_target = 3;
+  // evict_after_days applies to TIERED buckets (0 = keep every local copy).
+  int32 evict_after_days = 4;
 }
 
 message DeleteBucketRequest {
@@ -90,4 +109,23 @@ message DeleteObjectRequest {
 
 message DeleteObjectResponse {
   bool deleted = 1;
+}
+
+message SyncBucketRequest {
+  string name = 1;
+  // evict releases local copies that are older than evict_after_days and
+  // verified present in the cloud target. Off by default so a sync is never
+  // destructive unless the caller asked for it.
+  bool evict = 2;
+}
+
+message SyncBucketResponse {
+  Bucket bucket = 1;
+  // uploaded is how many local objects the cloud target gained;
+  // evicted is how many local copies were released after verification.
+  int64 uploaded = 2;
+  int64 evicted = 3;
+  // detail is the transport's own summary line, for the operator.
+  string detail = 4;
+  repeated string warnings = 5;
 }

@@ -74,8 +74,27 @@ reconnect.
 | GET/PATCH/DELETE | `/pools/{id}` |
 | POST | `/pools/{id}/devices` (add disk) |
 | POST | `/pools/{id}/devices/{dev}/replace` |
+| GET | `/devices` (list; the read performs a throttled live rescan), `/devices/{name}` |
+| POST | `/devices/{name}/attach`, `/devices/{name}/detach` |
 | GET | `/disks` (SMART + layout), `/disks/{id}` |
 | POST | `/disks/{id}/smart` (run now) |
+| GET | `/storage/overview` | Capacity headline for Files: one entry per pool/mount with `mounted` + `visible` flags, the primary capacity, and warnings when the data plane has mounted something this API process cannot reach (mount propagation is not shared) |
+
+### Platform (v0.4 Jade)
+| Method | Path |
+|--------|------|
+| GET | `/apps?status=` (installed), `/app-store` (catalog) |
+| POST | `/apps` (install: `{app_id, version}`) |
+| DELETE | `/apps/{id}?purge_data=` |
+| GET | `/containers?app_id=` |
+| POST | `/containers/{id}/start|stop|restart` |
+| GET/POST | `/vms` |
+| POST | `/vms/{id}/start|stop` (stop takes `{graceful}`) |
+| DELETE | `/vms/{id}?delete_disk=` |
+| GET/POST | `/buckets` (tier: local \| cloud \| tiered; cloud tiers take `{cloud_target}` — a configured rclone remote — and TIERED takes `{evict_after_days}`) |
+| POST | `/buckets/{name}/sync?evict=` (mirror to the cloud target; `evict=1` releases local copies the cloud has been verified to hold) |
+| DELETE | `/buckets/{name}?force=` (also purges the cloud target) |
+| GET | `/ai/advisor?pool=`, `/ai/backup-advice` |
 
 ### Datasets & shares
 | Method | Path |

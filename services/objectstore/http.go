@@ -134,7 +134,7 @@ func (s *server) s3Bucket(w http.ResponseWriter, r *http.Request, bucket string)
 		w.WriteHeader(http.StatusOK)
 	case http.MethodDelete:
 		force := r.URL.Query().Get("force") == "1"
-		if _, err := s.DeleteBucket(nil, &onyxv1.DeleteBucketRequest{Name: bucket, Force: force}); err != nil {
+		if _, err := s.DeleteBucket(r.Context(), &onyxv1.DeleteBucketRequest{Name: bucket, Force: force}); err != nil {
 			writeS3GRPCError(w, err)
 			return
 		}
@@ -223,6 +223,12 @@ func (s *server) s3ListObjects(w http.ResponseWriter, r *http.Request, bucket st
 	writeS3XML(w, http.StatusOK, xmlList)
 }
 
+// metaDirName is the hidden directory holding per-object user metadata. It is
+// skipped by every listing: it is bookkeeping this service keeps *about* the
+// objects, and a client that saw `.meta/<key>.json` in a bucket listing would be
+// looking at keys it never wrote.
+const metaDirName = ".meta"
+
 // walkObjectKeys lists every object key in a bucket directory, separated by `/`.
 //
 // The listing used to read only the bucket's top level and skip directories,
@@ -238,6 +244,11 @@ func walkObjectKeys(dir string) ([]string, error) {
 			return err
 		}
 		if entry.IsDir() {
+			// The metadata sidecar tree is not object data, and neither is
+			// anything else the store keeps about a bucket rather than in it.
+			if entry.Name() == metaDirName {
+				return fs.SkipDir
+			}
 			return nil
 		}
 		rel, relErr := filepath.Rel(dir, path)
@@ -285,6 +296,18 @@ func (s *server) s3Object(w http.ResponseWriter, r *http.Request, bucket, key st
 			info, err = os.Stat(path)
 		}
 		s.mu.Unlock()
+		// A cloud-tiered bucket whose object was evicted has no local file, and
+		// answering 404 here while GET succeeds would make every client that
+		// probes with HEAD believe the object is gone. Fetching it costs the same
+		// as the GET that follows and leaves it cached rather than downloading it
+		// twice.
+		if err != nil && os.IsNotExist(err) {
+			if _, cloudErr := s.GetObject(r.Context(), &onyxv1.GetObjectRequest{Bucket: bucket, Key: key}); cloudErr != nil {
+				headStatus(w, http.StatusNotFound)
+				return
+			}
+			info, err = os.Stat(path)
+		}
 		if err != nil {
 			if os.IsNotExist(err) || strings.Contains(err.Error(), "not found") {
 				headStatus(w, http.StatusNotFound)
@@ -308,7 +331,9 @@ func (s *server) s3Object(w http.ResponseWriter, r *http.Request, bucket, key st
 			writeS3Error(w, http.StatusBadRequest, "InvalidRequest", err.Error())
 			return
 		}
-		meta, err := s.PutObject(nil, &onyxv1.PutObjectRequest{
+		// r.Context(), not nil: a cloud-tiered PUT uploads before it answers, so
+		// the request's own deadline and cancellation must reach the transport.
+		meta, err := s.PutObject(r.Context(), &onyxv1.PutObjectRequest{
 			Bucket:      bucket,
 			Key:         key,
 			Data:        body,
@@ -327,22 +352,19 @@ func (s *server) s3Object(w http.ResponseWriter, r *http.Request, bucket, key st
 		w.Header().Set("ETag", `"`+meta.Etag+`"`)
 		w.WriteHeader(http.StatusOK)
 	case http.MethodGet:
-		s.mu.Lock()
-		path, err := s.objectPathLocked(bucket, key)
-		var data []byte
-		if err == nil {
-			data, err = os.ReadFile(path)
-		}
-		s.mu.Unlock()
+		// Through GetObject, not a direct read: on a cloud-tiered bucket an
+		// evicted object lives in the cloud, and GetObject is what refetches it.
+		obj, err := s.GetObject(r.Context(), &onyxv1.GetObjectRequest{Bucket: bucket, Key: key})
 		if err != nil {
-			if os.IsNotExist(err) {
-				writeS3Error(w, http.StatusNotFound, "NoSuchKey", "object does not exist")
-				return
-			}
-			writeS3Error(w, http.StatusInternalServerError, "InternalError", err.Error())
+			writeS3GRPCError(w, err)
 			return
 		}
-		w.Header().Set("Content-Type", http.DetectContentType(data))
+		data := obj.GetData()
+		if ct := obj.GetMeta().GetContentType(); ct != "" {
+			w.Header().Set("Content-Type", ct)
+		} else {
+			w.Header().Set("Content-Type", http.DetectContentType(data))
+		}
 		sum := md5.Sum(data)
 		w.Header().Set("ETag", `"`+hex.EncodeToString(sum[:])+`"`)
 		writeUserMetadata(w, s.loadUserMeta(bucket, key))
@@ -350,7 +372,7 @@ func (s *server) s3Object(w http.ResponseWriter, r *http.Request, bucket, key st
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(data)
 	case http.MethodDelete:
-		if _, err := s.DeleteObject(nil, &onyxv1.DeleteObjectRequest{Bucket: bucket, Key: key}); err != nil {
+		if _, err := s.DeleteObject(r.Context(), &onyxv1.DeleteObjectRequest{Bucket: bucket, Key: key}); err != nil {
 			writeS3GRPCError(w, err)
 			return
 		}

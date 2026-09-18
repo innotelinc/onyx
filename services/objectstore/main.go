@@ -1,8 +1,9 @@
 // Command onyx-objectstore is the S3-compatible object storage + hybrid cloud
 // service (docs/design/11 §6.6): bucket tiering (local / cloud / tiered) and
-// object I/O over an S3-style HTTP endpoint (storage.onyx.innotel.us) plus
-// the gRPC control contract. v0.1 ships the working local engine + tier
-// metadata skeleton; hybrid-cloud sync lands with v0.4.
+// object I/O over an S3-style HTTP endpoint (storage.onyx.innotel.us) plus the
+// gRPC control contract. Cloud tiers write through the shared rclone remote
+// catalog (the same one backupd and onyx-api use), and SyncBucket mirrors a
+// bucket out and evicts only cloud-verified copies.
 package main
 
 import (
@@ -13,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -50,6 +52,11 @@ func main() {
 		tcpListen = flag.String("tcp-listen", "", "optional gRPC TCP listen address (e.g. 0.0.0.0:9098) for containerized deployments")
 		httpAddr  = flag.String("http-listen", "", "optional S3 endpoint listen address (e.g. 0.0.0.0:9000)")
 		stateDir  = flag.String("state-dir", "/var/lib/onyx/objectstore", "service state directory (bucket metadata + objects)")
+		// Cloud tiers go through rclone (docs/design/11 §6.6). An empty
+		// --rclone-bin disables them outright, which is the right setting for a
+		// deployment that only wants local buckets.
+		rcloneBin    = flag.String("rclone-bin", "rclone", "rclone binary backing CLOUD/TIERED buckets (empty disables cloud tiers)")
+		rcloneConfig = flag.String("rclone-config", "/etc/rclone/rclone.conf", "shared rclone remote catalog")
 	)
 	flag.Parse()
 
@@ -74,8 +81,21 @@ func main() {
 		slog.Info("secret resolution enabled", "vault", true)
 	}
 
+	// Cloud tiers are advertised only when the transport can actually run: a
+	// bucket created against a missing rclone would fail on its first write, so
+	// the condition is reported at startup instead.
+	var cloud cloudTransport
+	if *rcloneBin != "" {
+		if _, err := exec.LookPath(*rcloneBin); err != nil {
+			slog.Warn("rclone not found: CLOUD and TIERED buckets are unavailable", "binary", *rcloneBin, "error", err)
+		} else {
+			cloud = newRcloneTransport(*rcloneBin, *rcloneConfig)
+			slog.Info("hybrid cloud enabled", "rclone", *rcloneBin, "config", *rcloneConfig)
+		}
+	}
+
 	gs := grpc.NewServer()
-	srv, err := newServer(*stateDir)
+	srv, err := newServer(*stateDir, cloud)
 	if err != nil {
 		fatal("load state", err)
 	}

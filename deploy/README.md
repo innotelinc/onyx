@@ -22,14 +22,19 @@ deploy/
 │   └── onyx-factory-reset      # system-only reset (--erase-all for the pool)
 ├── systemd/onyx-{privd,storaged,shared,core,api}.service   # the core daemons
 ├── systemd/onyx-{snapd,backupd,vmm,appd,ai,objectstore}.service
-│                                 # platform daemons (v0.1 skeletons, docs/design/11)
+│                                 # platform daemons (docs/design/11)
+├── systemd/onyx-davd.service         # WebDAV shares (v0.4 protocol surface)
+├── systemd/onyx-sftp.service         # dedicated sshd for SFTP shares
+├── systemd/vsftpd.service.d/onyx.conf    # drop-in: FTP from /etc/onyx/conf.d
+├── systemd/rsyncd.service.d/onyx.conf    # drop-in: rsync from /etc/onyx/conf.d
 ├── systemd/onyx-pool.service         # data pool auto-mount (before the stack)
 ├── systemd/onyx-firstboot.service    # first-boot wizard (once, marker-guarded)
 ├── systemd/onyx-bootcheck.service    # rollback health gate (after API)
 ├── systemd/onyx-updated.service      # A/B update check (appliance only)
 ├── systemd/onyx-update-check.timer   # daily update check
 └── tmpfiles.d/onyx.conf      # /run/onyx, /mnt/onyx, /var/lib/onyx/*,
-                              # /etc/onyx/conf.d (recreated on boot)
+                              # /etc/onyx/conf.d, /etc/onyx/conf.d/sftp
+                              # (recreated on boot)
 ```
 
 ## Unit graph
@@ -45,6 +50,22 @@ deploy/
 | `onyx-firstboot.service` | root (oneshot) | pool | runs once; prompts on console |
 | `onyx-bootcheck.service` | root (oneshot) | api | reboots into previous deployment on failure |
 | `onyx-updated.service` | `onyx-core` (oneshot) | — | `onyx-update check`; only runs with a sysroot |
+| `onyx-davd.service` | `onyx-davd` (group onyx) | HTTP on loopback, gRPC Health | `--config /etc/onyx/conf.d/davd.conf`; SIGHUP reloads shares |
+| `onyx-sftp.service` | root (sshd drops privileges) | — | dedicated sshd `-f /etc/onyx/conf.d/sshd_config`, Port 2222 |
+| `vsftpd.service.d/onyx.conf` | distro unit | — | repointed at `/etc/onyx/conf.d/vsftpd.conf` |
+| `rsyncd.service.d/onyx.conf` | distro unit | — | repointed at `/etc/onyx/conf.d/rsyncd.conf` |
+
+### Protocol daemons start with their first share
+
+`onyx-davd`, `onyx-sftp`, `vsftpd` and `rsyncd` all serve a config file that
+onyx-core renders, so each one is gated on that file existing
+(`ConditionPathExists=`): the unit is enabled, but inactive until a share
+enables its protocol. `onyx-privd` brings it up at that moment with
+`systemctl reload-or-restart`, which starts a stopped daemon and reloads a
+running one — the operator never has to enable a protocol's daemon by hand.
+The distribution's `vsftpd`/`rsync` units are repointed by the drop-ins above,
+and their own conditions are reset first so `/etc/vsftpd.conf` /
+`/etc/rsyncd.conf` are no longer consulted.
 
 `Requires=`/`After=` chain the startup order pool → privd → storaged+shared →
 core → api; every daemon has `Restart=always` so transient failures self-heal.
@@ -62,7 +83,11 @@ the install deliberately requires an explicit change (edit
 policy) before anything listens off-loopback. The generated `smb.conf` and
 `exports` are written but the daemons themselves aren't started by onyx — the
 host's package manager owns `samba`/`nfs-kernel-server`, started only when the
-user opts in (`scripts/onyx-install --install-deps`).
+user opts in (`scripts/onyx-install --install-deps`). The v0.4 protocol
+daemons follow the same rule: they exist only while a share enables them, and
+`onyx-davd` additionally refuses any request that did not arrive through the
+gateway (it authenticates nobody itself, it trusts the identity header the
+gateway sets).
 
 ## Install / uninstall
 

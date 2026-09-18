@@ -1,0 +1,35 @@
+# onyx-sftp — the dedicated SSH instance serving the SFTP protocol
+# (docs/design/05#6 SFTP row). It is a separate sshd with its own config on
+# Port 2222 so the host's administrative SSH is untouched; every share is a
+# `Match User onyx-<share>` chroot with ForceCommand internal-sftp, and
+# onyx-privd validates the generated config with `sshd -t` before reloading.
+[Unit]
+Description=Onyx SFTP share service (dedicated sshd)
+After=local-fs.target network.target onyx-core.service
+Wants=onyx-core.service
+# The config is rendered by onyx-core; onyx-privd brings the unit up with the
+# first SFTP share (`systemctl reload-or-restart onyx-sftp`).
+ConditionPathExists=/etc/onyx/conf.d/sshd_config
+
+[Service]
+Type=simple
+# sshd must start as root: it drops privileges per connection itself.
+ExecStartPre=/usr/bin/install -d -m 0755 -o root -g root /etc/onyx/conf.d/sftp /etc/onyx/conf.d/sftp/authorized_keys
+# The generated config pins the host key path; generate one on first start so
+# the unit does not depend on an operator step.
+ExecStartPre=/bin/sh -c '[ -s /etc/onyx/conf.d/sftp/ssh_host_ed25519_key ] || /usr/bin/ssh-keygen -q -t ed25519 -N "" -C onyx-sftp -f /etc/onyx/conf.d/sftp/ssh_host_ed25519_key'
+ExecStart=/usr/sbin/sshd -D -f /etc/onyx/conf.d/sshd_config
+# sshd re-execs and re-reads its config on SIGHUP.
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=2
+NoNewPrivileges=no
+ProtectSystem=strict
+PrivateTmp=yes
+# Chrooted shares live under /mnt/onyx; keys and the pid file under /etc/onyx
+# and /run/onyx.
+ReadWritePaths=/run/onyx /etc/onyx/conf.d/sftp
+ReadWritePaths=/mnt/onyx
+
+[Install]
+WantedBy=multi-user.target

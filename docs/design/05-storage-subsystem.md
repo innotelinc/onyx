@@ -59,6 +59,24 @@ clean `btrfs send` streams for backup, and bounded rollback scope.
 - **FSTRIM:** weekly TRIM on SSDs; wear-leveling friendly defaults for SD cards (noatime,
   `commit=120` on system disks, logs to RAM).
 
+### 2.1 Mount visibility across containers
+
+Pools are mounted under `/mnt/onyx` **on the host**, by onyx-privd (the only
+privileged process). Every other container — storaged, api, davd — bind-mounts
+that same host directory, so a mount box is only shared if propagation is
+*shared* on both sides:
+
+- the host path must be a shared mount (`mount --make-shared /mnt/onyx`, and an
+  `/etc/fstab` entry with the `shared` option to survive a reboot);
+- the compose bind mounts use `:rshared`.
+
+Get one half right and the failure is silent and confusing: privd mounts the
+pool, the data plane reports it as mounted, and the API's storage root is an
+empty directory — which reads as "No storage is mounted" in Files. `setup.sh`
+checks and fixes the host half, and `GET /storage/overview` reports the
+mismatch (per-entry `visible` flag plus an operator-actionable warning) instead
+of pretending there is nothing there.
+
 ## 5. Quotas and capacity
 
 - **Quotas:** `btrfs qgroup` per user and per share; enforced soft (warn) + hard (block)
@@ -67,6 +85,12 @@ clean `btrfs send` streams for backup, and bounded rollback scope.
   would push the pool below it.
 - **Capacity planning:** the Storage card shows pool health, per-dataset usage, snapshot
   reclaimable space (estimate via qgroup), and projected growth from history.
+- **What the card measures:** capacity comes from the *mounted pool* (statfs of the pool's
+  mountpoint, falling back to the data plane's own totals when the pool is not reachable),
+  never from whatever filesystem the storage root happens to sit on — on a normal install that
+  is the host's system disk, and reporting it as "Storage" is how a 220 GB root disk gets
+  shown as a 20 TB pool. `GET /storage/overview` is the source; `/files/trash` carries the
+  same totals for compatibility.
 
 ## 6. Sharing protocols (`onyx-shared`)
 
@@ -78,13 +102,19 @@ options) and translate it to per-daemon config. Shares are created once, exposed
 | **SMB** | Samba | SMB2/3 default (SMB1 disabled), `vfs objects = btrfs` for reflink copy-offload, user-level auth against Onyx users, optional AD/LDAP join; per-share browseable/guest settings |
 | **NFS** | Linux NFS | NFSv4 with Kerberos optional; `fsid` per share; squash settings; only exposed on demand (never by default) |
 | **FTP** | vsftpd | Explicit FTPS (TLS) required by default; chroot to share root; virtual users mapped to Onyx users |
-| **SFTP** | Dedicated `sshd` instance | Scoped config (`Subsystem sftp`, `ForceCommand internal-sftp`, chroot), on a separate port or default 22 with main SSH locked down; key + password auth |
-| **WebDAV** | Go WebDAV server (`onyx-davd`) | HTTPS only, integrates with the API auth layer (session or app token); ideal for cloud-sync clients (Nextcloud desktop, RaiDrive) |
+| **SFTP** | Dedicated `sshd` instance | Scoped config (`Subsystem sftp`, `ForceCommand internal-sftp`, chroot) on its own port (2222, so the host's admin SSH is untouched); keys live in `/etc/onyx/conf.d/sftp/authorized_keys/%u` because a chrooted user's `%h` is inside the share, where the share owner could replace them |
+| **WebDAV** | Go WebDAV server (`onyx-davd`, `services/davd`) | HTTPS only, integrates with the API auth layer (session or app token); ideal for cloud-sync clients (Nextcloud desktop, RaiDrive). Serves `/webdav/<share>` on loopback, renders no TLS itself and authenticates nobody itself — it requires the gateway's identity header (`X-Onyx-User`), so a request that bypassed the gateway is rejected rather than trusted |
 | **Rsync** | `rsyncd` via systemd socket | Read/write modules per share, restricted to configured users, chroot-style path containment |
 
 **Exposure policy:** every protocol is **off by default**; enabling it is an explicit,
 logged act. The Share detail page shows which protocols expose a given share, with copyable
 connection strings (`smb://`, `nfs://`, `davs://`, `rsync://`, `sftp://`).
+
+**Lifecycle:** each protocol's daemon is gated on the config file onyx-core renders for it
+(`ConditionPathExists=` in systemd). Enabling the first share for a protocol starts that
+daemon through onyx-privd (`systemctl reload-or-restart`); disabling the last share rewrites
+the config empty and reloads just that daemon. A protocol nobody uses therefore has no
+listening process at all.
 
 ## 7. Disk management
 

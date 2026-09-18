@@ -939,11 +939,16 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
                             vec!["-ra".into()],
                         ));
                     }
+                    // The protocol daemons added in v0.4 are started by their
+                    // first share: `reload-or-restart` brings a stopped daemon
+                    // up and reloads a running one, so an operator does not have
+                    // to enable each protocol's unit by hand before the first
+                    // FTP/SFTP/WebDAV/rsync share exists.
                     "ftp" => {
                         // vsftpd reloads its config on SIGHUP (systemd reload).
                         steps.push((
                             allowlist.systemctl_bin.clone(),
-                            vec!["reload".into(), "vsftpd".into()],
+                            vec!["reload-or-restart".into(), "vsftpd".into()],
                         ));
                     }
                     "sftp" => {
@@ -956,19 +961,19 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
                         ));
                         steps.push((
                             allowlist.systemctl_bin.clone(),
-                            vec!["reload".into(), "onyx-sftp".into()],
+                            vec!["reload-or-restart".into(), "onyx-sftp".into()],
                         ));
                     }
                     "webdav" => {
                         steps.push((
                             allowlist.systemctl_bin.clone(),
-                            vec!["reload".into(), "onyx-davd".into()],
+                            vec!["reload-or-restart".into(), "onyx-davd".into()],
                         ));
                     }
                     "rsync" => {
                         steps.push((
                             allowlist.systemctl_bin.clone(),
-                            vec!["reload".into(), "rsyncd".into()],
+                            vec!["reload-or-restart".into(), "rsyncd".into()],
                         ));
                     }
                     _ => unreachable!("validated target"),
@@ -1589,15 +1594,21 @@ mod tests {
         .unwrap();
         assert_eq!(resp.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&resp.stderr));
         let log = fs::read_to_string(dir.path().join("argv.log")).unwrap();
-        assert!(log.contains("/systemctl|reload|vsftpd"), "ftp reload missing:\n{log}");
+        // Every protocol daemon is started *or* reloaded (`reload-or-restart`):
+        // the first share that enables a protocol must bring its daemon up,
+        // not just poke one that was assumed to be running.
+        for unit in ["vsftpd", "onyx-davd", "rsyncd"] {
+            let want = format!("/systemctl|reload-or-restart|{unit}");
+            assert!(log.contains(&want), "{unit} reload missing:\n{log}");
+        }
         // SFTP validates the generated sshd_config before reloading.
         let idx_check = log.lines().position(|l| l.contains("/sshd") && l.contains("-t") && l.contains("sshd_config"));
         assert!(idx_check.is_some(), "sshd config check missing:\n{log}");
-        let idx_reload = log.lines().position(|l| l.contains("/systemctl") && l.contains("onyx-sftp"));
+        let idx_reload = log
+            .lines()
+            .position(|l| l.contains("/systemctl") && l.contains("reload-or-restart") && l.contains("onyx-sftp"));
         assert!(idx_reload.is_some(), "sftp reload missing:\n{log}");
         assert!(idx_check < idx_reload, "sshd -t must run before the sftp reload");
-        assert!(log.contains("/systemctl|reload|onyx-davd"), "webdav reload missing:\n{log}");
-        assert!(log.contains("/systemctl|reload|rsyncd"), "rsync reload missing:\n{log}");
     }
 
     #[test]

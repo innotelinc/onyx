@@ -121,7 +121,9 @@ func TestRenderAllProtocolSurface(t *testing.T) {
 	}
 	// SFTP: dedicated instance with a Match block per share.
 	for _, want := range []string{"Port 2222", "Subsystem sftp internal-sftp", "Match User onyx-media",
-		"ChrootDirectory /mnt/onyx/media", "ForceCommand internal-sftp"} {
+		"ChrootDirectory /mnt/onyx/media", "ForceCommand internal-sftp",
+		// Keys live outside the chroot, where a share owner cannot replace them.
+		"AuthorizedKeysFile /etc/onyx/conf.d/sftp/authorized_keys/%u"} {
 		if !strings.Contains(resp.SftpConf, want) {
 			t.Errorf("sshd_config missing %q:\n%s", want, resp.SftpConf)
 		}

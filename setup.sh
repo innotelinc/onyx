@@ -95,6 +95,44 @@ fi
 [ -f "$RCLONE_DIR/rclone.conf" ] || : > "$RCLONE_DIR/rclone.conf"
 chmod 0666 "$RCLONE_DIR/rclone.conf" 2>/dev/null || true
 
+# --- 2b. Storage root + mount propagation (docs/design/05#2) ------------------
+# Pools live under /mnt/onyx on the *host*: onyx-privd mounts them there inside
+# its container, and every other onyx container bind-mounts the same directory.
+# That only works when the host path is a shared mount. On a private mount the
+# mount stops at privd's namespace — the data plane reports the pool as mounted
+# while onyx-api sees an empty directory, which the Files page shows as "No
+# storage is mounted". Both halves have to be right: this makes the host path
+# shared, and docker-compose.yml binds it :rshared.
+STORAGE_ROOT="${ONYX_STORAGE_ROOT:-/mnt/onyx}"
+propagation_of() {
+  # The optional fields of this mount's /proc/self/mountinfo entry carry the
+  # propagation, up to the "-" separator. Field 5 is the mount point.
+  awk -v target="$1" '
+    $5 == target {
+      for (i = 7; i <= NF; i++) {
+        if ($i == "-") break
+        if ($i ~ /^shared:/) { print "shared"; exit }
+      }
+      print "private"; exit
+    }' /proc/self/mountinfo 2>/dev/null
+}
+if [ "$(id -u)" = "0" ]; then
+  mkdir -p "$STORAGE_ROOT"
+  if [ "$(propagation_of "$STORAGE_ROOT")" = "shared" ]; then
+    log "storage root ${STORAGE_ROOT} is shared — pool mounts propagate to every container"
+  elif mount --make-shared "$STORAGE_ROOT" 2>/dev/null; then
+    log "made ${STORAGE_ROOT} a shared mount so pool mounts reach the other containers"
+    log "note: make it permanent with an /etc/fstab entry: ${STORAGE_ROOT} none none shared"
+  else
+    echo "warning: could not make ${STORAGE_ROOT} a shared mount." >&2
+    echo "         A pool created now stays invisible to the API and WebDAV containers." >&2
+    echo "         Fix it with: sudo mount --make-shared ${STORAGE_ROOT}" >&2
+  fi
+else
+  echo "warning: not running as root — skipped the ${STORAGE_ROOT} shared-mount check." >&2
+  echo "         If pools are created but Files stays empty: sudo mount --make-shared ${STORAGE_ROOT}" >&2
+fi
+
 # --- 3. Bring the stack up -----------------------------------------------------
 # Compose profiles for local replacements of shared platform services.
 PROFILES=""

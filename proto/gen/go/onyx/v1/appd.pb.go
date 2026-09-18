@@ -28,9 +28,13 @@ type App struct {
 	Version     string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
 	Description string                 `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
 	// Compose manifest (signed, from the store).
-	Manifest      string `protobuf:"bytes,5,opt,name=manifest,proto3" json:"manifest,omitempty"`
-	Status        string `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"` // not_installed | installed | updating
-	InstalledAt   string `protobuf:"bytes,7,opt,name=installed_at,json=installedAt,proto3" json:"installed_at,omitempty"`
+	Manifest    string `protobuf:"bytes,5,opt,name=manifest,proto3" json:"manifest,omitempty"`
+	Status      string `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"` // not_installed | installed | updating | error
+	InstalledAt string `protobuf:"bytes,7,opt,name=installed_at,json=installedAt,proto3" json:"installed_at,omitempty"`
+	// Per-installation settings chosen at install time (ports, paths, …). The
+	// manifest templates these in as ${key}; unset values fall back to the
+	// manifest's own defaults.
+	Config        map[string]string `protobuf:"bytes,8,rep,name=config,proto3" json:"config,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -114,6 +118,13 @@ func (x *App) GetInstalledAt() string {
 	return ""
 }
 
+func (x *App) GetConfig() map[string]string {
+	if x != nil {
+		return x.Config
+	}
+	return nil
+}
+
 type ListAppsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -195,9 +206,12 @@ func (x *ListAppsResponse) GetApps() []*App {
 }
 
 type InstallAppRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AppId         string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
-	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	AppId string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	// Optional pinned version; empty = the catalog's current version.
+	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	// Per-installation settings injected into the manifest as ${key}.
+	Config        map[string]string `protobuf:"bytes,3,rep,name=config,proto3" json:"config,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -246,11 +260,22 @@ func (x *InstallAppRequest) GetVersion() string {
 	return ""
 }
 
+func (x *InstallAppRequest) GetConfig() map[string]string {
+	if x != nil {
+		return x.Config
+	}
+	return nil
+}
+
 type UninstallAppRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	AppId string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
-	// Also remove the app's data volumes.
-	PurgeData     bool `protobuf:"varint,2,opt,name=purge_data,json=purgeData,proto3" json:"purge_data,omitempty"`
+	// Also remove the app's data volumes (irreversible).
+	PurgeData bool `protobuf:"varint,2,opt,name=purge_data,json=purgeData,proto3" json:"purge_data,omitempty"`
+	// Remove the app even when its containers are still running: they are stopped
+	// first. Off by default — an uninstall must not surprise an operator by
+	// killing a service that is in use.
+	Force         bool `protobuf:"varint,3,opt,name=force,proto3" json:"force,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -295,6 +320,13 @@ func (x *UninstallAppRequest) GetAppId() string {
 func (x *UninstallAppRequest) GetPurgeData() bool {
 	if x != nil {
 		return x.PurgeData
+	}
+	return false
+}
+
+func (x *UninstallAppRequest) GetForce() bool {
+	if x != nil {
+		return x.Force
 	}
 	return false
 }
@@ -344,12 +376,14 @@ func (x *UninstallAppResponse) GetUninstalled() bool {
 }
 
 type Container struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Image         string                 `protobuf:"bytes,3,opt,name=image,proto3" json:"image,omitempty"`
-	Status        string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"` // created | running | paused | exited | error
-	AppId         string                 `protobuf:"bytes,5,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Id     string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name   string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Image  string                 `protobuf:"bytes,3,opt,name=image,proto3" json:"image,omitempty"`
+	Status string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"` // created | running | paused | exited | error
+	AppId  string                 `protobuf:"bytes,5,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	// Compose service this container belongs to; the unit onyx-appd acts on.
+	Service       string `protobuf:"bytes,6,opt,name=service,proto3" json:"service,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -415,6 +449,13 @@ func (x *Container) GetStatus() string {
 func (x *Container) GetAppId() string {
 	if x != nil {
 		return x.AppId
+	}
+	return ""
+}
+
+func (x *Container) GetService() string {
+	if x != nil {
+		return x.Service
 	}
 	return ""
 }
@@ -644,7 +685,7 @@ var File_onyx_v1_appd_proto protoreflect.FileDescriptor
 
 const file_onyx_v1_appd_proto_rawDesc = "" +
 	"\n" +
-	"\x12onyx/v1/appd.proto\x12\aonyx.v1\"\xbc\x01\n" +
+	"\x12onyx/v1/appd.proto\x12\aonyx.v1\"\xa9\x02\n" +
 	"\x03App\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -652,25 +693,35 @@ const file_onyx_v1_appd_proto_rawDesc = "" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12\x1a\n" +
 	"\bmanifest\x18\x05 \x01(\tR\bmanifest\x12\x16\n" +
 	"\x06status\x18\x06 \x01(\tR\x06status\x12!\n" +
-	"\finstalled_at\x18\a \x01(\tR\vinstalledAt\"\x11\n" +
+	"\finstalled_at\x18\a \x01(\tR\vinstalledAt\x120\n" +
+	"\x06config\x18\b \x03(\v2\x18.onyx.v1.App.ConfigEntryR\x06config\x1a9\n" +
+	"\vConfigEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x11\n" +
 	"\x0fListAppsRequest\"4\n" +
 	"\x10ListAppsResponse\x12 \n" +
-	"\x04apps\x18\x01 \x03(\v2\f.onyx.v1.AppR\x04apps\"D\n" +
+	"\x04apps\x18\x01 \x03(\v2\f.onyx.v1.AppR\x04apps\"\xbf\x01\n" +
 	"\x11InstallAppRequest\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\"K\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12>\n" +
+	"\x06config\x18\x03 \x03(\v2&.onyx.v1.InstallAppRequest.ConfigEntryR\x06config\x1a9\n" +
+	"\vConfigEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"a\n" +
 	"\x13UninstallAppRequest\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x1d\n" +
 	"\n" +
-	"purge_data\x18\x02 \x01(\bR\tpurgeData\"8\n" +
+	"purge_data\x18\x02 \x01(\bR\tpurgeData\x12\x14\n" +
+	"\x05force\x18\x03 \x01(\bR\x05force\"8\n" +
 	"\x14UninstallAppResponse\x12 \n" +
-	"\vuninstalled\x18\x01 \x01(\bR\vuninstalled\"t\n" +
+	"\vuninstalled\x18\x01 \x01(\bR\vuninstalled\"\x8e\x01\n" +
 	"\tContainer\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
 	"\x05image\x18\x03 \x01(\tR\x05image\x12\x16\n" +
 	"\x06status\x18\x04 \x01(\tR\x06status\x12\x15\n" +
-	"\x06app_id\x18\x05 \x01(\tR\x05appId\".\n" +
+	"\x06app_id\x18\x05 \x01(\tR\x05appId\x12\x18\n" +
+	"\aservice\x18\x06 \x01(\tR\aservice\".\n" +
 	"\x15ListContainersRequest\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\tR\x05appId\"L\n" +
 	"\x16ListContainersResponse\x122\n" +
@@ -705,7 +756,7 @@ func file_onyx_v1_appd_proto_rawDescGZIP() []byte {
 	return file_onyx_v1_appd_proto_rawDescData
 }
 
-var file_onyx_v1_appd_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_onyx_v1_appd_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_onyx_v1_appd_proto_goTypes = []any{
 	(*App)(nil),                     // 0: onyx.v1.App
 	(*ListAppsRequest)(nil),         // 1: onyx.v1.ListAppsRequest
@@ -719,29 +770,33 @@ var file_onyx_v1_appd_proto_goTypes = []any{
 	(*StartContainerRequest)(nil),   // 9: onyx.v1.StartContainerRequest
 	(*StopContainerRequest)(nil),    // 10: onyx.v1.StopContainerRequest
 	(*RestartContainerRequest)(nil), // 11: onyx.v1.RestartContainerRequest
+	nil,                             // 12: onyx.v1.App.ConfigEntry
+	nil,                             // 13: onyx.v1.InstallAppRequest.ConfigEntry
 }
 var file_onyx_v1_appd_proto_depIdxs = []int32{
-	0,  // 0: onyx.v1.ListAppsResponse.apps:type_name -> onyx.v1.App
-	6,  // 1: onyx.v1.ListContainersResponse.containers:type_name -> onyx.v1.Container
-	1,  // 2: onyx.v1.Appd.ListApps:input_type -> onyx.v1.ListAppsRequest
-	3,  // 3: onyx.v1.Appd.InstallApp:input_type -> onyx.v1.InstallAppRequest
-	4,  // 4: onyx.v1.Appd.UninstallApp:input_type -> onyx.v1.UninstallAppRequest
-	7,  // 5: onyx.v1.Appd.ListContainers:input_type -> onyx.v1.ListContainersRequest
-	9,  // 6: onyx.v1.Appd.StartContainer:input_type -> onyx.v1.StartContainerRequest
-	10, // 7: onyx.v1.Appd.StopContainer:input_type -> onyx.v1.StopContainerRequest
-	11, // 8: onyx.v1.Appd.RestartContainer:input_type -> onyx.v1.RestartContainerRequest
-	2,  // 9: onyx.v1.Appd.ListApps:output_type -> onyx.v1.ListAppsResponse
-	0,  // 10: onyx.v1.Appd.InstallApp:output_type -> onyx.v1.App
-	5,  // 11: onyx.v1.Appd.UninstallApp:output_type -> onyx.v1.UninstallAppResponse
-	8,  // 12: onyx.v1.Appd.ListContainers:output_type -> onyx.v1.ListContainersResponse
-	6,  // 13: onyx.v1.Appd.StartContainer:output_type -> onyx.v1.Container
-	6,  // 14: onyx.v1.Appd.StopContainer:output_type -> onyx.v1.Container
-	6,  // 15: onyx.v1.Appd.RestartContainer:output_type -> onyx.v1.Container
-	9,  // [9:16] is the sub-list for method output_type
-	2,  // [2:9] is the sub-list for method input_type
-	2,  // [2:2] is the sub-list for extension type_name
-	2,  // [2:2] is the sub-list for extension extendee
-	0,  // [0:2] is the sub-list for field type_name
+	12, // 0: onyx.v1.App.config:type_name -> onyx.v1.App.ConfigEntry
+	0,  // 1: onyx.v1.ListAppsResponse.apps:type_name -> onyx.v1.App
+	13, // 2: onyx.v1.InstallAppRequest.config:type_name -> onyx.v1.InstallAppRequest.ConfigEntry
+	6,  // 3: onyx.v1.ListContainersResponse.containers:type_name -> onyx.v1.Container
+	1,  // 4: onyx.v1.Appd.ListApps:input_type -> onyx.v1.ListAppsRequest
+	3,  // 5: onyx.v1.Appd.InstallApp:input_type -> onyx.v1.InstallAppRequest
+	4,  // 6: onyx.v1.Appd.UninstallApp:input_type -> onyx.v1.UninstallAppRequest
+	7,  // 7: onyx.v1.Appd.ListContainers:input_type -> onyx.v1.ListContainersRequest
+	9,  // 8: onyx.v1.Appd.StartContainer:input_type -> onyx.v1.StartContainerRequest
+	10, // 9: onyx.v1.Appd.StopContainer:input_type -> onyx.v1.StopContainerRequest
+	11, // 10: onyx.v1.Appd.RestartContainer:input_type -> onyx.v1.RestartContainerRequest
+	2,  // 11: onyx.v1.Appd.ListApps:output_type -> onyx.v1.ListAppsResponse
+	0,  // 12: onyx.v1.Appd.InstallApp:output_type -> onyx.v1.App
+	5,  // 13: onyx.v1.Appd.UninstallApp:output_type -> onyx.v1.UninstallAppResponse
+	8,  // 14: onyx.v1.Appd.ListContainers:output_type -> onyx.v1.ListContainersResponse
+	6,  // 15: onyx.v1.Appd.StartContainer:output_type -> onyx.v1.Container
+	6,  // 16: onyx.v1.Appd.StopContainer:output_type -> onyx.v1.Container
+	6,  // 17: onyx.v1.Appd.RestartContainer:output_type -> onyx.v1.Container
+	11, // [11:18] is the sub-list for method output_type
+	4,  // [4:11] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_onyx_v1_appd_proto_init() }
@@ -755,7 +810,7 @@ func file_onyx_v1_appd_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_onyx_v1_appd_proto_rawDesc), len(file_onyx_v1_appd_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
