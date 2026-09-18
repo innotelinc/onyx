@@ -15,7 +15,7 @@ use tokio::sync::{broadcast, Mutex as AsyncMutex};
 use tonic::transport::Channel;
 
 use crate::onyx::privd_client::PrivdClient;
-use crate::onyx::{Device, DeviceEvent, PrivOp, PrivRequest, PrivResponse};
+use crate::onyx::{Device, DeviceEvent, Pool, PrivOp, PrivRequest, PrivResponse};
 use crate::registry::Registry;
 
 /// Filesystem types we never attach: they are not user-visible storage.
@@ -602,6 +602,23 @@ impl DeviceManager {
             self.registry.upsert_device(&formatted).map_err(|e| format!("registry: {e}"))?;
             if auto_mount {
                 self.mount_and_record_at(&formatted, mount_name).await?;
+            }
+            // Btrfs discovery refreshes its own pool record. Register ext4
+            // pools here as well so they remain visible after creation and
+            // restart; Btrfs-only features simply do not apply to them.
+            if fs_type == "ext4" {
+                if let Ok(scan) = self.lsblk().await {
+                    if let Some(info) = parse_lsblk(&scan).into_iter().find(|info| info.kname == formatted.kname) {
+                        self.registry.upsert_pool(&Pool {
+                            name: pool_name.to_string(),
+                            uuid: info.uuid,
+                            fs_type: "ext4".to_string(),
+                            total_bytes: info.size_bytes,
+                            used_bytes: 0,
+                            state: "online".to_string(),
+                        }).map_err(|e| format!("registry: {e}"))?;
+                    }
+                }
             }
             self.registry.get_device(&formatted.kname)
                 .map_err(|e| format!("registry: {e}"))?

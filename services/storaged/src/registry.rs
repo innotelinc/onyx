@@ -54,7 +54,7 @@ impl Registry {
     /// listed so the UI can show a degraded pool instead of a silent hole).
     pub fn mark_missing(&self, seen: &HashSet<String>) -> rusqlite::Result<()> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT uuid FROM pools WHERE state != 'offline'")?;
+        let mut stmt = conn.prepare("SELECT uuid FROM pools WHERE state != 'offline' AND fs_type = 'btrfs'")?;
         let known: Vec<String> = stmt.query_map([], |row| row.get(0))?.collect::<Result<_, _>>()?;
         for uuid in known {
             if !seen.contains(&uuid) {
