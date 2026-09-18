@@ -483,7 +483,7 @@ func cmdShareShow(ctx context.Context, c *client.Client, jsonOut bool, name stri
 
 func cmdShareCreate(ctx context.Context, c *client.Client, jsonOut bool, args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: onyx share create <name> <path> [--comment TEXT] [--readonly] [--smb|--nfs] [--json]")
+		return fmt.Errorf("usage: onyx share create <name> <path> [--comment TEXT] [--readonly] [--smb|--nfs|--ftp|--sftp|--webdav|--rsync] [--json]")
 	}
 	name, path := args[0], args[1]
 	req := &client.CreateShareRequest{Name: name, Path: path}
@@ -502,6 +502,14 @@ func cmdShareCreate(ctx context.Context, c *client.Client, jsonOut bool, args []
 			protocols = append(protocols, client.ProtocolSMB)
 		case "--nfs":
 			protocols = append(protocols, client.ProtocolNFS)
+		case "--ftp":
+			protocols = append(protocols, client.ProtocolFTP)
+		case "--sftp":
+			protocols = append(protocols, client.ProtocolSFTP)
+		case "--webdav":
+			protocols = append(protocols, client.ProtocolWebDAV)
+		case "--rsync":
+			protocols = append(protocols, client.ProtocolRsync)
 		default:
 			return fmt.Errorf("unknown flag %q", args[i])
 		}

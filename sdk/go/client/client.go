@@ -299,8 +299,12 @@ func (c *Client) CreatePool(ctx context.Context, req *CreatePoolRequest) (*Pool,
 type ShareProtocol string
 
 const (
-	ProtocolSMB ShareProtocol = "SMB"
-	ProtocolNFS ShareProtocol = "NFS"
+	ProtocolSMB    ShareProtocol = "SMB"
+	ProtocolNFS    ShareProtocol = "NFS"
+	ProtocolFTP    ShareProtocol = "FTP"
+	ProtocolSFTP   ShareProtocol = "SFTP"
+	ProtocolWebDAV ShareProtocol = "WEBDAV"
+	ProtocolRsync  ShareProtocol = "RSYNC"
 )
 
 // Share mirrors onyx.v1.Share (protojson camelCase; protocols as enum names).

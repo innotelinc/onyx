@@ -287,7 +287,8 @@ func (s *server) handleShares(w http.ResponseWriter, r *http.Request) {
 }
 
 // createShareBody is the wire form of a share-create request. Protocols use
-// friendly names ("smb", "nfs") rather than proto enum values.
+// friendly lowercase names ("smb", "nfs", "ftp", "sftp", "webdav", "rsync")
+// rather than proto enum values.
 type createShareBody struct {
 	Name      string   `json:"name"`
 	Path      string   `json:"path"`
@@ -309,15 +310,15 @@ func (s *server) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		Readonly: body.Readonly,
 	}
 	for _, p := range body.Protocols {
-		switch strings.ToLower(p) {
-		case "smb":
-			req.Protocols = append(req.Protocols, onyxv1.ShareProtocol_SHARE_PROTOCOL_SMB)
-		case "nfs":
-			req.Protocols = append(req.Protocols, onyxv1.ShareProtocol_SHARE_PROTOCOL_NFS)
-		default:
-			writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: fmt.Sprintf("unknown protocol %q (expected smb or nfs)", p)})
+		// "smb" -> SHARE_PROTOCOL_SMB; the generated enum table keeps this in
+		// step with the contract as protocols are added (docs/design/05#6).
+		v, ok := onyxv1.ShareProtocol_value["SHARE_PROTOCOL_"+strings.ToUpper(strings.TrimSpace(p))]
+		proto := onyxv1.ShareProtocol(v)
+		if !ok || proto == onyxv1.ShareProtocol_SHARE_PROTOCOL_UNSPECIFIED {
+			writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: fmt.Sprintf("unknown protocol %q (expected smb, nfs, ftp, sftp, webdav or rsync)", p)})
 			return
 		}
+		req.Protocols = append(req.Protocols, proto)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()

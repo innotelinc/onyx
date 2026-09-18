@@ -13,8 +13,8 @@ import (
 
 // fakeShared implements SharedClient with a scripted RenderAll response.
 type fakeShared struct {
-	smb, nfs string
-	calls    int
+	smb, nfs, ftp, sftp, webdav, rsync string
+	calls                              int
 }
 
 func (f *fakeShared) RenderConfig(context.Context, *onyxv1.RenderConfigRequest, ...grpc.CallOption) (*onyxv1.RenderConfigResponse, error) {
@@ -23,7 +23,14 @@ func (f *fakeShared) RenderConfig(context.Context, *onyxv1.RenderConfigRequest, 
 
 func (f *fakeShared) RenderAll(_ context.Context, _ *onyxv1.RenderAllRequest, _ ...grpc.CallOption) (*onyxv1.RenderAllResponse, error) {
 	f.calls++
-	return &onyxv1.RenderAllResponse{SmbConf: f.smb, NfsExports: f.nfs}, nil
+	return &onyxv1.RenderAllResponse{
+		SmbConf:    f.smb,
+		NfsExports: f.nfs,
+		FtpConf:    f.ftp,
+		SftpConf:   f.sftp,
+		WebdavConf: f.webdav,
+		RsyncConf:  f.rsync,
+	}, nil
 }
 
 // fakePrivd implements PrivdClient, recording every Run in order. failReload
@@ -140,6 +147,42 @@ func TestConfigApplyReloadFailureRetries(t *testing.T) {
 	}
 	if len(p.reloads) != 2 {
 		t.Errorf("expected 2 reloads (fail + retry), got %v", p.reloads)
+	}
+}
+
+func TestConfigApplyMaterializesOptionalProtocols(t *testing.T) {
+	a, fakeS, p := applierFixture(t,
+		&onyxv1.Share{Name: "media", Path: "/mnt/onyx/media", Protocols: []onyxv1.ShareProtocol{
+			onyxv1.ShareProtocol_SHARE_PROTOCOL_SMB,
+			onyxv1.ShareProtocol_SHARE_PROTOCOL_FTP,
+			onyxv1.ShareProtocol_SHARE_PROTOCOL_SFTP,
+			onyxv1.ShareProtocol_SHARE_PROTOCOL_WEBDAV,
+			onyxv1.ShareProtocol_SHARE_PROTOCOL_RSYNC,
+		}},
+	)
+	fakeS.ftp, fakeS.sftp, fakeS.webdav, fakeS.rsync = "# ftp", "# sftp", "# davd", "# rsync"
+
+	if err := a.apply(context.Background()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(p.writes) != 6 {
+		t.Fatalf("expected 6 target writes, got %v", p.writes)
+	}
+	if len(p.reloads) != 1 || strings.Join(p.reloads[0], ",") != "smb,nfs,ftp,sftp,webdav,rsync" {
+		t.Errorf("expected one reload of every touched daemon, got %v", p.reloads)
+	}
+
+	// Turning a protocol off (last share using it removed) rewrites it empty
+	// and reloads only that daemon.
+	fakeS.webdav = ""
+	if err := a.apply(context.Background()); err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+	if len(p.writes) != 7 || !strings.HasPrefix(p.writes[6], "webdav=") {
+		t.Errorf("expected the cleared webdav target to be rewritten, got %v", p.writes)
+	}
+	if len(p.reloads) != 2 || strings.Join(p.reloads[1], ",") != "webdav" {
+		t.Errorf("expected reload of only webdav, got %v", p.reloads)
 	}
 }
 

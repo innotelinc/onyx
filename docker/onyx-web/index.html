@@ -498,6 +498,14 @@
         '<div class="card" style="margin-top:16px" id="storage-pool-setup"><h3>Create an Onyx storage pool</h3><p class="sub">Format a whole removable disk, then mount it automatically under /mnt/onyx. Disks Onyx already mounted can be re-created in place.</p><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end"><label>Disk<select id="pool-device" class="search" style="width:100%;max-width:none"><option value="">Loading safe disks…</option></select></label><label>Pool label<input id="pool-name" class="search" style="width:100%;max-width:none" placeholder="main-pool"></label><label>Filesystem<select id="pool-fs" class="search" style="width:100%;max-width:none"><option value="btrfs">Btrfs</option><option value="ext4">ext4</option></select></label><label>Mount directory<input id="pool-mount-name" class="search" style="width:100%;max-width:none" placeholder="Defaults to pool label"></label><label style="display:flex;gap:8px;align-items:center"><input id="pool-auto-mount" type="checkbox" checked> Auto-mount after format</label><label style="display:flex;gap:8px;align-items:center"><input id="pool-force" type="checkbox"> Force erase existing signatures</label><button class="btn" id="pool-preview">Review destructive operation</button></div><div id="pool-warning" class="sub" style="margin-top:12px">A verified backup and final confirmation are required before any erase operation.</div></div>';
     }
 
+    // protojson serializes protocol enums as names ("SHARE_PROTOCOL_SMB");
+    // render them the way users see them in the API and CLI ("smb, nfs").
+    function friendlyProtocols(list) {
+      return (list || []).map(function (p) {
+        return String(p).replace(/^SHARE_PROTOCOL_/, '').toLowerCase();
+      }).join(', ');
+    }
+
     function formatBytes(value) {
       var n = Number(value || 0);
       if (!n) return '0 MB';
@@ -665,6 +673,11 @@
         '<div style="display:flex;gap:16px;align-items:center;margin-top:16px;flex-wrap:wrap">' +
         '<label><input type="checkbox" id="share-smb" checked> SMB</label>' +
         '<label><input type="checkbox" id="share-nfs" checked> NFS</label>' +
+        // Every extra protocol is off until the operator opts in (docs/design/05#6).
+        '<label><input type="checkbox" id="share-ftp"> FTP</label>' +
+        '<label><input type="checkbox" id="share-sftp"> SFTP</label>' +
+        '<label><input type="checkbox" id="share-webdav"> WebDAV</label>' +
+        '<label><input type="checkbox" id="share-rsync"> Rsync</label>' +
         '<label><input type="checkbox" id="share-readonly"> Read-only</label>' +
         '<button class="btn primary" id="share-create">Create share</button>' +
         '</div><p class="sub" style="margin-bottom:0">Only folders under the mounted Onyx storage root can be shared. No disk formatting is performed here.</p></div>' +
@@ -697,7 +710,7 @@
       apiJSON('/shares').then(function (data) {
         var rows = data.shares || [];
         list.innerHTML = rows.length ? '<div style="display:grid;gap:10px">' + rows.map(function (s) {
-          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(s.name) + '</b><div class="sub">' + esc(s.path) + ' · ' + esc((s.protocols || []).join(', ')) + '</div></div><div style="display:flex;gap:8px;align-items:center"><span class="tag">' + (s.readonly ? 'read-only' : 'read-write') + '</span><button class="btn" data-share-delete="' + esc(s.name) + '">Remove</button></div></div>';
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(s.name) + '</b><div class="sub">' + esc(s.path) + ' · ' + esc(friendlyProtocols(s.protocols)) + '</div></div><div style="display:flex;gap:8px;align-items:center"><span class="tag">' + (s.readonly ? 'read-only' : 'read-write') + '</span><button class="btn" data-share-delete="' + esc(s.name) + '">Remove</button></div></div>';
         }).join('') + '</div>' : '<div class="empty"><b>No shares yet</b>Create a share to expose a dataset over SMB or NFS.</div>';
         Array.prototype.forEach.call(list.querySelectorAll('[data-share-delete]'), function (button) { button.addEventListener('click', function () { if (!confirm('Remove this share? Files will remain unchanged.')) return; apiJSON('/shares/' + encodeURIComponent(button.dataset.shareDelete), { method: 'DELETE' }).then(loadShares).catch(showError); }); });
       }).catch(showError);
@@ -841,6 +854,10 @@
           var protocols = [];
           if (document.getElementById('share-smb').checked) protocols.push('smb');
           if (document.getElementById('share-nfs').checked) protocols.push('nfs');
+          if (document.getElementById('share-ftp').checked) protocols.push('ftp');
+          if (document.getElementById('share-sftp').checked) protocols.push('sftp');
+          if (document.getElementById('share-webdav').checked) protocols.push('webdav');
+          if (document.getElementById('share-rsync').checked) protocols.push('rsync');
           if (!name || !relativePath || !protocols.length) {
             showError({ error: { message: 'Choose a name, storage folder, and at least one protocol.' } });
             return;
