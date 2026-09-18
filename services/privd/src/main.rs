@@ -220,8 +220,11 @@ enum AllowedCommand {
         mountpoint: PathBuf,
         options: Vec<String>,
     },
-    /// `umount <mountpoint>` — detach one device mounted under the allowed root.
-    UnmountBlock { mountpoint: PathBuf },
+    /// `umount [-f|-l] <mountpoint>` — detach one device mounted under the
+    /// allowed root. With force=true a busy mount is retried with `-f`
+    /// (force) and then `-l` (lazy detach) so a lingering handle cannot block
+    /// an operation the user already confirmed (pool creation).
+    UnmountBlock { mountpoint: PathBuf, force: bool },
     /// `smartctl -H -A <device>` — SMART health + temperature probe.
     SmartInfo { device: PathBuf },
     /// `mkfs.btrfs -f -L <label> <device>` — format one verified device.
@@ -385,13 +388,22 @@ impl Allowlist {
                 Ok(AllowedCommand::MountBlock { device, mountpoint, options })
             }
             PrivOp::UnmountBlock => {
-                if req.args.len() != 1 {
+                if req.args.is_empty() || req.args.len() > 2 {
                     return Err(Status::invalid_argument(
-                        "UNMOUNT_BLOCK requires exactly one mountpoint argument",
+                        "UNMOUNT_BLOCK requires <mountpoint> [force]",
                     ));
                 }
                 let mountpoint = validate_mount_path(&req.args[0], &self.allowed_root)?;
-                Ok(AllowedCommand::UnmountBlock { mountpoint })
+                let force = match req.args.get(1).map(String::as_str) {
+                    None | Some("false") => false,
+                    Some("true") => true,
+                    Some(other) => {
+                        return Err(Status::invalid_argument(format!(
+                            "force must be true or false, got {other:?}"
+                        )))
+                    }
+                };
+                Ok(AllowedCommand::UnmountBlock { mountpoint, force })
             }
             PrivOp::SmartInfoRaw => {
                 if req.args.len() != 1 {
@@ -695,10 +707,36 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
             args.push(mountpoint.display().to_string());
             (allowlist.mount_bin.clone(), args)
         }
-        AllowedCommand::UnmountBlock { mountpoint } => (
-            allowlist.umount_bin.clone(),
-            vec![mountpoint.display().to_string()],
-        ),
+        AllowedCommand::UnmountBlock { mountpoint, force } => {
+            // Escalating unmount: a plain `umount` first; when the caller asked
+            // for force, a busy mount is retried with `-f` (force) and then
+            // `-l` (lazy detach) so a stale handle cannot block a destructive
+            // operation the user already confirmed.
+            let target = mountpoint.display().to_string();
+            let mut attempts: Vec<Vec<String>> = vec![vec![target.clone()]];
+            if *force {
+                attempts.push(vec!["-f".into(), target.clone()]);
+                attempts.push(vec!["-l".into(), target.clone()]);
+            }
+            let mut last: Option<std::process::Output> = None;
+            for args in attempts {
+                let out = run_argv(&allowlist.umount_bin, &args).await?;
+                if out.status.success() {
+                    return Ok(PrivResponse {
+                        exit_code: 0,
+                        stdout: out.stdout,
+                        stderr: out.stderr,
+                    });
+                }
+                last = Some(out);
+            }
+            let out = last.expect("at least one umount attempt");
+            return Ok(PrivResponse {
+                exit_code: out.status.code().unwrap_or(-1) as i32,
+                stdout: out.stdout,
+                stderr: out.stderr,
+            });
+        }
         AllowedCommand::SmartInfo { device } => (
             allowlist.smartctl_bin.clone(),
             vec!["-H".into(), "-A".into(), device.display().to_string()],
@@ -937,6 +975,84 @@ mod tests {
         assert_eq!(resp.exit_code, 0);
         let log = fs::read_to_string(dir.path().join("argv.log")).unwrap();
         assert!(log.lines().any(|line| line.contains("mkfs.ext4") && line.contains("|-F") && line.contains("|-L|data")), "{log}");
+    }
+
+    #[tokio::test]
+    async fn unmount_block_force_escalates_until_it_succeeds() {
+        let dir = TempDir::new("umount-force");
+        // Fake umount that only succeeds for the lazy `-l` variant, so the
+        // escalating force path must try plain, `-f`, then `-l`.
+        let log = dir.path().join("argv.log");
+        let script = format!(
+            "#!/bin/sh\n{{ printf '%s' \"$0\"; printf '|%s' \"$@\"; printf '\\n'; }} >> \"{}\"\n[ \"$1\" = \"-l\" ] && exit 0\nexit 1\n",
+            log.display()
+        );
+        let umount = fake_bin(dir.path(), "umount", &script);
+        let record = |name: &str| fake_bin(dir.path(), name, "#!/bin/sh\nexit 0\n");
+        let a = Allowlist::new(
+            &record("btrfs"),
+            &record("lsblk"),
+            &record("mount"),
+            &umount,
+            &record("mkdir"),
+            &record("smartctl"),
+            &record("mkfs.btrfs"),
+            &record("mkfs.ext4"),
+            &record("testparm"),
+            &record("systemctl"),
+            &record("exportfs"),
+            dir.path(),
+            dir.path(),
+            dir.path().join("dev").as_path(),
+        );
+        let mountpoint = dir.path().join("usb-stick");
+        fs::create_dir_all(&mountpoint).unwrap();
+
+        // Without force a busy mount is reported as-is, no retry.
+        let resp = run_request(
+            &a,
+            &request(PrivOp::UnmountBlock, vec![mountpoint.to_str().unwrap()]),
+        )
+        .await
+        .unwrap();
+        assert_ne!(resp.exit_code, 0, "plain umount must fail");
+
+        let resp = run_request(
+            &a,
+            &request(PrivOp::UnmountBlock, vec![mountpoint.to_str().unwrap(), "true"]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp.exit_code, 0, "forced unmount must fall back to umount -l");
+        let log = fs::read_to_string(&log).unwrap();
+        assert!(log.contains("|-f|"), "force attempt logged: {log}");
+        assert!(log.contains("|-l|"), "lazy attempt logged: {log}");
+    }
+
+    #[test]
+    fn unmount_block_validates_force_argument() {
+        let dir = TempDir::new("umount-bad");
+        let a = test_allowlist(dir.path());
+        let mountpoint = dir.path().join("data");
+        fs::create_dir_all(&mountpoint).unwrap();
+
+        // force must be a boolean literal
+        let err = a
+            .validate(&request(
+                PrivOp::UnmountBlock,
+                vec![mountpoint.to_str().unwrap(), "yes"],
+            ))
+            .expect_err("bad force rejected");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument, "{err}");
+
+        // too many args
+        let err = a
+            .validate(&request(
+                PrivOp::UnmountBlock,
+                vec![mountpoint.to_str().unwrap(), "true", "extra"],
+            ))
+            .expect_err("extra arg rejected");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument, "{err}");
     }
 
     #[tokio::test]

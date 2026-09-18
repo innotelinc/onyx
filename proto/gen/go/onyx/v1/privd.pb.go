@@ -43,7 +43,10 @@ const (
 	// mountpoint must resolve inside /mnt/onyx/.
 	PrivOp_MOUNT_BLOCK PrivOp = 4
 	// `umount <mountpoint>` — detach one device mounted under /mnt/onyx/.
-	// Safe to call after an unplug (the kernel keeps the mount alive).
+	// Safe to call after an unplug (the kernel keeps the mount alive). An
+	// optional second argument "true" forces a busy mount to be retried with
+	// `umount -f` then `umount -l`; used only by operations the user already
+	// confirmed (e.g. formatting a disk into a pool).
 	PrivOp_UNMOUNT_BLOCK PrivOp = 5
 	// `smartctl -H -A <device>` — SMART health + attributes (temperature).
 	// The single argument must be a validated block device under /dev/.
