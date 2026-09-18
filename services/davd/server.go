@@ -57,15 +57,23 @@ const (
 	authModeNone    = "none"
 )
 
-// parseConfig reads the TOML-subset onyx-shared renders: `[server]`, repeated
-// `[[share]]` tables, and `key = "value"` / `key = true` pairs.
-func parseConfig(data []byte) (*config, error) {
-	cfg := &config{
+// defaultConfig is the configuration used before onyx-core has rendered
+// davd.conf at all: no shares, loopback only, gateway auth. It is the same
+// baseline parseConfig starts from, so a config that appears later only ever
+// adds to it.
+func defaultConfig() *config {
+	return &config{
 		Listen:         "127.0.0.1:8081",
 		TLS:            "upstream",
 		Auth:           authModeGateway,
 		IdentityHeader: "X-Onyx-User",
 	}
+}
+
+// parseConfig reads the TOML-subset onyx-shared renders: `[server]`, repeated
+// `[[share]]` tables, and `key = "value"` / `key = true` pairs.
+func parseConfig(data []byte) (*config, error) {
+	cfg := defaultConfig()
 
 	section := ""
 	seen := map[string]bool{}
@@ -215,9 +223,19 @@ func parseValue(v string) (string, error) {
 	return "", fmt.Errorf("unsupported value %s (expected a quoted string or true/false)", v)
 }
 
+// errNoConfig reports that the config file has not been rendered yet. That is
+// the normal state on a machine where no share has enabled WebDAV: the systemd
+// unit is gated on the file (`ConditionPathExists`), but a container cannot be,
+// so onyx-davd has to tell "nothing configured yet" apart from "the render is
+// broken" — the first is an empty share table, the second must not serve.
+var errNoConfig = errors.New("no share configuration has been rendered yet")
+
 func loadConfig(path string) (*config, error) {
 	f, err := os.Open(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: %s", errNoConfig, path)
+		}
 		return nil, err
 	}
 	defer f.Close()

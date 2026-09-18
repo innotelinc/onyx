@@ -27,16 +27,31 @@ import (
 // HTTP Basic is still accepted, because it is what this service accepted before
 // SigV4 landed and dropping it would break a deployment on upgrade; see
 // authenticateS3Request.
-func newS3Handler(s *server) http.Handler {
+//
+// Credentials come from the environment, and an *empty* S3_ACCESS_KEY used to
+// mean "authenticate nobody", which served every bucket to anyone who could
+// reach the port — the compose deployment publishes it. That is fail-open on a
+// data plane, so the empty case now denies every request unless the operator
+// explicitly asks for anonymous access (--s3-allow-anonymous, for a loopback
+// development run). The same rule the rest of the platform applies to secrets:
+// a missing credential refuses rather than silently widening access.
+func newS3Handler(s *server, allowAnonymous bool) http.Handler {
 	access := os.Getenv("S3_ACCESS_KEY")
 	secret := os.Getenv("S3_SECRET_KEY")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if access != "" {
-			if err := authenticateS3Request(r, access, secret, "s3"); err != nil {
-				writeS3AuthError(w, err)
+		if access == "" {
+			if !allowAnonymous {
+				writeS3Error(w, http.StatusForbidden, "AccessDenied",
+					"the object endpoint has no credentials configured; set S3_ACCESS_KEY and S3_SECRET_KEY, or pass --s3-allow-anonymous for anonymous access")
 				return
 			}
+			routeS3(s, w, r)
+			return
+		}
+		if err := authenticateS3Request(r, access, secret, "s3"); err != nil {
+			writeS3AuthError(w, err)
+			return
 		}
 		routeS3(s, w, r)
 	})

@@ -92,11 +92,14 @@ The single root process. Design rules:
 - If `onyx-privd` is compromised, the blast radius is contained to the allowlist — it cannot
   execute arbitrary commands.
 
-**Implemented (v0.1):** `services/privd` with `btrfs filesystem show --raw` and
-`btrfs filesystem usage -b` allowed (contract in `proto/onyx/v1/privd.proto`); execution is
-via explicit `argv` with a hard timeout, never a shell, and mount paths are canonicalized
-and required to stay under `/mnt/onyx`. Peer-identity audit (SO_PEERCRED) and the remaining
-ops (`nft`, `smartctl`, `systemctl`, …) arrive with the milestones that need them.
+**Implemented:** `services/privd` (contract in `proto/onyx/v1/privd.proto`) allows
+`btrfs` probes, `lsblk`, `mount`/`umount`, `mkdir`/`rmdir`, `smartctl`, `mkfs.btrfs`,
+`mkfs.ext4`, `wipefs`, and — for the destructive pool path only — `swapoff`, `dmsetup`,
+`mdadm` and `losetup` (releasing the stacks that hold a disk; `docs/design/05` §2.3), plus
+the config-write/reload ops for the protocol daemons. Execution is via explicit `argv` with a
+hard timeout, never a shell; paths are canonicalized and required to stay under the allowed
+roots. Peer-identity audit (SO_PEERCRED) and the remaining ops (`nft`, `systemctl` subsets,
+power actions) arrive with the milestones that need them.
 
 ## 8. Observability
 

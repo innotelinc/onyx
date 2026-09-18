@@ -541,7 +541,7 @@
         '<div class="grid" style="margin-bottom:16px"><div class="card" id="storage-card"><h3>Storage</h3><div class="stat">—</div><div class="sub">Loading pool capacity…</div></div></div>' +
         '<div class="card" id="storage-pools"><div class="empty"><b>Loading pools…</b>Checking mounted storage.</div></div>' +
         '<div class="card" style="margin-top:16px" id="storage-devices"><div class="empty"><b>Loading devices…</b>Scanning block devices.</div></div>' +
-        '<div class="card" style="margin-top:16px" id="storage-pool-setup"><h3>Create an Onyx storage pool</h3><p class="sub">Format a whole removable disk, then mount it automatically under /mnt/onyx. The defaults below — label <b>main-pool</b>, Btrfs, mounted at /mnt/onyx/main-pool, force unmount and erase — are ready to use; change any option before creating. Disks Onyx already mounted can be re-created in place.</p><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end"><label>Disk<select id="pool-device" class="search" style="width:100%;max-width:none"><option value="">Loading safe disks…</option></select></label><label>Pool label<input id="pool-name" class="search" style="width:100%;max-width:none" value="main-pool" placeholder="main-pool"></label><label>Filesystem<select id="pool-fs" class="search" style="width:100%;max-width:none"><option value="btrfs">Btrfs</option><option value="ext4">ext4</option></select></label><label>Mount directory<input id="pool-mount-name" class="search" style="width:100%;max-width:none" placeholder="Defaults to pool label"></label><label style="display:flex;gap:8px;align-items:center"><input id="pool-auto-mount" type="checkbox" checked> Auto-mount after format</label><label style="display:flex;gap:8px;align-items:center"><input id="pool-force" type="checkbox" checked> Force unmount &amp; erase</label><button class="btn" id="pool-preview">Review destructive operation</button><button class="btn" id="pool-defaults">Use defaults</button></div><div id="pool-warning" class="sub" style="margin-top:12px">A verified backup and final confirmation are required before any erase operation.</div></div>';
+        '<div class="card" style="margin-top:16px" id="storage-pool-setup"><h3>Create an Onyx storage pool</h3><p class="sub">Format a whole disk, then mount it automatically under /mnt/onyx. The defaults below — label <b>main-pool</b>, Btrfs, mounted at /mnt/onyx/main-pool, force unmount and erase — are ready to use; change any option before creating. Any whole disk can be pooled — internal disks included — and a disk Onyx already mounted is re-created in place.</p><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end"><label>Disk<select id="pool-device" class="search" style="width:100%;max-width:none"><option value="">Loading safe disks…</option></select></label><label>Pool label<input id="pool-name" class="search" style="width:100%;max-width:none" value="main-pool" placeholder="main-pool"></label><label>Filesystem<select id="pool-fs" class="search" style="width:100%;max-width:none"><option value="btrfs">Btrfs</option><option value="ext4">ext4</option></select></label><label>Mount directory<input id="pool-mount-name" class="search" style="width:100%;max-width:none" placeholder="Defaults to pool label"></label><label style="display:flex;gap:8px;align-items:center"><input id="pool-auto-mount" type="checkbox" checked> Auto-mount after format</label><label style="display:flex;gap:8px;align-items:center"><input id="pool-force" type="checkbox" checked> Force unmount &amp; erase</label><button class="btn" id="pool-preview">Review destructive operation</button><button class="btn" id="pool-defaults">Use defaults</button></div><div id="pool-warning" class="sub" style="margin-top:12px">A verified backup and final confirmation are required before any erase operation.</div></div>';
     }
 
     // protojson serializes protocol enums as names ("SHARE_PROTOCOL_SMB");
@@ -571,7 +571,17 @@
       return device.type || 'Block device';
     }
 
+    // `nodePresent` is answered by the data plane about its own /dev: a disk can
+    // be listed from /sys and still have no device node in the container's mount
+    // namespace, in which case nothing can be formatted or mounted on it. Saying
+    // so is the difference between "not visible to Onyx" and a failed erase.
+    function deviceNodeNote(device) {
+      if (device.nodePresent === false) return 'Not visible to Onyx: ' + (device.path || '/dev/' + device.kname) + ' does not exist in the data plane, so this disk can be listed but not formatted or mounted (bind /dev into onyx-privd and onyx-storaged).';
+      return '';
+    }
+
     function deviceWarning(device) {
+      if (device.nodePresent === false) return deviceNodeNote(device);
       if (device.mountpoint && device.mountpoint.indexOf('/mnt/onyx') !== 0) return 'Already mounted by the host; Onyx will not touch it.';
       if (!device.fsType) return 'No filesystem signature detected. It may be unused, encrypted, RAID/LVM metadata, or an unformatted partition.';
       if (['vfat', 'fat32', 'exfat', 'ntfs', 'ext2', 'ext3', 'ext4', 'xfs', 'btrfs', 'hfsplus', 'apfs'].indexOf(String(device.fsType).toLowerCase()) < 0) return 'Filesystem detected. Attach will ask the Linux kernel to mount it; support depends on the host kernel/tools.';
@@ -618,8 +628,9 @@
         devices.innerHTML = '<h3>Devices</h3><p class="sub">Onyx identifies disks by label, UUID, filesystem, size, mountpoint, and removable status. It never formats a device from this screen.</p>' + (deviceRows.length ? '<div style="display:grid;gap:10px">' + deviceRows.map(function (device) {
           var attached = device.state === 'mounted' || !!device.mountpoint;
           var outside = device.mountpoint && device.mountpoint.indexOf('/mnt/onyx') !== 0;
-          var attachable = !!device.fsType && !outside;
-          var action = attached ? (outside ? '<button class="btn" disabled title="Mounted outside Onyx">Host mounted</button>' : '<button class="btn" data-device-detach="' + esc(device.name) + '">Detach</button>') : (attachable ? '<button class="btn primary" data-device-attach="' + esc(device.name) + '">Attach</button>' : '<button class="btn" disabled title="No filesystem signature; formatting is intentionally not offered here">Needs filesystem</button>');
+          var visible = device.nodePresent !== false;
+          var attachable = !!device.fsType && !outside && visible;
+          var action = attached ? (outside ? '<button class="btn" disabled title="Mounted outside Onyx">Host mounted</button>' : '<button class="btn" data-device-detach="' + esc(device.name) + '">Detach</button>') : (attachable ? '<button class="btn primary" data-device-attach="' + esc(device.name) + '">Attach</button>' : '<button class="btn" disabled title="' + (visible ? 'No filesystem signature; formatting is intentionally not offered here' : 'This device has no node in the data plane container') + '">' + (visible ? 'Needs filesystem' : 'Not visible') + '</button>');
           var identity = [device.path || device.kname, device.fsType || 'no filesystem signature', formatBytes(device.sizeBytes), device.uuid ? 'UUID ' + device.uuid : 'no UUID'].join(' · ');
           return '<div class="event" style="justify-content:space-between;align-items:flex-start;border-bottom:1px solid var(--onyx-border);padding:12px 0"><div style="min-width:0"><b>' + esc(device.label || device.name) + '</b><div class="sub">' + esc(deviceRole(device)) + ' · ' + esc(identity) + '</div><div class="sub">' + esc(deviceWarning(device)) + (device.mountpoint ? ' · ' + esc(device.mountpoint) : '') + '</div></div><div style="display:flex;align-items:center;gap:8px;flex-shrink:0"><span class="tag">' + esc(device.state || 'unknown') + '</span>' + action + '</div></div>';
         }).join('') + '</div>' : '<div class="empty"><b>No devices detected</b>Connect a disk or USB drive to make it available to Onyx.</div>');
@@ -1232,23 +1243,42 @@
       if (v.id === 'storage') {
         document.getElementById('storage-refresh').addEventListener('click', refreshStorage);
         refreshStorage();
-        // Disks offered for pool creation: unused ones plus disks Onyx already
-        // mounted (re-creating a pool unmounts them, erases them and mounts
-        // them again in place). Anything the host mounted outside /mnt/onyx is
-        // hidden — those are never touched.
+        // Disks offered for pool creation: any whole device (a whole disk or a
+        // loop device) plus disks Onyx already mounted — re-creating a pool
+        // unmounts them, erases them and mounts them again in place. The one
+        // hard exclusion is a device the host mounted outside /mnt/onyx: it
+        // holds somebody else's data, and creating a pool would erase it.
+        // Internal (non-removable) disks are offered and labelled, because on
+        // most machines they are the only disks there are; the label is what
+        // makes the destructive step deliberate.
         var poolDisks = [];
         var poolDevices = [];
         apiJSON('/devices').then(function (data) {
           var select = document.getElementById('pool-device');
           poolDevices = data.devices || [];
+          // `nodePresent === false` means the data plane cannot open the device:
+          // offering it would produce a failed erase after the confirmation, so
+          // it is left out and explained instead.
+          var hidden = poolDevices.filter(function (device) {
+            return (device.type === 'disk' || device.type === 'loop') && device.nodePresent === false;
+          });
           poolDisks = poolDevices.filter(function (device) {
-            if (device.type !== 'disk' || !device.removable || device.state === 'detached') return false;
+            if (device.type !== 'disk' && device.type !== 'loop') return false;
+            if (device.state === 'detached') return false;
+            if (device.nodePresent === false) return false;
             return diskMountState(device, poolDevices) !== 'host';
           });
-          select.innerHTML = poolDisks.length ? '<option value="">Choose a removable disk…</option>' + poolDisks.map(function (device) {
-            var note = diskMountState(device, poolDevices) === 'onyx' ? ' · mounted by Onyx — will be erased and re-mounted' : '';
+          select.innerHTML = poolDisks.length ? '<option value="">Choose a disk…</option>' + poolDisks.map(function (device) {
+            var mounts = diskMountState(device, poolDevices);
+            var note = mounts === 'onyx' ? ' · mounted by Onyx — will be erased and re-mounted'
+              : (device.type === 'loop' ? ' · loop device (file-backed scratch)'
+                : (device.removable ? '' : ' · internal disk'));
             return '<option value="' + esc(device.name) + '">' + esc(device.path + ' · ' + formatBytes(device.sizeBytes) + (device.label ? ' · ' + device.label : '') + note) + '</option>';
-          }).join('') : '<option value="">No safe removable disks detected</option>';
+          }).join('') : '<option value="">No poolable disks detected</option>';
+          if (hidden.length) {
+            var hiddenWarning = document.getElementById('pool-warning');
+            if (hiddenWarning) hiddenWarning.textContent = hidden.length + ' disk(s) are hidden because Onyx cannot open them: ' + hidden.map(function (d) { return d.path || '/dev/' + d.kname; }).join(', ') + '. Device nodes are missing from the data plane containers — bind /dev into onyx-privd and onyx-storaged, then refresh.';
+          }
         }).catch(showError);
         document.getElementById('pool-defaults').addEventListener('click', function () {
           document.getElementById('pool-name').value = 'main-pool';
@@ -1267,7 +1297,7 @@
           var autoMount = document.getElementById('pool-auto-mount').checked;
           var force = document.getElementById('pool-force').checked;
           var warning = document.getElementById('pool-warning');
-          if (!device) { warning.textContent = 'Choose a removable whole disk first.'; return; }
+          if (!device) { warning.textContent = 'Choose a whole disk first.'; return; }
           var selected = poolDisks.filter(function (d) { return d.name === device; })[0];
           var path = selected ? selected.path : '/dev/' + device;
           var remountNote = selected && diskMountState(selected, poolDevices) === 'onyx' ? ' It is mounted by Onyx right now and will be unmounted first (forced if busy).' : '';

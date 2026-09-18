@@ -15,6 +15,7 @@
 //! validator, and one match arm below.
 
 use std::io::Write;
+use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
@@ -66,7 +67,9 @@ fn main() -> ExitCode {
         &args.config_dir,
         &args.allowed_root,
         &args.dev_root,
-    );
+    )
+    .with_holder_tools(&args.swapoff_bin, &args.dmsetup_bin, &args.mdadm_bin, &args.losetup_bin)
+    .with_pool_mode(args.pool_mode);
     match runtime.block_on(run(&args.socket_path, allowlist)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -91,6 +94,17 @@ struct Args {
     systemctl_bin: String,
     exportfs_bin: String,
     sshd_bin: String,
+    swapoff_bin: String,
+    dmsetup_bin: String,
+    mdadm_bin: String,
+    losetup_bin: String,
+    /// Permissions applied to the root of a freshly mounted pool. Defaults to
+    /// 0777: a pool is a *shared* volume whose writers are the unprivileged
+    /// protocol daemons (davd/SFTP/FTP/rsync), containerised apps and the
+    /// object-store tier target, all of which run as ordinary uids — a fresh
+    /// ext4/btrfs root is root:root 0755, so without this a freshly created
+    /// pool is read-only for everything that is supposed to use it.
+    pool_mode: u32,
     config_dir: PathBuf,
     allowed_root: PathBuf,
     dev_root: PathBuf,
@@ -112,6 +126,11 @@ impl Args {
         let mut systemctl_bin = "systemctl".to_string();
         let mut exportfs_bin = "exportfs".to_string();
         let mut sshd_bin = "sshd".to_string();
+        let mut swapoff_bin = "swapoff".to_string();
+        let mut dmsetup_bin = "dmsetup".to_string();
+        let mut mdadm_bin = "mdadm".to_string();
+        let mut losetup_bin = "losetup".to_string();
+        let mut pool_mode = 0o777;
         let mut config_dir = PathBuf::from("/etc/onyx/conf.d");
         let mut allowed_root = PathBuf::from("/mnt/onyx");
         let mut dev_root = PathBuf::from("/dev");
@@ -135,6 +154,20 @@ impl Args {
                 "--systemctl-bin" => systemctl_bin = it.next().expect("--systemctl-bin requires a value"),
                 "--exportfs-bin" => exportfs_bin = it.next().expect("--exportfs-bin requires a value"),
                 "--sshd-bin" => sshd_bin = it.next().expect("--sshd-bin requires a value"),
+                "--swapoff-bin" => swapoff_bin = it.next().expect("--swapoff-bin requires a value"),
+                "--dmsetup-bin" => dmsetup_bin = it.next().expect("--dmsetup-bin requires a value"),
+                "--mdadm-bin" => mdadm_bin = it.next().expect("--mdadm-bin requires a value"),
+                "--losetup-bin" => losetup_bin = it.next().expect("--losetup-bin requires a value"),
+                "--pool-mode" => {
+                    let raw = it.next().expect("--pool-mode requires a value");
+                    match parse_mode(&raw) {
+                        Some(mode) => pool_mode = mode,
+                        None => {
+                            eprintln!("onyx-privd: --pool-mode must be an octal mode up to 07777, got {raw:?}");
+                            std::process::exit(2);
+                        }
+                    }
+                }
                 "--config-dir" => {
                     config_dir = PathBuf::from(it.next().expect("--config-dir requires a value"));
                 }
@@ -165,6 +198,11 @@ impl Args {
             systemctl_bin,
             exportfs_bin,
             sshd_bin,
+            swapoff_bin,
+            dmsetup_bin,
+            mdadm_bin,
+            losetup_bin,
+            pool_mode,
             config_dir,
             allowed_root,
             dev_root,
@@ -327,9 +365,30 @@ struct Allowlist {
     systemctl_bin: String,
     exportfs_bin: String,
     sshd_bin: String,
+    /// Kernel stacks that keep a disk open — an active swap area, a
+    /// device-mapper mapping, an md array, a loop device. Releasing them is
+    /// what "force erase" means for a disk that was used before; each is
+    /// optional, so a host without (say) mdraid simply has nothing to stop.
+    swapoff_bin: String,
+    dmsetup_bin: String,
+    mdadm_bin: String,
+    losetup_bin: String,
+    /// Mode applied to the root of a freshly mounted pool (docs/design/05 §2).
+    pool_mode: u32,
     config_dir: PathBuf,
     allowed_root: PathBuf,
     dev_root: PathBuf,
+    /// How a device path is checked for a node this process can open. It is a
+    /// field so the argv-construction tests can drive synthetic device paths
+    /// (a unit test cannot create a block device node); production always uses
+    /// [`device_node_error`].
+    device_check: fn(&Path) -> Option<String>,
+    /// How the holder-release path finds active swap areas and the devices
+    /// stacked on a disk. Fields for the same reason as `device_check`: a unit
+    /// test cannot activate swap or create a dm mapping, so it injects the
+    /// kernel's answer; production reads /proc/swaps and /sys.
+    swap_probe: fn(&Path, &str) -> Vec<PathBuf>,
+    holders_probe: fn(&str) -> Vec<String>,
 }
 
 impl Allowlist {
@@ -365,10 +424,34 @@ impl Allowlist {
             systemctl_bin: systemctl_bin.to_string(),
             exportfs_bin: exportfs_bin.to_string(),
             sshd_bin: sshd_bin.to_string(),
+            swapoff_bin: "swapoff".to_string(),
+            dmsetup_bin: "dmsetup".to_string(),
+            mdadm_bin: "mdadm".to_string(),
+            losetup_bin: "losetup".to_string(),
+            pool_mode: 0o777,
             config_dir: config_dir.to_path_buf(),
             allowed_root: allowed_root.to_path_buf(),
             dev_root: dev_root.to_path_buf(),
+            device_check: device_node_error,
+            swap_probe: swap_areas_for,
+            holders_probe: stacked_holders,
         }
+    }
+
+    /// Point the holder-release tools at explicit binaries. Tests use this to
+    /// drive fake ones; production passes the `--*-bin` flags through.
+    fn with_holder_tools(mut self, swapoff: &str, dmsetup: &str, mdadm: &str, losetup: &str) -> Self {
+        self.swapoff_bin = swapoff.to_string();
+        self.dmsetup_bin = dmsetup.to_string();
+        self.mdadm_bin = mdadm.to_string();
+        self.losetup_bin = losetup.to_string();
+        self
+    }
+
+    /// Permissions applied to a freshly mounted pool root.
+    fn with_pool_mode(mut self, mode: u32) -> Self {
+        self.pool_mode = mode & 0o7777;
+        self
     }
 
     /// Fixed filename per config target (validated before use).
@@ -651,6 +734,30 @@ fn has_traversal(p: &Path) -> bool {
     p.components().any(|c| matches!(c, std::path::Component::ParentDir))
 }
 
+/// The reason a device path cannot be opened here, or None when it can.
+///
+/// The kernel's device list (`/sys`) and this process's `/dev` can disagree:
+/// `lsblk` reports a disk that has no node in this mount namespace, and the
+/// tools then fail with their own wording — `wipefs: error: /dev/sda: probing
+/// initialization failed: No such file or directory` followed by `mke2fs: The
+/// file /dev/sda does not exist and no size was specified`. Neither tells an
+/// operator that the disk is simply not visible inside the container, so the
+/// check runs before any tool is invoked (and before the destructive path).
+fn device_node_error(device: &Path) -> Option<String> {
+    match std::fs::metadata(device) {
+        Ok(meta) if meta.file_type().is_block_device() => None,
+        Ok(_) => Some(format!(
+            "{} is not a block device node; nothing can be formatted or mounted on it",
+            device.display()
+        )),
+        Err(_) => Some(format!(
+            "{} does not exist in this container: the disk is visible to the kernel but has no device node here. \
+             Block devices have to be passed into onyx-privd (compose mounts `- /dev:/dev`; a nested or restricted runtime can still hide them)",
+            device.display()
+        )),
+    }
+}
+
 /// How many `key=value` mount options MOUNT_BLOCK will accept.
 const MAX_MOUNT_OPTIONS: usize = 8;
 
@@ -740,6 +847,20 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
             ],
         ),
         AllowedCommand::MountBlock { device, mountpoint, options } => {
+            // Same visibility check as the format path: mounting a node that is
+            // not here would fail with the generic mount error after the
+            // mountpoint had already been created.
+            if let Some(reason) = (allowlist.device_check)(device) {
+                // Validation created the mountpoint on the way in; a mount that
+                // never happens must not leave an empty directory for the file
+                // explorer to list as a stale pool.
+                let _ = std::fs::remove_dir(mountpoint);
+                return Ok(PrivResponse {
+                    exit_code: 1,
+                    stdout: Vec::new(),
+                    stderr: reason.into_bytes(),
+                });
+            }
             // mkdir -p first: the mountpoint may not exist yet (it was created
             // during validation, but execute must be self-sufficient too).
             run_sync_ok(
@@ -759,11 +880,28 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
                 // behind — the file explorer would list it as a stale pool.
                 // Best effort: a directory that already held something stays.
                 let _ = std::fs::remove_dir(mountpoint);
+                return Ok(PrivResponse {
+                    exit_code: out.status.code().unwrap_or(-1) as i32,
+                    stdout: out.stdout,
+                    stderr: out.stderr,
+                });
+            }
+            // A freshly formatted pool mounts as root:root 0755. Everything
+            // that is supposed to write into it runs unprivileged, so the pool
+            // root is opened up here, once, instead of failing every protocol
+            // and app later with a bare "permission denied".
+            let mut stderr = out.stderr;
+            if let Some(note) = apply_pool_mode(mountpoint, allowlist.pool_mode) {
+                tracing::warn!(mountpoint = %mountpoint.display(), mode = format!("{:04o}", allowlist.pool_mode), "{note}");
+                stderr.extend_from_slice(note.as_bytes());
+                stderr.push(b'\n');
+            } else {
+                tracing::info!(mountpoint = %mountpoint.display(), mode = format!("{:04o}", allowlist.pool_mode), "pool root mode set");
             }
             return Ok(PrivResponse {
-                exit_code: out.status.code().unwrap_or(-1) as i32,
+                exit_code: 0,
                 stdout: out.stdout,
-                stderr: out.stderr,
+                stderr,
             });
         }
         AllowedCommand::UnmountBlock { mountpoint, force } => {
@@ -783,6 +921,16 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
             vec!["-H".into(), "-A".into(), device.display().to_string()],
         ),
         AllowedCommand::FormatFilesystem { device, fs_type, label, force } => {
+            // A device nothing can be opened on is refused before wipefs runs,
+            // so the failure is a plain-language one instead of two tools'
+            // variants of "No such file or directory".
+            if let Some(reason) = (allowlist.device_check)(device) {
+                return Ok(PrivResponse {
+                    exit_code: 1,
+                    stdout: Vec::new(),
+                    stderr: format!("format failed: {reason}").into_bytes(),
+                });
+            }
             // Formatting refuses a device that is still mounted — "apparently
             // in use by the system" (mke2fs) or "Resource busy" (mkfs.btrfs) —
             // and the control plane's registry can miss a mount it did not
@@ -796,6 +944,14 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
                 .unwrap_or_default();
 
             let mut stderr: Vec<u8> = Vec::new();
+            // Stacked holders first: everything below them (a swap area, a dm
+            // mapping, an md array) has to go before the disk can be erased,
+            // and releasing the stack is what makes the mounts unmountable too.
+            for note in release_device_holders(allowlist, &kname, &target, *force).await {
+                tracing::info!(device = %target, "{note}");
+                stderr.extend_from_slice(note.as_bytes());
+                stderr.push(b'\n');
+            }
             // Two sweeps: a nested mount only appears once its outer one is gone.
             for _ in 0..2 {
                 let mounts = device_mounts(device, &allowlist.dev_root);
@@ -885,10 +1041,19 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
                 stderr,
             });
         }
-        AllowedCommand::CreateBtrfsPool { device, label } => (
-            allowlist.mkfs_btrfs_bin.clone(),
-            vec!["-f".into(), "-L".into(), label.clone(), device.display().to_string()],
-        ),
+        AllowedCommand::CreateBtrfsPool { device, label } => {
+            if let Some(reason) = (allowlist.device_check)(device) {
+                return Ok(PrivResponse {
+                    exit_code: 1,
+                    stdout: Vec::new(),
+                    stderr: reason.into_bytes(),
+                });
+            }
+            (
+                allowlist.mkfs_btrfs_bin.clone(),
+                vec!["-f".into(), "-L".into(), label.clone(), device.display().to_string()],
+            )
+        }
         AllowedCommand::RemoveMountpoint { mountpoint } => {
             // Not a subprocess: rmdir the empty mountpoint. A directory that
             // still holds anything stays (rmdir refuses non-empty), and the
@@ -1134,6 +1299,164 @@ fn busy_reason(kname: &str, target: &str) -> Option<String> {
     Some(format!("{target} is busy: {}", notes.join("; ")))
 }
 
+/// Parse an octal mode (`0777`, `0o777`, `777`). The leading digit is kept when
+/// it is there — on a shared pool root `2775`/`1777` mean something (setgid for
+/// group inheritance, sticky for delete protection) — and anything above 07777,
+/// non-octal or empty is refused rather than guessed at.
+fn parse_mode(raw: &str) -> Option<u32> {
+    let trimmed = raw.trim();
+    let digits = trimmed
+        .strip_prefix("0o")
+        .or_else(|| trimmed.strip_prefix("0O"))
+        .unwrap_or(trimmed);
+    if digits.is_empty() || !digits.chars().all(|c| matches!(c, '0'..='7')) {
+        return None;
+    }
+    u32::from_str_radix(digits, 8).ok().filter(|v| *v <= 0o7777)
+}
+
+/// Active swap areas on a disk or any of its partitions, from /proc/swaps.
+/// An active swap signature is the classic reason `mke2fs` refuses a disk with
+/// "is apparently in use by the system": the kernel, not a mount, is holding
+/// it — so unmounting alone can never release it.
+fn swap_areas_for(dev_root: &Path, kname: &str) -> Vec<PathBuf> {
+    if kname.is_empty() {
+        return Vec::new();
+    }
+    let Ok(content) = std::fs::read_to_string("/proc/swaps") else {
+        return Vec::new();
+    };
+    let mut areas = Vec::new();
+    for line in content.lines().skip(1) {
+        let Some(source) = line.split_whitespace().next() else {
+            continue;
+        };
+        let path = Path::new(source);
+        // Only the device tree this helper acts on (see `device_mounts`).
+        if !path.starts_with(dev_root) {
+            continue;
+        }
+        let Some(name) = path.file_name().map(|n| n.to_string_lossy().to_string()) else {
+            continue;
+        };
+        if name == kname || is_partition_device(kname, &name) {
+            areas.push(path.to_path_buf());
+        }
+    }
+    areas
+}
+
+/// The devices stacked on top of `kname` (device-mapper, mdraid, loop), read
+/// from sysfs. These are what keep the disk open once every mount is gone.
+fn stacked_holders(kname: &str) -> Vec<String> {
+    if kname.is_empty() {
+        return Vec::new();
+    }
+    let Ok(entries) = std::fs::read_dir(format!("/sys/class/block/{kname}/holders")) else {
+        return Vec::new();
+    };
+    let mut holders: Vec<String> = entries
+        .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string()))
+        // Kernel-provided names still become argv, so only the shape the
+        // kernel actually uses is accepted.
+        .filter(|name| {
+            !name.is_empty()
+                && name.len() <= 64
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+        })
+        .collect();
+    holders.sort();
+    holders
+}
+
+/// Release everything that holds a disk open, so a format the user confirmed
+/// can actually run (docs/design/05 §2 "force erase"). Covers the three
+/// stacks that survive an unmount sweep: an active swap area, a device-mapper
+/// mapping (LVM/bcache) and an md array, plus loop devices. Every step is best
+/// effort and reported: a disk still busy afterwards fails with the tool's own
+/// message *plus* a note saying what is left, which is the difference between
+/// "try again" and "this disk belongs to something else".
+///
+/// Only reached when the caller set `force` — the confirmation the operator
+/// gave for erasing the disk.
+async fn release_device_holders(allowlist: &Allowlist, kname: &str, target: &str, force: bool) -> Vec<String> {
+    let mut notes: Vec<String> = Vec::new();
+    if !force || kname.is_empty() {
+        return notes;
+    }
+    // Only the device tree this helper acts on (same guard as `device_mounts`):
+    // it keeps a test's fake device names from ever matching a real host swap
+    // area — swapoff on the wrong device would end the host's memory.
+    let swap_areas: Vec<PathBuf> = (allowlist.swap_probe)(&allowlist.dev_root, kname)
+        .into_iter()
+        .filter(|area| area.starts_with(&allowlist.dev_root))
+        .collect();
+    for area in swap_areas {
+        match run_argv(&allowlist.swapoff_bin, &[area.display().to_string()]).await {
+            Ok(out) if out.status.success() => notes.push(format!("deactivated swap on {}", area.display())),
+            Ok(out) => notes.push(format!(
+                "could not deactivate swap on {}: {}",
+                area.display(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            )),
+            Err(_) => notes.push(format!(
+                "{} is active swap and {} is unavailable to deactivate it",
+                area.display(),
+                allowlist.swapoff_bin
+            )),
+        }
+    }
+    for holder in (allowlist.holders_probe)(kname) {
+        let path = allowlist.dev_root.join(&holder).display().to_string();
+        // dm-0 -> device mapper; md0 -> mdraid; loop0 -> loop. Anything else is
+        // a stack this helper has no business tearing down.
+        let released = if holder.starts_with("dm-") {
+            run_argv(&allowlist.dmsetup_bin, &["remove".to_string(), path.clone()]).await
+        } else if holder.starts_with("md") {
+            run_argv(&allowlist.mdadm_bin, &["--stop".to_string(), path.clone()]).await
+        } else if holder.starts_with("loop") {
+            run_argv(&allowlist.losetup_bin, &["-d".to_string(), path.clone()]).await
+        } else {
+            notes.push(format!("{target} is held by {holder}, which Onyx does not manage"));
+            continue;
+        };
+        match released {
+            Ok(out) if out.status.success() => notes.push(format!("released {holder}")),
+            Ok(out) => notes.push(format!(
+                "could not release {holder}: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )),
+            Err(_) => notes.push(format!("{target} is held by {holder}, which could not be released")),
+        }
+    }
+    notes
+}
+
+/// Make a freshly mounted pool usable by the services that write to it: a new
+/// ext4/btrfs root is root:root 0755, which leaves every unprivileged writer
+/// (davd, SFTP/FTP/rsync daemons, apps, the object-store tier target) unable to
+/// create anything. Returns a note when the mode could not be applied — the
+/// mount itself succeeded, so this is a warning, not a failure.
+fn apply_pool_mode(mountpoint: &Path, mode: u32) -> Option<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        match std::fs::set_permissions(mountpoint, std::fs::Permissions::from_mode(mode & 0o7777)) {
+            Ok(()) => None,
+            Err(e) => Some(format!(
+                "mounted at {} but its mode could not be set to {:04o}: {e} (writes may fail)",
+                mountpoint.display(),
+                mode & 0o7777
+            )),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (mountpoint, mode);
+        None
+    }
+}
+
 /// Run a helper subprocess (mkdir -p before mount) whose failures surface as
 /// mount failures, not gRPC errors.
 fn run_sync_ok(bin: &str, args: &[String]) -> Result<(), Status> {
@@ -1229,7 +1552,11 @@ mod tests {
             log.display()
         );
         let marker = |name: &str| fake_bin(dir, name, &record);
-        Allowlist::new(
+        // The fake devices are plain paths under a temp "dev root": nothing on
+        // disk backs them, which is exactly what the real check refuses. The
+        // argv tests care about the command that would run, so the check is
+        // stubbed here and exercised on its own below.
+        let mut allowlist = Allowlist::new(
             &marker("btrfs"),
             &marker("lsblk"),
             &marker("mount"),
@@ -1246,12 +1573,224 @@ mod tests {
             dir,             // config dir = temp dir
             dir,             // allowed root = temp dir
             dir.join("dev").as_path(), // dev root = temp dir/dev (created by tests)
+        );
+        allowlist.device_check = |_| None;
+        // The holder-release path is exercised with explicit probes so a unit
+        // test does not depend on the host's swap or dm state.
+        allowlist.swap_probe = |_, _| Vec::new();
+        allowlist.holders_probe = |_| Vec::new();
+        allowlist.with_holder_tools(
+            &marker("swapoff"),
+            &marker("dmsetup"),
+            &marker("mdadm"),
+            &marker("losetup"),
         )
     }
 
     async fn run_request(a: &Allowlist, req: &PrivRequest) -> Result<PrivResponse, Status> {
         let cmd = a.validate(req)?;
         execute(a, &cmd).await
+    }
+
+    /// The real check, on a device the kernel may list but this namespace has no
+    /// node for: the operator must get that sentence, not two tools' variants of
+    /// "No such file or directory" — and nothing may be run against the path.
+    #[tokio::test]
+    async fn format_and_mount_refuse_a_device_with_no_node_here() {
+        let dir = TempDir::new("missingnode");
+        let dev_root = dir.path().join("dev");
+        fs::create_dir_all(&dev_root).unwrap();
+        let a = test_allowlist(dir.path()); // stub the check for other tests
+        let real = Allowlist { device_check: device_node_error, ..test_allowlist(dir.path()) };
+
+        let device = dev_root.join("sde");
+        let format = run_request(
+            &real,
+            &request(
+                PrivOp::FormatFilesystem,
+                vec![device.to_str().unwrap(), "ext4", "main-pool", "true"],
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(format.exit_code, 1);
+        let stderr = String::from_utf8_lossy(&format.stderr);
+        assert!(stderr.contains("does not exist in this container"), "{stderr}");
+        assert!(stderr.starts_with("format failed:"), "{stderr}");
+
+        let mountpoint = dir.path().join("pool");
+        let mount = run_request(
+            &real,
+            &request(
+                PrivOp::MountBlock,
+                vec![device.to_str().unwrap(), mountpoint.to_str().unwrap()],
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(mount.exit_code, 1);
+        assert!(
+            String::from_utf8_lossy(&mount.stderr).contains("does not exist in this container")
+        );
+        // Refused before anything ran: no mountpoint left behind, and no argv log.
+        assert!(!mountpoint.exists(), "a refused mount must not create its mountpoint");
+        assert!(!dir.path().join("argv.log").exists(), "no tool may run for an unusable device");
+        drop(a);
+    }
+
+    /// "Force erase" has to mean something on a disk that was used before: the
+    /// stacks that keep it open (active swap, dm mapping, md array, loop device)
+    /// are released before wipefs/mkfs run, and each release is named in the
+    /// output so the operator can see what the disk belonged to.
+    #[tokio::test]
+    async fn forced_format_releases_the_stacks_holding_the_disk() {
+        let dir = TempDir::new("holders");
+        let dev_root = dir.path().join("dev");
+        fs::create_dir_all(&dev_root).unwrap();
+        let log = dir.path().join("argv.log");
+        let fake = |name: &str| {
+            fake_bin(
+                dir.path(),
+                name,
+                &format!(
+                    "#!/bin/sh\n{{ printf '%s' \"$0\"; printf '|%s' \"$@\"; printf '\\n'; }} >> \"{}\"\nexit 0\n",
+                    log.display()
+                ),
+            )
+        };
+        let mut a = test_allowlist(dir.path());
+        // The probe answers from this temp dev root, so no real /dev path is
+        // ever handed to swapoff/dmsetup/mdadm/losetup.
+        let swap_path = dev_root.join("sdc1");
+        a.swap_probe = |dev_root, _| vec![dev_root.join("sdc1")];
+        a.holders_probe = |kname| {
+            if kname == "sdc" {
+                vec!["dm-0".to_string(), "md0".to_string(), "loop0".to_string()]
+            } else {
+                Vec::new()
+            }
+        };
+        a = a.with_holder_tools(
+            &fake("swapoff"),
+            &fake("dmsetup"),
+            &fake("mdadm"),
+            &fake("losetup"),
+        );
+
+        let device = dev_root.join("sdc");
+        let resp = run_request(
+            &a,
+            &request(
+                PrivOp::FormatFilesystem,
+                vec![device.to_str().unwrap(), "ext4", "data", "true"],
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp.exit_code, 0);
+
+        let recorded = fs::read_to_string(&log).unwrap();
+        let line = |needle: &str| {
+            recorded
+                .lines()
+                .find(|l| l.contains(needle))
+                .unwrap_or_else(|| panic!("no {needle} in argv.log:\n{recorded}"))
+                .to_string()
+        };
+        assert!(line("/swapoff").ends_with(&swap_path.display().to_string()), "{recorded}");
+        assert!(line("/dmsetup").contains(&format!("|remove|{}", dev_root.join("dm-0").display())), "{recorded}");
+        assert!(line("/mdadm").contains(&format!("|--stop|{}", dev_root.join("md0").display())), "{recorded}");
+        assert!(line("/losetup").contains(&format!("|-d|{}", dev_root.join("loop0").display())), "{recorded}");
+        // The release is reported, so a partial one is visible to the operator.
+        let stderr = String::from_utf8_lossy(&resp.stderr);
+        assert!(stderr.contains("released dm-0"), "{stderr}");
+        assert!(stderr.contains("deactivated swap"), "{stderr}");
+    }
+
+    /// Without the confirmation, nothing is torn down: the holder is reported
+    /// and the disk is left alone.
+    #[tokio::test]
+    async fn unforced_format_does_not_touch_holders() {
+        let dir = TempDir::new("noholders");
+        let dev_root = dir.path().join("dev");
+        fs::create_dir_all(&dev_root).unwrap();
+        let mut a = test_allowlist(dir.path());
+        a.holders_probe = |_| vec!["dm-0".to_string()];
+        a.swap_probe = |dev_root, _| vec![dev_root.join("sdc1")];
+
+        let device = dev_root.join("sdc");
+        run_request(
+            &a,
+            &request(
+                PrivOp::FormatFilesystem,
+                vec![device.to_str().unwrap(), "ext4", "data", "false"],
+            ),
+        )
+        .await
+        .unwrap();
+        let log = fs::read_to_string(dir.path().join("argv.log")).unwrap_or_default();
+        assert!(!log.contains("dmsetup"), "no holder may be released unforced: {log}");
+        assert!(!log.contains("swapoff"), "swap must stay for an unforced run: {log}");
+    }
+
+    /// A mounted pool root is opened up for the unprivileged writers that use
+    /// it — a fresh filesystem is root:root 0755, which would make every share,
+    /// app and tier target read-only.
+    #[tokio::test]
+    async fn mount_opens_up_the_pool_root_for_unprivileged_writers() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("poolmode");
+        let mountpoint = dir.path().join("mnt").join("main-pool");
+        fs::create_dir_all(&mountpoint).unwrap();
+        fs::set_permissions(&mountpoint, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let a = test_allowlist(dir.path()).with_pool_mode(0o777);
+        let resp = run_request(
+            &a,
+            &request(
+                PrivOp::MountBlock,
+                vec![
+                    dir.path().join("dev").join("sdb").to_str().unwrap(),
+                    mountpoint.to_str().unwrap(),
+                ],
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp.exit_code, 0, "{:?}", String::from_utf8_lossy(&resp.stderr));
+        let mode = fs::metadata(&mountpoint).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o777, "the pool root must be writable by every service");
+    }
+
+    #[test]
+    fn parse_mode_accepts_octal_and_rejects_the_rest() {
+        assert_eq!(parse_mode("0777"), Some(0o777));
+        assert_eq!(parse_mode("0o775"), Some(0o775));
+        assert_eq!(parse_mode("775"), Some(0o775));
+        assert_eq!(parse_mode("2775"), Some(0o2775));
+        // Above 07777, non-octal, empty, or smuggled: refused outright.
+        assert_eq!(parse_mode("017777"), None);
+        assert_eq!(parse_mode("0888"), None);
+        assert_eq!(parse_mode("rwx"), None);
+        assert_eq!(parse_mode(""), None);
+    }
+
+    /// An unknown stacked holder is reported rather than torn down: privd only
+    /// stops stacks it understands (dm, md, loop).
+    #[tokio::test]
+    async fn unknown_holders_are_reported_not_released() {
+        let dir = TempDir::new("unknownholder");
+        let dev_root = dir.path().join("dev");
+        fs::create_dir_all(&dev_root).unwrap();
+        let mut a = test_allowlist(dir.path());
+        a.holders_probe = |_| vec!["bcache0".to_string()];
+
+        let notes = release_device_holders(&a, "sdc", "/dev/sdc", true).await;
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("bcache0"), "{notes:?}");
+        assert!(notes[0].contains("does not manage"), "{notes:?}");
+        let log = fs::read_to_string(dir.path().join("argv.log")).unwrap_or_default();
+        assert!(log.is_empty(), "nothing may run for a stack Onyx does not manage: {log}");
     }
 
     #[tokio::test]

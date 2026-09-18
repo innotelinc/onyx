@@ -173,6 +173,49 @@ func TestValidateManifestHardeningRejectsPrivilegeEscalation(t *testing.T) {
 	}
 }
 
+// Dropping everything and adding back a narrow capability is the supported
+// direction (docs/design/09 §6): an image whose entrypoint chowns its data and
+// then drops to its own user needs CHOWN/SETUID/SETGID, and without them the
+// shipped Nextcloud database crash-looped with "failed switching to 'mysql'" —
+// a working catalog must be able to declare them.
+func TestValidateManifestAllowsNarrowCapabilityAdditions(t *testing.T) {
+	manifest := `services:
+  app:
+    image: example/app:1
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    pids_limit: 256
+    mem_limit: 1g
+`
+	if err := validateManifestHardening("example", manifest); err != nil {
+		t.Fatalf("a declared narrow capability must be accepted: %v", err)
+	}
+}
+
+// The baseline itself is enforced, not assumed: a manifest that drops nothing
+// runs with the engine's default set, and the check that refuses dangerous
+// additions would then be policing a posture the app never adopted.
+func TestValidateManifestRequiresDroppingEveryCapability(t *testing.T) {
+	manifest := `services:
+  app:
+    image: example/app:1
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
+`
+	err := validateManifestHardening("example", manifest)
+	if err == nil || !strings.Contains(err.Error(), "cap_drop") {
+		t.Fatalf("expected the cap_drop baseline to be required, got %v", err)
+	}
+}
+
 // A named volume is the app's own storage and needs no pool path; a bind mount
 // on the pool is the supported way to reach data the operator already has.
 func TestValidateMountSourceAcceptsNamedVolumesAndPoolPaths(t *testing.T) {

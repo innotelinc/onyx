@@ -240,6 +240,10 @@ Btrfs snapshot lifecycle on top of the fixed subvolume layout
 - S3-compatible API surface (`storage.onyx.innotel.us`): `ListBuckets`,
   `PutObject`, `GetObject`, `DeleteObject`, `DeleteBucket` — served over HTTPS
   by NPM; static credentials from env (`S3_ACCESS_KEY`/`S3_SECRET_KEY`).
+  Both are **required**: with no access key the endpoint refuses every request
+  (403 `AccessDenied`) instead of serving anonymous access, because that port is
+  published for the ingress. `--s3-allow-anonymous` is the explicit opt-out for
+  a development run on loopback.
 - Bucket storage on the pool (Btrfs subvolume per bucket → snapshots/scrub
   come free).
 - **Hybrid cloud:** per-bucket lifecycle policies — `LOCAL`, `CLOUD` (primary
@@ -268,6 +272,17 @@ Btrfs snapshot lifecycle on top of the fixed subvolume layout
 
 - **`ci.yml`** — on push/PR: `make bootstrap` (cached), `make check`
   (vet + tests), `make build`. Validation only; nothing is published.
+
+`make check` exercises the code; `scripts/e2e-stack.sh` (`make e2e`) exercises
+the *deployment* — it drives a running compose stack through the three flows
+that span every layer (pool creation on a real disk with `POOL_DEVICE=`, an app
+install, and a tiered bucket's sync → verify → evict → refetch over the S3 API)
+and asserts what only a real stack can show: a pool root the unprivileged
+daemons can write, containers that are running rather than crash-looping, an
+evicted object that comes back on read. A unit test cannot see a mount
+namespace, a file mode or a missing helper binary; this can, and both bugs it
+was written for — an un-clearable disk and a storage root nobody could write
+into — were invisible to the test suite.
 - **`release.yml`** — one publish pipeline for both event kinds:
   - `main` push → build + publish `:latest` images;
   - tag `v*` push → build + publish `:latest` + `:<tag>` images, then create

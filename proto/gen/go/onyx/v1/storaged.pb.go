@@ -359,7 +359,18 @@ type Device struct {
 	// unknown (unsupported device, or not yet checked).
 	HealthStatus string `protobuf:"bytes,13,opt,name=health_status,json=healthStatus,proto3" json:"health_status,omitempty"`
 	// SMART temperature in °C; 0 when unknown.
-	TemperatureC  uint32 `protobuf:"varint,14,opt,name=temperature_c,json=temperatureC,proto3" json:"temperature_c,omitempty"`
+	TemperatureC uint32 `protobuf:"varint,14,opt,name=temperature_c,json=temperatureC,proto3" json:"temperature_c,omitempty"`
+	// Whether the data plane can actually open this device: the kernel view
+	// (lsblk reads /sys) can list a disk whose `/dev/<kname>` node is absent from
+	// the daemon's mount namespace — a nested or locked-down container sees the
+	// disk and cannot format or mount it. False means "listed, but not usable
+	// from here"; the UI must not offer it as a pool target.
+	//
+	// Explicitly optional so the JSON carries the false: protojson omits a
+	// non-optional bool that is false, which is indistinguishable from "this
+	// response came from a daemon that does not answer the question" — and those
+	// two cases must not be treated the same way by a client.
+	NodePresent   *bool `protobuf:"varint,15,opt,name=node_present,json=nodePresent,proto3,oneof" json:"node_present,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -490,6 +501,13 @@ func (x *Device) GetTemperatureC() uint32 {
 		return x.TemperatureC
 	}
 	return 0
+}
+
+func (x *Device) GetNodePresent() bool {
+	if x != nil && x.NodePresent != nil {
+		return *x.NodePresent
+	}
+	return false
 }
 
 // One entry of the device audit trail (docs/design/04#8-observability).
@@ -965,7 +983,7 @@ const file_onyx_v1_storaged_proto_rawDesc = "" +
 	"totalBytes\x12\x1d\n" +
 	"\n" +
 	"used_bytes\x18\x05 \x01(\x04R\tusedBytes\x12\x14\n" +
-	"\x05state\x18\x06 \x01(\tR\x05state\"\xee\x02\n" +
+	"\x05state\x18\x06 \x01(\tR\x05state\"\xa7\x03\n" +
 	"\x06Device\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05kname\x18\x02 \x01(\tR\x05kname\x12\x12\n" +
@@ -984,7 +1002,9 @@ const file_onyx_v1_storaged_proto_rawDesc = "" +
 	"\x05state\x18\v \x01(\tR\x05state\x12\x12\n" +
 	"\x04auto\x18\f \x01(\tR\x04auto\x12#\n" +
 	"\rhealth_status\x18\r \x01(\tR\fhealthStatus\x12#\n" +
-	"\rtemperature_c\x18\x0e \x01(\rR\ftemperatureC\"\x85\x01\n" +
+	"\rtemperature_c\x18\x0e \x01(\rR\ftemperatureC\x12&\n" +
+	"\fnode_present\x18\x0f \x01(\bH\x00R\vnodePresent\x88\x01\x01B\x0f\n" +
+	"\r_node_present\"\x85\x01\n" +
 	"\vDeviceEvent\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x0e\n" +
 	"\x02ts\x18\x02 \x01(\tR\x02ts\x12\x14\n" +
@@ -1085,6 +1105,7 @@ func file_onyx_v1_storaged_proto_init() {
 	if File_onyx_v1_storaged_proto != nil {
 		return
 	}
+	file_onyx_v1_storaged_proto_msgTypes[5].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
