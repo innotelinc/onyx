@@ -495,7 +495,7 @@
         '<button class="btn" id="storage-refresh">Refresh</button></div>' +
         '<div class="card" id="storage-pools"><div class="empty"><b>Loading pools…</b>Checking mounted storage.</div></div>' +
         '<div class="card" style="margin-top:16px" id="storage-devices"><div class="empty"><b>Loading devices…</b>Scanning block devices.</div></div>' +
-        '<div class="card" style="margin-top:16px" id="storage-pool-setup"><h3>Create an Onyx storage pool</h3><p class="sub">Format a whole removable disk, then mount it automatically under /mnt/onyx.</p><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end"><label>Disk<select id="pool-device" class="search" style="width:100%;max-width:none"><option value="">Loading safe disks…</option></select></label><label>Pool label<input id="pool-name" class="search" style="width:100%;max-width:none" placeholder="main-pool"></label><label>Filesystem<select id="pool-fs" class="search" style="width:100%;max-width:none"><option value="btrfs">Btrfs</option><option value="ext4">ext4</option></select></label><label>Mount directory<input id="pool-mount-name" class="search" style="width:100%;max-width:none" placeholder="Defaults to pool label"></label><label style="display:flex;gap:8px;align-items:center"><input id="pool-auto-mount" type="checkbox" checked> Auto-mount after format</label><label style="display:flex;gap:8px;align-items:center"><input id="pool-force" type="checkbox"> Force erase existing signatures</label><button class="btn" id="pool-preview">Review destructive operation</button></div><div id="pool-warning" class="sub" style="margin-top:12px">A verified backup and final confirmation are required before any erase operation.</div></div>';
+        '<div class="card" style="margin-top:16px" id="storage-pool-setup"><h3>Create an Onyx storage pool</h3><p class="sub">Format a whole removable disk, then mount it automatically under /mnt/onyx. Disks Onyx already mounted can be re-created in place.</p><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end"><label>Disk<select id="pool-device" class="search" style="width:100%;max-width:none"><option value="">Loading safe disks…</option></select></label><label>Pool label<input id="pool-name" class="search" style="width:100%;max-width:none" placeholder="main-pool"></label><label>Filesystem<select id="pool-fs" class="search" style="width:100%;max-width:none"><option value="btrfs">Btrfs</option><option value="ext4">ext4</option></select></label><label>Mount directory<input id="pool-mount-name" class="search" style="width:100%;max-width:none" placeholder="Defaults to pool label"></label><label style="display:flex;gap:8px;align-items:center"><input id="pool-auto-mount" type="checkbox" checked> Auto-mount after format</label><label style="display:flex;gap:8px;align-items:center"><input id="pool-force" type="checkbox"> Force erase existing signatures</label><button class="btn" id="pool-preview">Review destructive operation</button></div><div id="pool-warning" class="sub" style="margin-top:12px">A verified backup and final confirmation are required before any erase operation.</div></div>';
     }
 
     function formatBytes(value) {
@@ -519,6 +519,34 @@
       if (!device.fsType) return 'No filesystem signature detected. It may be unused, encrypted, RAID/LVM metadata, or an unformatted partition.';
       if (['vfat', 'fat32', 'exfat', 'ntfs', 'ext2', 'ext3', 'ext4', 'xfs', 'btrfs', 'hfsplus', 'apfs'].indexOf(String(device.fsType).toLowerCase()) < 0) return 'Filesystem detected. Attach will ask the Linux kernel to mount it; support depends on the host kernel/tools.';
       return 'Readable filesystem detected; attaching does not format or erase it.';
+    }
+
+    // True for a partition kname belonging directly to a disk kname: "sdc1"
+    // belongs to "sdc", "nvme0n1p1" to "nvme0n1". Mirrors the data plane's
+    // own mapping so the Storage page reasons about a disk and its partitions
+    // the same way the backend does.
+    function isPartitionOf(diskKname, candidate) {
+      var disk = String(diskKname || '');
+      var s = String(candidate || '');
+      if (!disk || s === disk || s.indexOf(disk) !== 0) return false;
+      var suffix = s.slice(disk.length);
+      return /^[0-9]+$/.test(suffix) || /^p[0-9]+$/.test(suffix);
+    }
+
+    // Every mount of a disk: the disk itself plus any of its partitions.
+    function diskMounts(disk, devices) {
+      return (devices || []).filter(function (d) {
+        return (d.kname === disk.kname || isPartitionOf(disk.kname, d.kname)) && d.mountpoint;
+      });
+    }
+
+    // "onyx" when the disk (or one of its partitions) is mounted under
+    // /mnt/onyx, "host" when anything of it is mounted elsewhere, else "none".
+    // Host mounts are the boundary Onyx never crosses.
+    function diskMountState(disk, devices) {
+      var mounts = diskMounts(disk, devices);
+      if (mounts.some(function (m) { return String(m.mountpoint).indexOf('/mnt/onyx') !== 0; })) return 'host';
+      return mounts.length ? 'onyx' : 'none';
     }
 
     function loadStorage() {
@@ -723,10 +751,23 @@
       if (v.id === 'storage') {
         document.getElementById('storage-refresh').addEventListener('click', loadStorage);
         loadStorage();
+        // Disks offered for pool creation: unused ones plus disks Onyx already
+        // mounted (re-creating a pool unmounts them, erases them and mounts
+        // them again in place). Anything the host mounted outside /mnt/onyx is
+        // hidden — those are never touched.
+        var poolDisks = [];
+        var poolDevices = [];
         apiJSON('/devices').then(function (data) {
           var select = document.getElementById('pool-device');
-          var disks = (data.devices || []).filter(function (device) { return device.type === 'disk' && device.removable && device.state !== 'detached' && !device.mountpoint; });
-          select.innerHTML = disks.length ? '<option value="">Choose a removable disk…</option>' + disks.map(function (device) { return '<option value="' + esc(device.name) + '">' + esc(device.path + ' · ' + formatBytes(device.sizeBytes) + (device.label ? ' · ' + device.label : '')) + '</option>'; }).join('') : '<option value="">No safe removable disks detected</option>';
+          poolDevices = data.devices || [];
+          poolDisks = poolDevices.filter(function (device) {
+            if (device.type !== 'disk' || !device.removable || device.state === 'detached') return false;
+            return diskMountState(device, poolDevices) !== 'host';
+          });
+          select.innerHTML = poolDisks.length ? '<option value="">Choose a removable disk…</option>' + poolDisks.map(function (device) {
+            var note = diskMountState(device, poolDevices) === 'onyx' ? ' · mounted by Onyx — will be erased and re-mounted' : '';
+            return '<option value="' + esc(device.name) + '">' + esc(device.path + ' · ' + formatBytes(device.sizeBytes) + (device.label ? ' · ' + device.label : '') + note) + '</option>';
+          }).join('') : '<option value="">No safe removable disks detected</option>';
         }).catch(showError);
         document.getElementById('pool-preview').addEventListener('click', function () {
           var device = document.getElementById('pool-device').value;
@@ -737,12 +778,15 @@
           var force = document.getElementById('pool-force').checked;
           var warning = document.getElementById('pool-warning');
           if (!device) { warning.textContent = 'Choose a removable whole disk first.'; return; }
-          warning.innerHTML = '<b>Destructive preview:</b> format /dev/' + esc(device) + ' as ' + esc(fsType) + ' with label ' + esc(name) + (force ? ' (force enabled)' : '') + '. ' + (autoMount ? 'It will be mounted at /mnt/onyx/' + esc(mountName) + '.' : 'It will remain unmounted after formatting.') + ' Existing partitions and files will be erased. Click <b>Create pool</b> only after verifying the disk and backup.';
+          var selected = poolDisks.filter(function (d) { return d.name === device; })[0];
+          var path = selected ? selected.path : '/dev/' + device;
+          var remountNote = selected && diskMountState(selected, poolDevices) === 'onyx' ? ' It is mounted by Onyx right now and will be unmounted first (forced if busy).' : '';
+          warning.innerHTML = '<b>Destructive preview:</b> format ' + esc(path) + ' as ' + esc(fsType) + ' with label ' + esc(name) + (force ? ' (force enabled)' : '') + '. ' + (autoMount ? 'It will be mounted at /mnt/onyx/' + esc(mountName) + '.' : 'It will remain unmounted after formatting.') + remountNote + ' Existing partitions and files will be erased. Click <b>Create pool</b> only after verifying the disk and backup.';
           var button = document.getElementById('pool-preview');
           button.textContent = 'Create pool';
           button.classList.add('primary');
           button.onclick = function () {
-            if (!confirm('Format /dev/' + device + ' as ' + fsType + ' and erase all existing data? This cannot be undone.')) return;
+            if (!confirm('Format ' + path + ' as ' + fsType + ' and erase all existing data? This cannot be undone.')) return;
             button.disabled = true;
             button.textContent = 'Creating…';              apiJSON('/pools', { method: 'POST', body: JSON.stringify({ device: device, name: name, fs_type: fsType, force: force, auto_mount: autoMount, mount_name: mountName }) })
               .then(function (pool) {

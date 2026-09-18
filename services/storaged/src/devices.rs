@@ -401,10 +401,15 @@ impl DeviceManager {
         Ok(())
     }
 
-    async fn unmount_block(&self, mountpoint: &str) -> Result<(), String> {
-        let resp = self
-            .run_op(PrivOp::UnmountBlock, vec![mountpoint.to_string()])
-            .await?;
+    /// Unmount one mountpoint through privd. `force` lets privd escalate a
+    /// busy mount to `umount -f` / `umount -l` (used by pool creation, where
+    /// the user already confirmed erasing the disk).
+    async fn unmount_block(&self, mountpoint: &str, force: bool) -> Result<(), String> {
+        let mut args = vec![mountpoint.to_string()];
+        if force {
+            args.push("true".to_string());
+        }
+        let resp = self.run_op(PrivOp::UnmountBlock, args).await?;
         if resp.exit_code != 0 {
             let stderr = String::from_utf8_lossy(&resp.stderr);
             return Err(format!("umount {mountpoint} failed: {}", stderr.trim()));
@@ -550,9 +555,12 @@ impl DeviceManager {
         Ok(updated)
     }
 
-    /// Format a removable whole disk as Btrfs or ext4 and optionally mount it
-    /// under the Onyx storage root. The privileged helper performs the
-    /// destructive filesystem operation; this layer enforces device policy.
+    /// Format a removable whole disk as Btrfs or ext4 and mount it under the
+    /// Onyx storage root (when auto_mount). The disk is unmounted first — the
+    /// disk itself and any of its partitions, forcing a busy mount — so a
+    /// previously attached pool is released, erased and seamlessly re-mounted.
+    /// The privileged helper performs the destructive filesystem operation;
+    /// this layer enforces device policy.
     pub async fn create_pool(&self, device_name: &str, pool_name: &str, requested_fs: &str, force: bool, auto_mount: bool, requested_mount_name: &str) -> Result<Device, String> {
         if pool_name.is_empty() || pool_name.len() > 32 || !pool_name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')) {
             return Err("pool name must be 1-32 characters: letters, numbers, _, -, .".into());
@@ -571,21 +579,22 @@ impl DeviceManager {
             .map_err(|e| format!("registry: {e}"))?
             .ok_or_else(|| format!("device {device_name} not found"))?;
         if dev.r#type != "disk" || !dev.removable {
-            return Err("only an unmounted removable whole disk can be formatted".into());
+            return Err("only a removable whole disk can be formatted".into());
         }
-        if dev.state == "detached" || !dev.mountpoint.is_empty() {
-            return Err("the selected disk is unavailable or already mounted".into());
+        if dev.state == "detached" {
+            return Err("the selected disk is unavailable".into());
         }
         if !self.begin_attach(&dev.kname) {
             return Err(format!("pool creation already in progress for {}", dev.name));
         }
         let result = async {
-            // A whole disk can look unmounted while one of its partitions is
-            // still mounted (for example /dev/sdc1). Unmount only partitions
-            // belonging to this selected disk, and only when Onyx owns the
-            // mount under its configured root. Never unmount an OS/external
-            // mount implicitly.
-            self.unmount_disk_partitions(&dev).await?;
+            // Destructive operation the user already confirmed: release every
+            // mount of this disk first — the disk itself may be mounted, and
+            // so may any of its partitions (for example /dev/sdc1 while
+            // /dev/sdc shows no mountpoint) — forcing busy mounts so a stale
+            // handle cannot block the format. The filesystem is re-mounted
+            // below when auto_mount is set.
+            self.unmount_disk_mounts(&dev, true, false).await?;
             let response = self.run_op(
                 PrivOp::FormatFilesystem,
                 vec![dev.path.clone(), fs_type.to_string(), pool_name.to_string(), force.to_string()],
@@ -631,35 +640,59 @@ impl DeviceManager {
         result
     }
 
-    /// Unmount mounted child partitions of a selected whole disk. The device
-    /// registry is populated from lsblk, so this catches mounts such as
-    /// /dev/sdc1 even when /dev/sdc itself has no mountpoint.
-    async fn unmount_disk_partitions(&self, disk: &Device) -> Result<(), String> {
-        let related = self
+    /// Unmount every mount of a selected whole disk — its mounted child
+    /// partitions first, then the disk's own mount — so it can be re-formatted
+    /// or cleanly detached. The registry is populated from lsblk, so this
+    /// catches mounts such as /dev/sdc1 even when /dev/sdc itself has no
+    /// mountpoint.
+    ///
+    /// `force` escalates a busy mount to `umount -f` / `umount -l` (pool
+    /// creation, where the user already confirmed erasing the disk).
+    /// `onyx_only` keeps detach safe: a mount living outside Onyx's storage
+    /// root is an error, never something detached silently.
+    async fn unmount_disk_mounts(
+        &self,
+        disk: &Device,
+        force: bool,
+        onyx_only: bool,
+    ) -> Result<(), String> {
+        let devices = self
             .registry
             .list_devices()
-            .map_err(|e| format!("registry: {e}"))?
-            .into_iter()
-            .filter(|candidate| candidate.kname != disk.kname && Self::is_partition_of(&disk.kname, &candidate.kname))
-            .filter(|candidate| !candidate.mountpoint.is_empty())
-            .collect::<Vec<_>>();
-
-        for partition in related {
-            if !Path::new(&partition.mountpoint).starts_with(self.mount_root.as_path()) {
+            .map_err(|e| format!("registry: {e}"))?;
+        for (kname, mountpoint) in Self::mounts_to_release(disk, &devices) {
+            if onyx_only && !Path::new(&mountpoint).starts_with(self.mount_root.as_path()) {
                 return Err(format!(
-                    "partition {} is mounted at {} outside Onyx; unmount it manually before formatting {}",
-                    partition.path, partition.mountpoint, disk.path
+                    "{kname} is mounted at {mountpoint} outside Onyx; unmount it manually before this operation"
                 ));
             }
-            self.unmount_block(&partition.mountpoint).await.map_err(|e| {
-                format!("cannot unmount {} at {} before formatting {}: {e}", partition.path, partition.mountpoint, disk.path)
+            self.unmount_block(&mountpoint, force).await.map_err(|e| {
+                format!("cannot unmount {kname} at {mountpoint}: {e}")
             })?;
             self.registry
-                .set_unmounted(&partition.kname)
+                .set_unmounted(&kname)
                 .map_err(|e| format!("registry: {e}"))?;
-            tracing::info!(disk = %disk.path, partition = %partition.path, mountpoint = %partition.mountpoint, "unmounted partition before pool format");
+            tracing::info!(disk = %disk.path, kname = %kname, mountpoint = %mountpoint, "unmounted before disk operation");
         }
         Ok(())
+    }
+
+    /// The mounts to release before re-formatting or detaching a disk: its
+    /// mounted child partitions first, then the whole disk's own mount.
+    /// Partitions come first — unmounting a disk while a partition of it is
+    /// still mounted would fail (and format the wrong view).
+    fn mounts_to_release(disk: &Device, devices: &[Device]) -> Vec<(String, String)> {
+        let mut targets: Vec<(String, String)> = devices
+            .iter()
+            .filter(|candidate| candidate.kname != disk.kname && Self::is_partition_of(&disk.kname, &candidate.kname))
+            .filter(|candidate| !candidate.mountpoint.is_empty())
+            .map(|candidate| (candidate.kname.clone(), candidate.mountpoint.clone()))
+            .collect();
+        targets.sort();
+        if !disk.mountpoint.is_empty() {
+            targets.push((disk.kname.clone(), disk.mountpoint.clone()));
+        }
+        targets
     }
 
     /// Return true for a partition kname belonging directly to a disk kname.
@@ -699,9 +732,10 @@ impl DeviceManager {
         if dev.mountpoint.is_empty() {
             // A whole disk can have a mounted child partition even when the
             // disk itself has no mountpoint. Detach the selected disk as a
-            // unit, then pin it out of auto-attach.
+            // unit (never touching mounts outside Onyx), then pin it out of
+            // auto-attach.
             if dev.r#type == "disk" {
-                self.unmount_disk_partitions(&dev).await?;
+                self.unmount_disk_mounts(&dev, false, true).await?;
             }
             // Not mounted: nothing else to unmount, but record the user's
             // intent so the watcher keeps the drive detached while plugged in.
@@ -709,7 +743,7 @@ impl DeviceManager {
                 .mark_detached_by_user(&dev.kname)
                 .map_err(|e| format!("registry: {e}"))?;
         } else {
-            if let Err(e) = self.unmount_block(&dev.mountpoint).await {
+            if let Err(e) = self.unmount_block(&dev.mountpoint, false).await {
                 tracing::warn!(kname = %dev.kname, mountpoint = %dev.mountpoint, error = %e, "unmount failed");
                 return Err(e);
             }
@@ -742,7 +776,7 @@ impl DeviceManager {
             }
         };
         if !prev.mountpoint.is_empty() && Path::new(&prev.mountpoint).starts_with(self.mount_root.as_path()) {
-            if let Err(e) = self.unmount_block(&prev.mountpoint).await {
+            if let Err(e) = self.unmount_block(&prev.mountpoint, false).await {
                 tracing::warn!(kname, mountpoint = %prev.mountpoint, error = %e, "unmount after unplug failed");
             } else {
                 tracing::info!(kname, mountpoint = %prev.mountpoint, "unmounted removed device");
@@ -933,6 +967,61 @@ mod tests {
         assert!(!attachable("loop", "ext4")); // loopback
         assert!(!attachable("rom", "iso9660")); // cdrom
         assert!(!attachable("dm", "ext4")); // device mapper
+    }
+
+    fn test_device(kname: &str, device_type: &str, mountpoint: &str) -> Device {
+        Device {
+            name: kname.to_string(),
+            kname: kname.to_string(),
+            path: format!("/dev/{kname}"),
+            r#type: device_type.to_string(),
+            fs_type: "ext4".to_string(),
+            label: String::new(),
+            uuid: String::new(),
+            size_bytes: 1_000_000,
+            mountpoint: mountpoint.to_string(),
+            removable: true,
+            state: if mountpoint.is_empty() { "attached".into() } else { "mounted".into() },
+            auto: "removable".to_string(),
+            health_status: String::new(),
+            temperature_c: 0,
+        }
+    }
+
+    #[test]
+    fn mounts_to_release_orders_partitions_before_the_disk() {
+        let disk = test_device("sdc", "disk", "/mnt/onyx/pool");
+        let devices = vec![
+            disk.clone(),
+            test_device("sdc1", "part", "/mnt/onyx/old"),
+            test_device("sdc2", "part", ""), // unmounted partition: ignored
+            test_device("sdd1", "part", "/mnt/onyx/other"), // other disk: ignored
+        ];
+        assert_eq!(
+            DeviceManager::mounts_to_release(&disk, &devices),
+            vec![
+                ("sdc1".to_string(), "/mnt/onyx/old".to_string()),
+                ("sdc".to_string(), "/mnt/onyx/pool".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn mounts_to_release_handles_nvme_and_no_disk_mount() {
+        let disk = test_device("nvme0n1", "disk", "");
+        let devices = vec![
+            disk.clone(),
+            test_device("nvme0n1p1", "part", "/mnt/onyx/d1"),
+            test_device("nvme0n1p2", "part", "/mnt/onyx/d2"),
+            test_device("nvme0n2", "disk", ""), // unrelated whole disk
+        ];
+        assert_eq!(
+            DeviceManager::mounts_to_release(&disk, &devices),
+            vec![
+                ("nvme0n1p1".to_string(), "/mnt/onyx/d1".to_string()),
+                ("nvme0n1p2".to_string(), "/mnt/onyx/d2".to_string()),
+            ]
+        );
     }
 
     #[tokio::test]
