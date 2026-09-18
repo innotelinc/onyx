@@ -98,3 +98,81 @@ jobs:
           file: docker/onyx-web/Dockerfile
           push: false
           cache-from: type=gha
+
+  e2e:
+    # The three flows that span every layer — API → core → storaged/privd →
+    # kernel, appd → the host Docker engine, objectstore → rclone → the tier
+    # target — are the only place a file mode, a mount namespace or a missing
+    # helper binary shows up; `make check` cannot see any of them (every bug the
+    # E2E run found so far was invisible to the unit suite).
+    #
+    # The pool flow formats a *loop device backed by a file the harness creates*,
+    # so no runner disk is ever touched, while the path under test is the
+    # production one: wipefs, mkfs, mount, pool-root mode.
+    runs-on: ubuntu-latest
+    # The stack builds two Rust services, installs an app and pulls its images.
+    # A generous ceiling so a slow-but-working run is not killed mid-flow.
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Prepare the host paths the stack binds
+        run: |
+          # onyx-privd/storaged/api bind /mnt/onyx :rshared, and a pool mount
+          # only reaches the other containers if the *host* path is a shared
+          # mount as well (docs/design/05 §2.4). setup.sh does this on a real
+          # install; a runner needs the same steps.
+          sudo mkdir -p /mnt/onyx
+          sudo chmod 0777 /mnt/onyx
+          sudo mount --make-shared /mnt/onyx
+          # The rclone catalog is written by the API's container user, which has
+          # no counterpart on the runner.
+          mkdir -p data/rclone
+          chmod 0777 data/rclone
+
+      - name: Write .env from the documented defaults
+        run: |
+          cp .env.example .env
+          # onyx-appd drives the host engine through the socket, so its granted
+          # group has to be this runner's docker group.
+          DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
+          sed -i "s/^DOCKER_GID=.*/DOCKER_GID=${DOCKER_GID}/" .env
+          # The S3 client in the tiered flow authenticates against the endpoint,
+          # which refuses every request when no key is configured.
+          sed -i "s/^S3_ACCESS_KEY=.*/S3_ACCESS_KEY=ci-access-key/" .env
+          sed -i "s/^S3_SECRET_KEY=.*/S3_SECRET_KEY=ci-secret-key/" .env
+
+      - name: Build and start the stack
+        run: |
+          docker compose -p onyx-e2e up -d --build \
+            onyx-privd onyx-storaged onyx-shared onyx-core onyx-api \
+            onyx-objectstore onyx-backupd onyx-appd
+
+      - name: Wait for the API
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:${ONYX_API_PORT:-2081}/api/v1/system/version" >/dev/null; then
+              echo "the API is answering"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "the API never answered" >&2
+          docker compose -p onyx-e2e ps >&2
+          exit 1
+
+      - name: Run the flows
+        env:
+          # A loop device is the only way this runner can host the destructive
+          # flow, so failing to provision one is a failure, not a skip.
+          E2E_REQUIRE_POOL: "1"
+        run: |
+          SUDO=sudo POOL_IMAGE=/tmp/onyx-e2e-pool.img bash scripts/e2e-stack.sh
+
+      - name: Container logs
+        if: failure()
+        run: docker compose -p onyx-e2e logs --tail=200

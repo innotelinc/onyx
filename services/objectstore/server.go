@@ -278,7 +278,7 @@ func (s *server) GetObject(ctx context.Context, req *onyxv1.GetObjectRequest) (*
 		return nil, status.Error(codes.NotFound, "object not found")
 	}
 	target := cloudTargetFor(b.CloudTarget, b.Name) + "/" + cloudPath(req.GetKey())
-	if err := cloud.Fetch(ctx, target, path); err != nil {
+	if err := s.refetchObject(ctx, cloud, req.GetBucket(), req.GetKey(), target, path); err != nil {
 		return nil, status.Errorf(codes.NotFound, "object not found locally and not retrievable from the cloud target: %v", err)
 	}
 	data, readErr = os.ReadFile(path)
@@ -289,6 +289,48 @@ func (s *server) GetObject(ctx context.Context, req *onyxv1.GetObjectRequest) (*
 		Meta: &onyxv1.ObjectMeta{Bucket: req.GetBucket(), Key: req.GetKey(), SizeBytes: int64(len(data))},
 		Data: data,
 	}, nil
+}
+
+// refetchObject downloads an evicted object back into the cache so that the
+// cache only ever holds whole objects.
+//
+// The transfer has to go through a temporary path: `rclone copyto` (and every
+// transport shaped like it) writes the destination as the bytes arrive, so a
+// download that dies halfway — a reset connection, the transport's own timeout,
+// a cancelled request — leaves a truncated file *at the object's path*. From
+// then on every read finds a local file, serves it as the object, and never
+// asks the cloud again: the cache would silently hold a corrupt copy of data
+// that is intact in the cloud. Downloading into the store's hidden `.meta` area
+// (which bucket listings never walk, so a temp can never be mistaken for an
+// object) and renaming into place on success makes the object appear only once
+// it is complete — a failed refetch leaves the object evicted and retryable.
+func (s *server) refetchObject(ctx context.Context, cloud cloudTransport, bucket, key, target, path string) error {
+	tmpRoot := filepath.Join(s.userMetaDir(bucket), "tmp")
+	if err := os.MkdirAll(tmpRoot, 0o750); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(tmpRoot, "refetch-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if closeErr := tmp.Close(); closeErr != nil {
+		_ = os.Remove(tmpPath)
+		return closeErr
+	}
+	if err := cloud.Fetch(ctx, target, tmpPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 // userMetaDir is where per-object user metadata lives: a hidden directory inside
@@ -485,9 +527,13 @@ func (s *server) evictCold(_ context.Context, dir string, b *onyxv1.Bucket, _ cl
 			failures = append(failures, key)
 			continue
 		}
-		// The sidecar is local bookkeeping, not storage: it goes with the
-		// object rather than being evicted on its own schedule.
-		_ = os.Remove(s.userMetaPath(b.Name, key))
+		// The sidecar stays. Evicting the local copy does not delete the object
+		// — it lives in the cloud, and the next read refetches it — so the
+		// client metadata that goes with it has to survive too: a client that
+		// PUT a document with its hash in `x-amz-meta-*` checks the hash on its
+		// way back out, and dropping the sidecar here would make the refetched
+		// object answer HEAD with no metadata at all. DeleteObject is what
+		// removes it, because that is when the object genuinely stops existing.
 		evicted++
 	}
 	if len(failures) > 0 {
