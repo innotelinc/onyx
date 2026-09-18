@@ -44,6 +44,12 @@ Commands:
   share list    list shares
   share show    show one share (<name>)
   share delete  delete a share (<name>)
+  storage remotes    list configured cloud/remote targets
+  storage providers  list the cloud/remote backends setup supports
+  storage add        configure a target (<name> <type> key=value ...)
+  storage rm         remove a target (<name>)
+  storage check      probe a target (<name>)
+  storage clone      copy a storage folder to a target (<folder> <remote> [dest])
   help        show this help
 
 Flags:
@@ -100,6 +106,8 @@ func run(args []string) int {
 		err = cmdEvents(ctx, c, jsonMode, fs.Args()[1:])
 	case "share":
 		err = cmdShare(ctx, c, jsonMode, fs.Args()[1:])
+	case "storage":
+		err = cmdStorage(ctx, c, jsonMode, fs.Args()[1:])
 	case "help", "-h", "--help":
 		fs.Usage()
 		return 0
@@ -198,13 +206,14 @@ func cmdPoolShow(ctx context.Context, c *client.Client, jsonOut bool, name strin
 }
 
 // cmdPoolCreate formats a removable whole disk into a pool. The data plane
-// unmounts whatever is currently on the disk (forcing a busy mount), erases
-// it, and mounts the fresh filesystem under /mnt/onyx unless --no-mount.
+// force-unmounts whatever is currently on the disk, force-erases it, and
+// mounts the fresh filesystem under /mnt/onyx unless --no-mount.
 func cmdPoolCreate(ctx context.Context, c *client.Client, jsonOut bool, args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: onyx pool create <device> <name> [--fs btrfs|ext4] [--mount-name NAME] [--no-mount] [--force] [--json]")
+		return fmt.Errorf("usage: onyx pool create <device> <name> [--fs btrfs|ext4] [--mount-name NAME] [--no-mount] [--no-force] [--json]")
 	}
 	req := &client.CreatePoolRequest{Device: args[0], Name: args[1]}
+	force := true
 	for i := 2; i < len(args); i++ {
 		switch args[i] {
 		case "--fs":
@@ -226,11 +235,14 @@ func cmdPoolCreate(ctx context.Context, c *client.Client, jsonOut bool, args []s
 			no := false
 			req.AutoMount = &no
 		case "--force":
-			req.Force = true
+			force = true
+		case "--no-force":
+			force = false
 		default:
 			return fmt.Errorf("unknown flag %q", args[i])
 		}
 	}
+	req.Force = &force
 	pool, err := c.CreatePool(ctx, req)
 	if err != nil {
 		return err
@@ -547,6 +559,134 @@ func friendlyProtocols(ps []client.ShareProtocol) string {
 		names = append(names, s)
 	}
 	return strings.Join(names, ", ")
+}
+
+// cmdStorage covers the cloud/remote storage surface: the remote catalog, the
+// backends setup supports, remote configuration, reachability probes, and
+// cloning a storage folder out to a remote.
+func cmdStorage(ctx context.Context, c *client.Client, jsonOut bool, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: onyx storage remotes|providers|add|rm|check|clone [args] [--json]")
+	}
+	switch args[0] {
+	case "remotes", "list":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: onyx storage remotes [--json]")
+		}
+		remotes, err := c.ListRemotes(ctx)
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(remotes)
+		}
+		if len(remotes.Remotes) == 0 {
+			fmt.Println("no cloud/remote targets configured")
+			return nil
+		}
+		for _, name := range remotes.Remotes {
+			if kind := remotes.Details[name]; kind != "" {
+				fmt.Printf("%s\t%s\n", name, kind)
+				continue
+			}
+			fmt.Println(name)
+		}
+		return nil
+	case "providers":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: onyx storage providers [--json]")
+		}
+		remotes, err := c.ListRemotes(ctx)
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(remotes.Providers)
+		}
+		if len(remotes.Providers) == 0 {
+			fmt.Println("no providers reported")
+			return nil
+		}
+		for _, p := range remotes.Providers {
+			kind := "credentials"
+			if p.OAuth {
+				kind = "oauth (one-time browser approval)"
+			}
+			fmt.Printf("%-24s %-34s %s\n", p.Type, kind, strings.Join(p.Required, ", "))
+		}
+		return nil
+	case "add", "create":
+		if len(args) < 3 {
+			return fmt.Errorf("usage: onyx storage add <name> <type> [key=value ...] [--json]")
+		}
+		req := &client.CreateRemoteRequest{Name: args[1], Type: args[2], Params: map[string]string{}}
+		for _, pair := range args[3:] {
+			key, value, found := strings.Cut(pair, "=")
+			if !found || key == "" {
+				return fmt.Errorf("options must be key=value (got %q)", pair)
+			}
+			req.Params[key] = value
+		}
+		remote, err := c.CreateRemote(ctx, req)
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(remote)
+		}
+		fmt.Printf("configured %s (%s)\n", remote.Name, remote.Type)
+		if remote.NextStep != "" {
+			fmt.Println(remote.NextStep)
+		}
+		return nil
+	case "rm", "delete", "remove":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: onyx storage rm <name>")
+		}
+		if err := c.DeleteRemote(ctx, args[1]); err != nil {
+			return err
+		}
+		fmt.Printf("removed %s\n", args[1])
+		return nil
+	case "check":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: onyx storage check <name> [--json]")
+		}
+		check, err := c.CheckRemote(ctx, args[1])
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(check)
+		}
+		if check.OK {
+			fmt.Printf("%s is reachable\n", check.Name)
+			return nil
+		}
+		return fmt.Errorf("%s is not reachable: %s", check.Name, check.Detail)
+	case "clone":
+		if len(args) < 3 {
+			return fmt.Errorf("usage: onyx storage clone <folder> <remote> [dest] [--json]")
+		}
+		req := &client.CloneToRemoteRequest{Source: args[1], Remote: args[2]}
+		if len(args) > 3 {
+			req.Dest = args[3]
+		}
+		result, err := c.CloneToRemote(ctx, req)
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return printJSON(result)
+		}
+		fmt.Printf("cloned %s to %s\n", result.Source, result.Target)
+		if result.Detail != "" {
+			fmt.Println(result.Detail)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown storage command %q (usage: onyx storage remotes|providers|add|rm|check|clone)", args[0])
+	}
 }
 
 func printJSON(v any) error {

@@ -58,6 +58,7 @@ fn main() -> ExitCode {
         &args.smartctl_bin,
         &args.mkfs_btrfs_bin,
         &args.mkfs_ext4_bin,
+        &args.wipefs_bin,
         &args.testparm_bin,
         &args.systemctl_bin,
         &args.exportfs_bin,
@@ -85,6 +86,7 @@ struct Args {
     smartctl_bin: String,
     mkfs_btrfs_bin: String,
     mkfs_ext4_bin: String,
+    wipefs_bin: String,
     testparm_bin: String,
     systemctl_bin: String,
     exportfs_bin: String,
@@ -105,6 +107,7 @@ impl Args {
         let mut smartctl_bin = "smartctl".to_string();
         let mut mkfs_btrfs_bin = "mkfs.btrfs".to_string();
         let mut mkfs_ext4_bin = "mkfs.ext4".to_string();
+        let mut wipefs_bin = "wipefs".to_string();
         let mut testparm_bin = "testparm".to_string();
         let mut systemctl_bin = "systemctl".to_string();
         let mut exportfs_bin = "exportfs".to_string();
@@ -127,6 +130,7 @@ impl Args {
                 "--smartctl-bin" => smartctl_bin = it.next().expect("--smartctl-bin requires a value"),
                 "--mkfs-btrfs-bin" => mkfs_btrfs_bin = it.next().expect("--mkfs-btrfs-bin requires a value"),
                 "--mkfs-ext4-bin" => mkfs_ext4_bin = it.next().expect("--mkfs-ext4-bin requires a value"),
+                "--wipefs-bin" => wipefs_bin = it.next().expect("--wipefs-bin requires a value"),
                 "--testparm-bin" => testparm_bin = it.next().expect("--testparm-bin requires a value"),
                 "--systemctl-bin" => systemctl_bin = it.next().expect("--systemctl-bin requires a value"),
                 "--exportfs-bin" => exportfs_bin = it.next().expect("--exportfs-bin requires a value"),
@@ -156,6 +160,7 @@ impl Args {
             smartctl_bin,
             mkfs_btrfs_bin,
             mkfs_ext4_bin,
+            wipefs_bin,
             testparm_bin,
             systemctl_bin,
             exportfs_bin,
@@ -317,6 +322,7 @@ struct Allowlist {
     smartctl_bin: String,
     mkfs_btrfs_bin: String,
     mkfs_ext4_bin: String,
+    wipefs_bin: String,
     testparm_bin: String,
     systemctl_bin: String,
     exportfs_bin: String,
@@ -336,6 +342,7 @@ impl Allowlist {
         smartctl_bin: &str,
         mkfs_btrfs_bin: &str,
         mkfs_ext4_bin: &str,
+        wipefs_bin: &str,
         testparm_bin: &str,
         systemctl_bin: &str,
         exportfs_bin: &str,
@@ -353,6 +360,7 @@ impl Allowlist {
             smartctl_bin: smartctl_bin.to_string(),
             mkfs_btrfs_bin: mkfs_btrfs_bin.to_string(),
             mkfs_ext4_bin: mkfs_ext4_bin.to_string(),
+            wipefs_bin: wipefs_bin.to_string(),
             testparm_bin: testparm_bin.to_string(),
             systemctl_bin: systemctl_bin.to_string(),
             exportfs_bin: exportfs_bin.to_string(),
@@ -745,32 +753,25 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
             }
             args.push(device.display().to_string());
             args.push(mountpoint.display().to_string());
-            (allowlist.mount_bin.clone(), args)
+            let out = run_argv(&allowlist.mount_bin, &args).await?;
+            if !out.status.success() {
+                // A failed mount must not leave its empty mountpoint directory
+                // behind — the file explorer would list it as a stale pool.
+                // Best effort: a directory that already held something stays.
+                let _ = std::fs::remove_dir(mountpoint);
+            }
+            return Ok(PrivResponse {
+                exit_code: out.status.code().unwrap_or(-1) as i32,
+                stdout: out.stdout,
+                stderr: out.stderr,
+            });
         }
         AllowedCommand::UnmountBlock { mountpoint, force } => {
             // Escalating unmount: a plain `umount` first; when the caller asked
             // for force, a busy mount is retried with `-f` (force) and then
             // `-l` (lazy detach) so a stale handle cannot block a destructive
             // operation the user already confirmed.
-            let target = mountpoint.display().to_string();
-            let mut attempts: Vec<Vec<String>> = vec![vec![target.clone()]];
-            if *force {
-                attempts.push(vec!["-f".into(), target.clone()]);
-                attempts.push(vec!["-l".into(), target.clone()]);
-            }
-            let mut last: Option<std::process::Output> = None;
-            for args in attempts {
-                let out = run_argv(&allowlist.umount_bin, &args).await?;
-                if out.status.success() {
-                    return Ok(PrivResponse {
-                        exit_code: 0,
-                        stdout: out.stdout,
-                        stderr: out.stderr,
-                    });
-                }
-                last = Some(out);
-            }
-            let out = last.expect("at least one umount attempt");
+            let out = umount_escalating(allowlist, &mountpoint.display().to_string(), *force).await?;
             return Ok(PrivResponse {
                 exit_code: out.status.code().unwrap_or(-1) as i32,
                 stdout: out.stdout,
@@ -782,14 +783,107 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
             vec!["-H".into(), "-A".into(), device.display().to_string()],
         ),
         AllowedCommand::FormatFilesystem { device, fs_type, label, force } => {
+            // Formatting refuses a device that is still mounted — "apparently
+            // in use by the system" (mke2fs) or "Resource busy" (mkfs.btrfs) —
+            // and the control plane's registry can miss a mount it did not
+            // create. So privd releases every kernel mount of the device (and
+            // of its partitions) itself, then erases stale signatures, then
+            // formats, retrying while the kernel finishes releasing the disk.
+            let target = device.display().to_string();
+            let kname = device
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            let mut stderr: Vec<u8> = Vec::new();
+            // Two sweeps: a nested mount only appears once its outer one is gone.
+            for _ in 0..2 {
+                let mounts = device_mounts(device, &allowlist.dev_root);
+                if mounts.is_empty() {
+                    break;
+                }
+                for mountpoint in mounts {
+                    if !mountpoint.starts_with(&allowlist.allowed_root) {
+                        // Never silently unmount a host or OS volume: report it
+                        // so the operator decides.
+                        return Ok(PrivResponse {
+                            exit_code: 1,
+                            stdout: Vec::new(),
+                            stderr: format!(
+                                "{target} is mounted at {} outside {}; unmount it manually before formatting",
+                                mountpoint.display(),
+                                allowlist.allowed_root.display()
+                            )
+                            .into_bytes(),
+                        });
+                    }
+                    let out = umount_escalating(allowlist, &mountpoint.display().to_string(), *force).await?;
+                    if out.status.success() {
+                        tracing::info!(device = %target, mountpoint = %mountpoint.display(), "released before format");
+                    } else {
+                        stderr.extend_from_slice(&out.stderr);
+                        stderr.push(b'\n');
+                    }
+                }
+            }
+
+            // Erase whatever signatures are left (the "force erase" the user
+            // confirmed). Best effort: a missing wipefs is not fatal because
+            // mkfs writes fresh signatures anyway, but a failed wipe is worth
+            // reporting alongside a failed format.
+            match run_argv(&allowlist.wipefs_bin, &["-a".into(), target.clone()]).await {
+                Ok(out) if out.status.success() => {}
+                Ok(out) => {
+                    stderr.extend_from_slice(&out.stderr);
+                    stderr.push(b'\n');
+                }
+                Err(_) => tracing::debug!(bin = %allowlist.wipefs_bin, "wipefs unavailable; skipping signature erase"),
+            }
+
             let (bin, force_arg) = if fs_type == "ext4" {
                 (allowlist.mkfs_ext4_bin.clone(), "-F")
             } else {
                 (allowlist.mkfs_btrfs_bin.clone(), "-f")
             };
-            let mut args = vec!["-L".into(), label.clone(), device.display().to_string()];
+            let mut args = vec!["-L".into(), label.clone(), target.clone()];
             if *force { args.insert(0, force_arg.into()); }
-            (bin, args)
+
+            let mut last: Option<std::process::Output> = None;
+            for attempt in 0..3 {
+                let out = run_argv(&bin, &args).await?;
+                let busy = !out.status.success() && is_busy_error(&out);
+                // Give an asynchronously unmounting filesystem a moment to
+                // release the device before the next attempt.
+                if busy && attempt < 2 {
+                    tracing::warn!(device = %target, attempt, "device still busy; retrying format");
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    last = Some(out);
+                    continue;
+                }
+                last = Some(out);
+                break;
+            }
+            let out = last.expect("at least one format attempt");
+            if !out.status.success() {
+                // Say what is still holding the disk: a stacked holder (dm/md)
+                // or a mount that survived the sweep is the whole difference
+                // between "try again" and "this disk is in use by something else".
+                if let Some(reason) = busy_reason(&kname, &target) {
+                    stderr.extend_from_slice(reason.as_bytes());
+                    stderr.push(b'\n');
+                }
+                stderr.extend_from_slice(&out.stderr);
+                return Ok(PrivResponse {
+                    exit_code: out.status.code().unwrap_or(-1) as i32,
+                    stdout: out.stdout,
+                    stderr,
+                });
+            }
+            return Ok(PrivResponse {
+                exit_code: 0,
+                stdout: out.stdout,
+                stderr,
+            });
         }
         AllowedCommand::CreateBtrfsPool { device, label } => (
             allowlist.mkfs_btrfs_bin.clone(),
@@ -906,6 +1000,135 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
     })
 }
 
+/// Unmount one mountpoint, escalating a busy mount: plain `umount` first,
+/// then (only when the caller asked for force) `umount -f` and finally
+/// `umount -l`. The last attempt's output is returned either way.
+async fn umount_escalating(
+    allowlist: &Allowlist,
+    target: &str,
+    force: bool,
+) -> Result<std::process::Output, Status> {
+    let mut attempts: Vec<Vec<String>> = vec![vec![target.to_string()]];
+    if force {
+        attempts.push(vec!["-f".into(), target.to_string()]);
+        attempts.push(vec!["-l".into(), target.to_string()]);
+    }
+    let mut last: Option<std::process::Output> = None;
+    for args in attempts {
+        let out = run_argv(&allowlist.umount_bin, &args).await?;
+        if out.status.success() {
+            return Ok(out);
+        }
+        last = Some(out);
+    }
+    Ok(last.expect("at least one umount attempt"))
+}
+
+/// True when `candidate` is a partition of disk `disk` (sdc/sdc1,
+/// nvme0n1/nvme0n1p1) — the same grouping storaged uses, so a device mounted
+/// through its partition still counts as busy.
+fn is_partition_device(disk: &str, candidate: &str) -> bool {
+    candidate.strip_prefix(disk).is_some_and(|suffix| {
+        !suffix.is_empty()
+            && (suffix.chars().all(|c| c.is_ascii_digit())
+                || suffix
+                    .strip_prefix('p')
+                    .is_some_and(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())))
+    })
+}
+
+/// Undo the octal escaping the kernel applies to mount fields (\040 et al) so
+/// a mountpoint with a space can still be unmounted by path.
+fn unescape_mount_field(field: &str) -> String {
+    let bytes = field.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 3 < bytes.len() {
+            let octal = &field[i + 1..i + 4];
+            if let Ok(value) = u8::from_str_radix(octal, 8) {
+                out.push(value);
+                i += 4;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+/// Every kernel mountpoint carrying `device` or one of its partitions, read
+/// from /proc/self/mounts. Only sources under `dev_root` are considered: that
+/// is the device tree this helper is allowed to act on, and it keeps a test's
+/// fake device names from matching real host mounts.
+fn device_mounts(device: &Path, dev_root: &Path) -> Vec<PathBuf> {
+    let kname = match device.file_name().map(|n| n.to_string_lossy().to_string()) {
+        Some(name) if !name.is_empty() => name,
+        _ => return Vec::new(),
+    };
+    let Ok(content) = std::fs::read_to_string("/proc/self/mounts") else {
+        return Vec::new();
+    };
+    let mut mounts = Vec::new();
+    for line in content.lines() {
+        let mut fields = line.split_whitespace();
+        let (Some(source), Some(target)) = (fields.next(), fields.next()) else {
+            continue;
+        };
+        let source = Path::new(source);
+        if !source.starts_with(dev_root) {
+            continue;
+        }
+        let Some(name) = source.file_name().map(|n| n.to_string_lossy().to_string()) else {
+            continue;
+        };
+        if name == kname || is_partition_device(&kname, &name) {
+            mounts.push(PathBuf::from(unescape_mount_field(target)));
+        }
+    }
+    mounts
+}
+
+/// True when a failed command looks like the kernel refusing a busy device.
+fn is_busy_error(output: &std::process::Output) -> bool {
+    let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+    stderr.contains("resource busy")
+        || stderr.contains("device or resource busy")
+        || stderr.contains("apparently in use by the system")
+        || stderr.contains("is mounted")
+}
+
+/// Explain what still holds a busy device: remaining mounts, then stacked
+/// holders from sysfs (device-mapper, mdraid, loop). Returns None when the
+/// device looks free, so a failure that has nothing to do with busy-ness is
+/// reported without a misleading note.
+fn busy_reason(kname: &str, target: &str) -> Option<String> {
+    if kname.is_empty() {
+        return None;
+    }
+    let mut notes: Vec<String> = Vec::new();
+    let mounts = device_mounts(Path::new(target), Path::new("/dev"));
+    if !mounts.is_empty() {
+        let list: Vec<String> = mounts.iter().map(|m| m.display().to_string()).collect();
+        notes.push(format!("still mounted at {}", list.join(", ")));
+    }
+    let holders = std::fs::read_dir(format!("/sys/class/block/{kname}/holders"))
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !holders.is_empty() {
+        notes.push(format!("held by {}", holders.join(", ")));
+    }
+    if notes.is_empty() {
+        return None;
+    }
+    Some(format!("{target} is busy: {}", notes.join("; ")))
+}
+
 /// Run a helper subprocess (mkdir -p before mount) whose failures surface as
 /// mount failures, not gRPC errors.
 fn run_sync_ok(bin: &str, args: &[String]) -> Result<(), Status> {
@@ -1010,6 +1233,7 @@ mod tests {
             &marker("smartctl"),
             &marker("mkfs.btrfs"),
             &marker("mkfs.ext4"),
+            &marker("wipefs"),
             &marker("testparm"),
             &marker("systemctl"),
             &marker("exportfs"),
@@ -1038,6 +1262,7 @@ mod tests {
             "smartctl",
             "mkfs.btrfs",
             "mkfs.ext4",
+            "wipefs",
             "testparm",
             "systemctl",
             "exportfs",
@@ -1065,7 +1290,26 @@ mod tests {
         ).await.unwrap();
         assert_eq!(resp.exit_code, 0);
         let log = fs::read_to_string(dir.path().join("argv.log")).unwrap();
-        assert!(log.lines().any(|line| line.contains("mkfs.ext4") && line.contains("|-F") && line.contains("|-L|data")), "{log}");
+        let mkfs = log.lines().position(|line| line.contains("mkfs.ext4")).expect("mkfs ran");
+        assert!(log.lines().nth(mkfs).unwrap().contains("|-F") && log.lines().nth(mkfs).unwrap().contains("|-L|data"), "{log}");
+        // Force erase: stale signatures are wiped before the new filesystem is
+        // written, so a surviving superblock cannot confuse the new pool.
+        let wipe = log.lines().position(|line| line.contains("wipefs")).expect("wipefs ran");
+        assert!(wipe < mkfs, "wipefs must run before mkfs: {log}");
+        assert!(log.lines().nth(wipe).unwrap().contains("|-a|"), "wipefs -a: {log}");
+    }
+
+    #[test]
+    fn device_mounts_matches_partitions_of_the_whole_disk() {
+        assert!(is_partition_device("sdc", "sdc1"));
+        assert!(is_partition_device("sdc", "sdc12"));
+        assert!(is_partition_device("nvme0n1", "nvme0n1p1"));
+        assert!(!is_partition_device("sdc", "sdc"));
+        assert!(!is_partition_device("sdc", "sdd1"));
+        assert!(!is_partition_device("sdc", "sdcx"));
+        // Kernel escaping in /proc/self/mounts uses octal \040 for a space.
+        assert_eq!(unescape_mount_field("/mnt/onyx/main\\040pool"), "/mnt/onyx/main pool");
+        assert_eq!(unescape_mount_field("/mnt/onyx/main-pool"), "/mnt/onyx/main-pool");
     }
 
     #[tokio::test]
@@ -1089,6 +1333,7 @@ mod tests {
             &record("smartctl"),
             &record("mkfs.btrfs"),
             &record("mkfs.ext4"),
+            &record("wipefs"),
             &record("testparm"),
             &record("systemctl"),
             &record("exportfs"),
@@ -1420,6 +1665,7 @@ mod tests {
         let failing = fake_bin(dir.path(), "testparm-bad", "#!/bin/sh\nexit 1\n");
         let a = Allowlist::new(
             "btrfs", "lsblk", "mount", "umount", "mkdir", "smartctl", "mkfs.btrfs", "mkfs.ext4",
+            "wipefs",
             &failing, // testparm fails
             "systemctl", "exportfs", "sshd",
             dir.path(), dir.path(), dir.path().join("dev").as_path(),

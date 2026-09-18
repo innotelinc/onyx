@@ -177,6 +177,14 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("GET /api/v1/files/archive", s.handleFileArchive)
 	mux.HandleFunc("GET /api/v1/files/content", s.handleFileContent)
 	mux.HandleFunc("GET /api/v1/storage/remotes", s.handleRcloneRemotes)
+	mux.HandleFunc("GET /api/v1/storage/providers", s.handleRcloneProviders)
+	// Cloud/remote storage setup (docs/design/05#5): the Shares page writes
+	// remotes into the shared rclone config, probes them, and clones a storage
+	// folder out to them.
+	mux.HandleFunc("POST /api/v1/storage/remotes", s.handleCreateRemote)
+	mux.HandleFunc("DELETE /api/v1/storage/remotes/{name}", s.handleDeleteRemote)
+	mux.HandleFunc("POST /api/v1/storage/remotes/{name}/check", s.handleCheckRemote)
+	mux.HandleFunc("POST /api/v1/storage/clone", s.handleCloneToRemote)
 	mux.HandleFunc("POST /api/v1/files/upload", s.handleFileUpload)
 	mux.HandleFunc("POST /api/v1/files/mkdir", s.handleFileMkdir)
 	mux.HandleFunc("POST /api/v1/files/rename", s.handleFileRename)
@@ -355,10 +363,13 @@ func (s *server) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
 // handlePool serves GET /api/v1/pools/{name}; storaged's not_found propagates
 // as a 404 via writeGRPCError (docs/design/06#2-error-model).
 type createPoolBody struct {
-	Device    string `json:"device"`
-	Name      string `json:"name"`
-	FsType    string `json:"fs_type"`
-	Force     bool   `json:"force"`
+	Device string `json:"device"`
+	Name   string `json:"name"`
+	FsType string `json:"fs_type"`
+	// Force unmounts busy mounts and overwrites existing filesystem
+	// signatures. Defaults to true: creating a pool already means erasing the
+	// disk, and the data plane refuses to format a busy device anyway.
+	Force     *bool  `json:"force"`
 	AutoMount *bool  `json:"auto_mount"`
 	MountName string `json:"mount_name"`
 }
@@ -382,9 +393,13 @@ func (s *server) handleCreatePool(w http.ResponseWriter, r *http.Request) {
 	if body.AutoMount != nil {
 		autoMount = *body.AutoMount
 	}
+	force := true
+	if body.Force != nil {
+		force = *body.Force
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
-	pool, err := s.core.CreatePool(ctx, &onyxv1.CreatePoolRequest{Device: body.Device, Name: body.Name, FsType: fsType, Force: body.Force, AutoMount: autoMount, MountName: body.MountName})
+	pool, err := s.core.CreatePool(ctx, &onyxv1.CreatePoolRequest{Device: body.Device, Name: body.Name, FsType: fsType, Force: force, AutoMount: autoMount, MountName: body.MountName})
 	if err != nil {
 		s.writeGRPCError(w, r, err)
 		return
