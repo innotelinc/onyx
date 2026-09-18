@@ -31,6 +31,8 @@ func main() {
 		appRoot    = flag.String("app-root", "", "where app compose projects are written (default: <state-dir>/apps)")
 		composeBin = flag.String("compose-bin", "docker", "container engine CLI (docker compose)")
 		hostName   = flag.String("host", "", "public hostname apps use for their own URLs (e.g. onyx.example.com)")
+		// The only host tree an app may bind-mount (docs/design/09 §6).
+		storageRoot = flag.String("storage-root", storageRootDefault, "storage root apps may mount from")
 	)
 	flag.Parse()
 
@@ -58,7 +60,7 @@ func main() {
 	defer st.Close()
 
 	gs := grpc.NewServer()
-	srv := newServer(apps, st, newComposeRuntime(*composeBin, *appRoot), *hostName)
+	srv := newServer(apps, st, newComposeRuntime(*composeBin, *appRoot), *hostName, *storageRoot)
 	onyxv1.RegisterHealthServer(gs, srv)
 	onyxv1.RegisterAppdServer(gs, srv)
 	slog.Info("onyx-appd ready", "catalog", len(apps), "engine", *composeBin, "app_root", *appRoot)

@@ -75,7 +75,7 @@ func testServer(t *testing.T, rt Runtime) *server {
 	if err := validateCatalog(apps); err != nil {
 		t.Fatalf("catalog: %v", err)
 	}
-	return newServer(apps, st, rt, "onyx.test")
+	return newServer(apps, st, rt, "onyx.test", storageRootDefault)
 }
 
 func jellyfinContainer() *onyxv1.Container {
@@ -137,7 +137,7 @@ func TestInstallSurvivesRestart(t *testing.T) {
 		t.Fatalf("openStore: %v", err)
 	}
 	apps := catalog()
-	s := newServer(apps, st, rt, "")
+	s := newServer(apps, st, rt, "", storageRootDefault)
 	if _, err := s.InstallApp(context.Background(), &onyxv1.InstallAppRequest{AppId: "jellyfin"}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestInstallSurvivesRestart(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer st2.Close()
-	restarted := newServer(apps, st2, rt, "")
+	restarted := newServer(apps, st2, rt, "", storageRootDefault)
 	resp, err := restarted.ListApps(context.Background(), &onyxv1.ListAppsRequest{})
 	if err != nil {
 		t.Fatalf("list: %v", err)

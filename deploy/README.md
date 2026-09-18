@@ -46,6 +46,10 @@ deploy/
 | `onyx-shared.service` | `onyx-shared` (group onyx) | — | stateless renderer |
 | `onyx-core.service` | `onyx-core` (group onyx) | storaged, shared, privd | state at `/var/lib/onyx/core` |
 | `onyx-api.service` | `onyx-api` (group onyx) | core | `--listen 127.0.0.1:8080` (loopback only) |
+| `onyx-vmm.service` | `onyx-vmm` (groups onyx, libvirt, kvm) | libvirt (`virsh`, `qemu-img`) | `--disk-root /mnt/onyx/main-pool/@apps/vms` |
+| `onyx-appd.service` | `onyx-appd` (group onyx) | the Docker engine | installed apps run as `onyx-app-<app>` compose projects |
+| `onyx-objectstore.service` | `onyx-objectstore` (group onyx) | rclone remotes | `--rclone-config /etc/rclone/rclone.conf` (CLOUD/TIERED buckets) |
+| `onyx-davd.service` | `onyx-davd` (group onyx) | — | reads `/etc/onyx/conf.d/davd.conf`; requires the gateway's identity header |
 | `onyx-pool.service` | root (oneshot) | — | mounts the labelled pool + ensures subvolumes |
 | `onyx-firstboot.service` | root (oneshot) | pool | runs once; prompts on console |
 | `onyx-bootcheck.service` | root (oneshot) | api | reboots into previous deployment on failure |

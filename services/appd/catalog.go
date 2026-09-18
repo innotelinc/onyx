@@ -22,6 +22,10 @@ type catalogApp struct {
 	Manifest    string
 	// Defaults are the install-time settings offered to the operator.
 	Defaults map[string]string
+	// PathKeys are the config keys whose value is a host path. They are
+	// substituted into bind mounts, so their values are confined to the storage
+	// root (validateConfigPaths) rather than trusted from the install request.
+	PathKeys []string
 }
 
 // appIDRe keeps an app id safe as a compose project name and directory name.
@@ -35,7 +39,10 @@ func catalog() map[string]catalogApp {
 			Version:     "10.9",
 			Description: "Media server for movies, shows and music",
 			Defaults:    map[string]string{"http_port": "8096", "media_path": "/mnt/onyx"},
+			PathKeys:    []string{"media_path"},
 			Manifest: `# Onyx app manifest: Jellyfin (docs/design/09).
+# Sandbox posture (docs/design/09 §6): no new privileges, every capability
+# dropped, resource limits, and storage limited to the pool.
 services:
   jellyfin:
     image: jellyfin/jellyfin:10.9
@@ -47,6 +54,12 @@ services:
       - jellyfin-config:/config
       - jellyfin-cache:/cache
       - "{{media_path}}:/media:ro"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
+    mem_limit: 2g
 volumes:
   jellyfin-config:
   jellyfin-cache:
@@ -58,9 +71,11 @@ volumes:
 			Version:     "29",
 			Description: "File sync and share with a web UI",
 			Defaults:    map[string]string{"http_port": "8080", "data_path": "/mnt/onyx", "db_password": "onyx"},
+			PathKeys:    []string{"data_path"},
 			Manifest: `# Onyx app manifest: Nextcloud (docs/design/09).
 # Two services: the app and its database. The database is private to the
-# project's network, so only the app publishes a port.
+# project's network, so only the app publishes a port. Both carry the platform
+# sandbox posture (docs/design/09 §6).
 services:
   app:
     image: nextcloud:29-apache
@@ -79,6 +94,12 @@ services:
     volumes:
       - nextcloud-data:/var/www/html
       - "{{data_path}}/nextcloud:/data"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
+    mem_limit: 2g
   db:
     image: mariadb:11
     container_name: onyx-nextcloud-db
@@ -90,6 +111,12 @@ services:
       MARIADB_ROOT_PASSWORD: "{{db_password}}"
     volumes:
       - nextcloud-db:/var/lib/mysql
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
+    mem_limit: 2g
 volumes:
   nextcloud-data:
   nextcloud-db:
@@ -101,7 +128,10 @@ volumes:
 			Version:     "240717",
 			Description: "Photo manager with search and face recognition",
 			Defaults:    map[string]string{"http_port": "2342", "originals_path": "/mnt/onyx/photos"},
+			PathKeys:    []string{"originals_path"},
 			Manifest: `# Onyx app manifest: PhotoPrism (docs/design/09).
+# Sandbox posture (docs/design/09 §6): no new privileges, every capability
+# dropped, resource limits, and storage limited to the pool.
 services:
   photoprism:
     image: photoprism/photoprism:240717
@@ -116,6 +146,12 @@ services:
     volumes:
       - "{{originals_path}}:/photoprism/originals"
       - photoprism-storage:/photoprism/storage
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
+    mem_limit: 2g
 volumes:
   photoprism-storage:
 `,
@@ -130,9 +166,10 @@ volumes:
 }
 
 // validateCatalog rejects a catalog entry that could not be installed: a bad
-// id (it names a compose project and a directory) or a manifest with nothing
-// in it. Called at startup so a broken entry fails loudly instead of becoming a
-// confusing install error later.
+// id (it names a compose project and a directory), a manifest with nothing in
+// it, or a manifest that breaks the app sandbox (docs/design/09 §6). Called at
+// startup so a broken entry fails loudly instead of becoming a confusing install
+// error — or a privileged container — later.
 func validateCatalog(apps map[string]catalogApp) error {
 	for id, app := range apps {
 		if err := validateAppID(id); err != nil {
@@ -140,6 +177,9 @@ func validateCatalog(apps map[string]catalogApp) error {
 		}
 		if strings.TrimSpace(app.Manifest) == "" {
 			return fmt.Errorf("app %q has an empty manifest", id)
+		}
+		if err := validateManifestHardening(id, app.Manifest); err != nil {
+			return err
 		}
 	}
 	return nil
