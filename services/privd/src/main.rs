@@ -61,6 +61,7 @@ fn main() -> ExitCode {
         &args.testparm_bin,
         &args.systemctl_bin,
         &args.exportfs_bin,
+        &args.sshd_bin,
         &args.config_dir,
         &args.allowed_root,
         &args.dev_root,
@@ -87,6 +88,7 @@ struct Args {
     testparm_bin: String,
     systemctl_bin: String,
     exportfs_bin: String,
+    sshd_bin: String,
     config_dir: PathBuf,
     allowed_root: PathBuf,
     dev_root: PathBuf,
@@ -106,6 +108,7 @@ impl Args {
         let mut testparm_bin = "testparm".to_string();
         let mut systemctl_bin = "systemctl".to_string();
         let mut exportfs_bin = "exportfs".to_string();
+        let mut sshd_bin = "sshd".to_string();
         let mut config_dir = PathBuf::from("/etc/onyx/conf.d");
         let mut allowed_root = PathBuf::from("/mnt/onyx");
         let mut dev_root = PathBuf::from("/dev");
@@ -127,6 +130,7 @@ impl Args {
                 "--testparm-bin" => testparm_bin = it.next().expect("--testparm-bin requires a value"),
                 "--systemctl-bin" => systemctl_bin = it.next().expect("--systemctl-bin requires a value"),
                 "--exportfs-bin" => exportfs_bin = it.next().expect("--exportfs-bin requires a value"),
+                "--sshd-bin" => sshd_bin = it.next().expect("--sshd-bin requires a value"),
                 "--config-dir" => {
                     config_dir = PathBuf::from(it.next().expect("--config-dir requires a value"));
                 }
@@ -155,6 +159,7 @@ impl Args {
             testparm_bin,
             systemctl_bin,
             exportfs_bin,
+            sshd_bin,
             config_dir,
             allowed_root,
             dev_root,
@@ -233,25 +238,46 @@ enum AllowedCommand {
     /// Atomic write of one generated daemon config (target -> fixed path
     /// under the config dir); content is pre-validated size-wise.
     WriteDaemonConfig { target: String, content: Vec<u8> },
-    /// Validate + reload daemons: smb = testparm then systemctl reload smbd;
-    /// nfs = exportfs -ra.
+    /// Validate + reload daemons after a config write. smb = testparm then
+    /// systemctl reload smbd; nfs = exportfs -ra; sftp = sshd -t then systemctl
+    /// reload onyx-sftp; ftp/webdav/rsync = systemctl reload of their daemon.
     ReloadDaemons { targets: Vec<String> },
 }
 
-/// Maximum size of one generated daemon config (smb.conf/exports). Configs
-/// are tiny; this only stops a buggy caller from writing gigabytes.
+/// Maximum size of one generated daemon config. Configs are tiny; this only
+/// stops a buggy caller from writing gigabytes.
 const MAX_CONFIG_BYTES: usize = 1 << 20;
+
+/// The closed set of generated daemon config files (docs/design/05#6): one per
+/// sharing protocol. Each maps to a fixed filename under the config dir, so a
+/// caller never passes a path.
+const CONFIG_TARGETS: &[&str] = &["smb", "nfs", "ftp", "sftp", "webdav", "rsync"];
+
+fn is_config_target(target: &str) -> bool {
+    CONFIG_TARGETS.contains(&target)
+}
+
+/// Fixed filename for one config target, or None for an unknown target.
+fn config_filename(target: &str) -> Option<&'static str> {
+    Some(match target {
+        "smb" => "smb.conf",
+        "nfs" => "exports",
+        "ftp" => "vsftpd.conf",
+        "sftp" => "sshd_config",
+        "webdav" => "davd.conf",
+        "rsync" => "rsyncd.conf",
+        _ => return None,
+    })
+}
 
 /// Atomically write a generated daemon config: tmp file in the same dir,
 /// fsync, rename into place, mode 0644 (docs/design/04#4: write -> fsync ->
 /// rename, only via the owning service). The path is derived from the
 /// allowlisted target, never from callers.
 fn write_config(config_dir: &Path, target: &str, content: &[u8]) -> Result<(), Status> {
-    let path = config_dir.join(match target {
-        "smb" => "smb.conf",
-        "nfs" => "exports",
-        _ => return Err(Status::invalid_argument("target must be smb or nfs")),
-    });
+    let filename = config_filename(target)
+        .ok_or_else(|| Status::invalid_argument(format!("unknown config target {target:?}")))?;
+    let path = config_dir.join(filename);
     std::fs::create_dir_all(config_dir).map_err(|e| {
         Status::internal(format!("create config dir {}: {e}", config_dir.display()))
     })?;
@@ -290,6 +316,7 @@ struct Allowlist {
     testparm_bin: String,
     systemctl_bin: String,
     exportfs_bin: String,
+    sshd_bin: String,
     config_dir: PathBuf,
     allowed_root: PathBuf,
     dev_root: PathBuf,
@@ -308,6 +335,7 @@ impl Allowlist {
         testparm_bin: &str,
         systemctl_bin: &str,
         exportfs_bin: &str,
+        sshd_bin: &str,
         config_dir: &Path,
         allowed_root: &Path,
         dev_root: &Path,
@@ -324,19 +352,17 @@ impl Allowlist {
             testparm_bin: testparm_bin.to_string(),
             systemctl_bin: systemctl_bin.to_string(),
             exportfs_bin: exportfs_bin.to_string(),
+            sshd_bin: sshd_bin.to_string(),
             config_dir: config_dir.to_path_buf(),
             allowed_root: allowed_root.to_path_buf(),
             dev_root: dev_root.to_path_buf(),
         }
     }
 
-    /// Fixed filename per config target.
+    /// Fixed filename per config target (validated before use).
     fn config_path(&self, target: &str) -> PathBuf {
-        self.config_dir.join(match target {
-            "smb" => "smb.conf",
-            "nfs" => "exports",
-            _ => unreachable!("validated target"),
-        })
+        self.config_dir
+            .join(config_filename(target).expect("validated config target"))
     }
 
     /// Validate a `PrivRequest` against the allowlist. Arguments are checked
@@ -449,9 +475,9 @@ impl Allowlist {
                     ));
                 }
                 let target = &req.args[0];
-                if target != "smb" && target != "nfs" {
+                if !is_config_target(target) {
                     return Err(Status::invalid_argument(format!(
-                        "WRITE_DAEMON_CONFIG target must be smb or nfs, got {target:?}"
+                        "WRITE_DAEMON_CONFIG target must be one of {CONFIG_TARGETS:?}, got {target:?}"
                     )));
                 }
                 let content = req.args[1].as_bytes();
@@ -467,16 +493,17 @@ impl Allowlist {
                 })
             }
             PrivOp::ReloadDaemons => {
-                if req.args.is_empty() || req.args.len() > 2 {
-                    return Err(Status::invalid_argument(
-                        "RELOAD_DAEMONS requires 1-2 targets: smb, nfs",
-                    ));
+                if req.args.is_empty() || req.args.len() > CONFIG_TARGETS.len() {
+                    return Err(Status::invalid_argument(format!(
+                        "RELOAD_DAEMONS requires 1-{} targets: {CONFIG_TARGETS:?}",
+                        CONFIG_TARGETS.len()
+                    )));
                 }
                 let mut targets = Vec::new();
                 for t in &req.args {
-                    if t != "smb" && t != "nfs" {
+                    if !is_config_target(t) {
                         return Err(Status::invalid_argument(format!(
-                            "RELOAD_DAEMONS target must be smb or nfs, got {t:?}"
+                            "RELOAD_DAEMONS target must be one of {CONFIG_TARGETS:?}, got {t:?}"
                         )));
                     }
                     if !targets.contains(t) {
@@ -788,6 +815,38 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
                             vec!["-ra".into()],
                         ));
                     }
+                    "ftp" => {
+                        // vsftpd reloads its config on SIGHUP (systemd reload).
+                        steps.push((
+                            allowlist.systemctl_bin.clone(),
+                            vec!["reload".into(), "vsftpd".into()],
+                        ));
+                    }
+                    "sftp" => {
+                        let conf = allowlist.config_path("sftp");
+                        // Validate before reload: a broken sshd_config would
+                        // otherwise take the dedicated sftp instance down.
+                        steps.push((
+                            allowlist.sshd_bin.clone(),
+                            vec!["-t".into(), "-f".into(), conf.display().to_string()],
+                        ));
+                        steps.push((
+                            allowlist.systemctl_bin.clone(),
+                            vec!["reload".into(), "onyx-sftp".into()],
+                        ));
+                    }
+                    "webdav" => {
+                        steps.push((
+                            allowlist.systemctl_bin.clone(),
+                            vec!["reload".into(), "onyx-davd".into()],
+                        ));
+                    }
+                    "rsync" => {
+                        steps.push((
+                            allowlist.systemctl_bin.clone(),
+                            vec!["reload".into(), "rsyncd".into()],
+                        ));
+                    }
                     _ => unreachable!("validated target"),
                 }
             }
@@ -924,6 +983,7 @@ mod tests {
             &marker("testparm"),
             &marker("systemctl"),
             &marker("exportfs"),
+            &marker("sshd"),
             dir,             // config dir = temp dir
             dir,             // allowed root = temp dir
             dir.join("dev").as_path(), // dev root = temp dir/dev (created by tests)
@@ -951,6 +1011,7 @@ mod tests {
             "testparm",
             "systemctl",
             "exportfs",
+            "sshd",
             dir.path(),
             dir.path(),
             dir.path().join("dev").as_path(),
@@ -1001,6 +1062,7 @@ mod tests {
             &record("testparm"),
             &record("systemctl"),
             &record("exportfs"),
+            &record("sshd"),
             dir.path(),
             dir.path(),
             dir.path().join("dev").as_path(),
@@ -1171,6 +1233,60 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn write_daemon_config_covers_protocol_surface() {
+        let dir = TempDir::new("writeproto");
+        let a = test_allowlist(dir.path());
+        let cases = [
+            ("ftp", "vsftpd.conf"),
+            ("sftp", "sshd_config"),
+            ("webdav", "davd.conf"),
+            ("rsync", "rsyncd.conf"),
+        ];
+        for (target, filename) in cases {
+            let content = format!("# {target}\n");
+            let resp = run_request(
+                &a,
+                &PrivRequest {
+                    op: PrivOp::WriteDaemonConfig as i32,
+                    args: vec![target.to_string(), content.clone()],
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(resp.exit_code, 0, "{target}: {}", String::from_utf8_lossy(&resp.stderr));
+            let written = fs::read_to_string(dir.path().join(filename))
+                .unwrap_or_else(|e| panic!("{target} did not land in {filename}: {e}"));
+            assert_eq!(written, content);
+        }
+    }
+
+    #[tokio::test]
+    async fn reload_daemons_covers_protocol_surface() {
+        let dir = TempDir::new("reloadproto");
+        let a = test_allowlist(dir.path());
+        let resp = run_request(
+            &a,
+            &PrivRequest {
+                op: PrivOp::ReloadDaemons as i32,
+                args: ["ftp", "sftp", "webdav", "rsync"].iter().map(|s| s.to_string()).collect(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&resp.stderr));
+        let log = fs::read_to_string(dir.path().join("argv.log")).unwrap();
+        assert!(log.contains("/systemctl|reload|vsftpd"), "ftp reload missing:\n{log}");
+        // SFTP validates the generated sshd_config before reloading.
+        let idx_check = log.lines().position(|l| l.contains("/sshd") && l.contains("-t") && l.contains("sshd_config"));
+        assert!(idx_check.is_some(), "sshd config check missing:\n{log}");
+        let idx_reload = log.lines().position(|l| l.contains("/systemctl") && l.contains("onyx-sftp"));
+        assert!(idx_reload.is_some(), "sftp reload missing:\n{log}");
+        assert!(idx_check < idx_reload, "sshd -t must run before the sftp reload");
+        assert!(log.contains("/systemctl|reload|onyx-davd"), "webdav reload missing:\n{log}");
+        assert!(log.contains("/systemctl|reload|rsyncd"), "rsync reload missing:\n{log}");
+    }
+
     #[test]
     fn write_daemon_config_rejects_bad_input() {
         let dir = TempDir::new("writebad");
@@ -1237,7 +1353,7 @@ mod tests {
         let a = Allowlist::new(
             "btrfs", "lsblk", "mount", "umount", "mkdir", "smartctl", "mkfs.btrfs", "mkfs.ext4",
             &failing, // testparm fails
-            "systemctl", "exportfs",
+            "systemctl", "exportfs", "sshd",
             dir.path(), dir.path(), dir.path().join("dev").as_path(),
         );
         let resp = run_request(
@@ -1258,7 +1374,11 @@ mod tests {
     fn reload_daemons_rejects_bad_targets() {
         let dir = TempDir::new("reloadbad");
         let a = test_allowlist(dir.path());
-        for args in [vec!["ftp"], vec![], vec!["smb", "nfs", "smb"]] {
+        for args in [
+            vec!["httpd"],
+            vec![],
+            vec!["smb", "nfs", "ftp", "sftp", "webdav", "rsync", "smb"],
+        ] {
             let err = a
                 .validate(&PrivRequest {
                     op: PrivOp::ReloadDaemons as i32,

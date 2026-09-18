@@ -29,10 +29,20 @@ service Shared {
   rpc RenderAll(RenderAllRequest) returns (RenderAllResponse);
 }
 
+// The protocols one logical share can be exposed over (docs/design/05#6).
+// Every protocol is off by default; enabling one is an explicit, logged act.
 enum ShareProtocol {
   SHARE_PROTOCOL_UNSPECIFIED = 0;
   SHARE_PROTOCOL_SMB = 1;
   SHARE_PROTOCOL_NFS = 2;
+  // FTP over explicit TLS (FTPS) via vsftpd, chrooted per share.
+  SHARE_PROTOCOL_FTP = 3;
+  // SFTP via the dedicated onyx-sftp sshd instance, chrooted per share.
+  SHARE_PROTOCOL_SFTP = 4;
+  // HTTPS WebDAV served by onyx-davd (API auth layer).
+  SHARE_PROTOCOL_WEBDAV = 5;
+  // rsync module over rsyncd, restricted to Onyx users.
+  SHARE_PROTOCOL_RSYNC = 6;
 }
 
 // A logical share. `name` is a stable id (^[a-z0-9_-]{1,64}$); `path` is the
@@ -78,6 +88,17 @@ message RenderAllResponse {
   string smb_conf = 1;
   // Complete /etc/onyx/conf.d/exports content.
   string nfs_exports = 2;
+  // Complete /etc/onyx/conf.d/vsftpd.conf content (empty when no share uses FTP).
+  string ftp_conf = 3;
+  // Complete /etc/onyx/conf.d/sshd_config content for the dedicated onyx-sftp
+  // sshd (empty when no share uses SFTP).
+  string sftp_conf = 4;
+  // Complete /etc/onyx/conf.d/davd.conf content for onyx-davd (empty when no
+  // share uses WebDAV).
+  string webdav_conf = 5;
+  // Complete /etc/onyx/conf.d/rsyncd.conf content (empty when no share uses
+  // rsync).
+  string rsync_conf = 6;
 }
 
 // --- onyx-shared ---
@@ -86,11 +107,21 @@ message RenderConfigRequest {
   Share share = 1;
 }
 
-// Generated daemon fragments for the share. Empty string = protocol not
+// Generated daemon fragments for one share. Empty string = protocol not
 // enabled for this share.
 message RenderConfigResponse {
   // smb.conf share-section fragment (docs/design/05#6, SMB row).
   string smb_conf = 1;
   // /etc/exports fragment (docs/design/05#6, NFS row).
   string nfs_exports = 2;
+  // The share's FTP exposure fragment: its chroot root and write policy
+  // (FTP row). Per-user `vsftpd.d/` chroots are driven by Onyx users, not the
+  // share model.
+  string ftp_conf = 3;
+  // sshd_config Match block fragment for the dedicated sshd (SFTP row).
+  string sftp_conf = 4;
+  // davd.conf share-table fragment (WebDAV row).
+  string webdav_conf = 5;
+  // rsyncd.conf module fragment (Rsync row).
+  string rsync_conf = 6;
 }

@@ -18,10 +18,10 @@ import (
 // (docs/design/02#6 steps 3-4): onyx-core owns the share model (SQLite), and
 // the daemon config must reflect it. Every share mutation — CreateShare,
 // DeleteShare, and the hotplug reconciler — flows through apply(), which
-// renders the complete smb.conf + exports via onyx-shared, hands changed
-// files to onyx-privd's WRITE_DAEMON_CONFIG (atomic, root-owned, paths fixed
-// by target), and reloads the affected daemons (testparm-validated) via
-// RELOAD_DAEMONS.
+// renders the complete daemon config for every enabled protocol via
+// onyx-shared, hands changed files to onyx-privd's WRITE_DAEMON_CONFIG
+// (atomic, root-owned, paths fixed by target), and reloads the affected
+// daemons via RELOAD_DAEMONS.
 //
 // apply is change-guarded: when the rendered content for a target matches
 // what we last wrote, that file is neither rewritten nor reloaded, so steady
@@ -35,7 +35,8 @@ type configApplier struct {
 	shared onyxv1.SharedClient
 	privd  onyxv1.PrivdClient
 
-	// written holds the content we last wrote for each target ("smb", "nfs").
+	// written holds the content we last wrote for each target ("smb", "nfs",
+	// "ftp", "sftp", "webdav", "rsync").
 	written map[string]string
 }
 
@@ -48,9 +49,16 @@ func newConfigApplier(db *sql.DB, shared onyxv1.SharedClient, privd onyxv1.Privd
 	}
 }
 
-// configTargets is the fixed set of daemon config files privd knows how to
-// write (docs/design/02#6): smb.conf and the NFS exports file.
+// configTargets are reconciled unconditionally: smb.conf always carries a
+// global section, and the exports file is rewritten (possibly empty) so a
+// removed last NFS share stops being exported.
 var configTargets = []string{"smb", "nfs"}
+
+// optionalTargets materialize only for protocols a share actually enables. An
+// empty render with nothing previously written means the protocol is off, so
+// its daemon is neither written to nor reloaded (docs/design/05#6: every
+// protocol is off by default).
+var optionalTargets = []string{"ftp", "sftp", "webdav", "rsync"}
 
 // apply renders the full daemon config for the current share set, writes any
 // target whose content changed, and reloads the daemons that were touched.
@@ -69,25 +77,28 @@ func (c *configApplier) apply(ctx context.Context) error {
 	}
 
 	files := map[string]string{
-		"smb": rendered.SmbConf,
-		"nfs": rendered.NfsExports,
+		"smb":    rendered.SmbConf,
+		"nfs":    rendered.NfsExports,
+		"ftp":    rendered.FtpConf,
+		"sftp":   rendered.SftpConf,
+		"webdav": rendered.WebdavConf,
+		"rsync":  rendered.RsyncConf,
 	}
 
 	var changed []string
 	for _, target := range configTargets {
-		content := files[target]
-		if c.written[target] == content {
-			continue
-		}
-		resp, err := c.privd.Run(ctx, &onyxv1.PrivRequest{
-			Op:   onyxv1.PrivOp_WRITE_DAEMON_CONFIG,
-			Args: []string{target, content},
-		})
-		if err := privdOK(resp, err, "write "+target+" config"); err != nil {
+		if err := c.writeTarget(ctx, &changed, target, files[target]); err != nil {
 			return err
 		}
-		c.written[target] = content
-		changed = append(changed, target)
+	}
+	for _, target := range optionalTargets {
+		content := files[target]
+		if content == "" && c.written[target] == "" {
+			continue
+		}
+		if err := c.writeTarget(ctx, &changed, target, content); err != nil {
+			return err
+		}
 	}
 
 	if len(changed) == 0 {
@@ -108,6 +119,35 @@ func (c *configApplier) apply(ctx context.Context) error {
 	}
 	slog.Info("daemon config written and reloaded", "targets", strings.Join(changed, ","))
 	return nil
+}
+
+// writeTarget writes one daemon config target when its content changed and, on
+// success, records what is now on disk and marks the owning daemon for reload.
+func (c *configApplier) writeTarget(ctx context.Context, changed *[]string, target, content string) error {
+	if c.written[target] == content {
+		return nil
+	}
+	resp, err := c.privd.Run(ctx, &onyxv1.PrivRequest{
+		Op:   onyxv1.PrivOp_WRITE_DAEMON_CONFIG,
+		Args: []string{target, content},
+	})
+	if err := privdOK(resp, err, "write "+target+" config"); err != nil {
+		return err
+	}
+	c.written[target] = content
+	if !containsStr(*changed, target) {
+		*changed = append(*changed, target)
+	}
+	return nil
+}
+
+func containsStr(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // listSharesForConfig loads the full share set in the deterministic order
