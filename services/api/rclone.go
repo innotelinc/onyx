@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -56,37 +57,65 @@ func rcloneProviders() []rcloneProvider {
 		},
 		{Type: "azureblob", Label: "Azure Blob Storage", Fields: []string{"account", "key"}, Required: []string{"account", "key"}},
 		{Type: "mega", Label: "MEGA", Fields: []string{"user", "pass"}, Required: []string{"user", "pass"}},
+		// OAuth backends. client_id/client_secret are optional: left empty,
+		// rclone uses its own registered application. Filling them in is for
+		// organisations that want the consent screen under their own name, and
+		// then the same pair has to be given to `rclone authorize`.
 		{
-			Type:  "drive",
-			Label: "Google Drive",
-			OAuth: true,
-			Hint:  "Google Drive needs a one-time browser approval: run `rclone config reconnect NAME:` on the host.",
+			Type:   "drive",
+			Label:  "Google Drive",
+			Fields: []string{"client_id", "client_secret"},
+			OAuth:  true,
+			Hint:   "Google Drive is approved in a browser. On a machine with a browser run `rclone authorize drive`, then paste the token here.",
 		},
 		{
-			Type:  "onedrive",
-			Label: "Microsoft OneDrive",
-			OAuth: true,
-			Hint:  "OneDrive needs a one-time browser approval: run `rclone config reconnect NAME:` on the host.",
+			Type:   "onedrive",
+			Label:  "Microsoft OneDrive",
+			Fields: []string{"client_id", "client_secret"},
+			OAuth:  true,
+			Hint:   "OneDrive (personal or Microsoft 365) is approved in a browser. On a machine with a browser run `rclone authorize onedrive`, then paste the token here.",
 		},
 		{
-			Type:  "dropbox",
-			Label: "Dropbox",
-			OAuth: true,
-			Hint:  "Dropbox needs a one-time browser approval: run `rclone config reconnect NAME:` on the host.",
+			Type:   "sharepoint",
+			Label:  "Microsoft SharePoint",
+			Fields: []string{"client_id", "client_secret", "site_url"},
+			OAuth:  true,
+			Hint:   "SharePoint is approved in a browser. On a machine with a browser run `rclone authorize sharepoint`, then paste the token here. Set site_url to the document library.",
 		},
 		{
-			Type:  "box",
-			Label: "Box",
-			OAuth: true,
-			Hint:  "Box needs a one-time browser approval: run `rclone config reconnect NAME:` on the host.",
+			Type:   "dropbox",
+			Label:  "Dropbox",
+			Fields: []string{"client_id", "client_secret"},
+			OAuth:  true,
+			Hint:   "Dropbox is approved in a browser. On a machine with a browser run `rclone authorize dropbox`, then paste the token here.",
 		},
 		{
-			Type:  "pcloud",
-			Label: "pCloud",
-			OAuth: true,
-			Hint:  "pCloud needs a one-time browser approval: run `rclone config reconnect NAME:` on the host.",
+			Type:   "box",
+			Label:  "Box",
+			Fields: []string{"client_id", "client_secret"},
+			OAuth:  true,
+			Hint:   "Box is approved in a browser. On a machine with a browser run `rclone authorize box`, then paste the token here.",
+		},
+		{
+			Type:   "pcloud",
+			Label:  "pCloud",
+			Fields: []string{"client_id", "client_secret"},
+			OAuth:  true,
+			Hint:   "pCloud is approved in a browser. On a machine with a browser run `rclone authorize pcloud`, then paste the token here.",
 		},
 	}
+}
+
+// oauthProviderTypes is the set of backends finished with a stored token, so a
+// remote's row can offer a Connect action without a second lookup from the UI.
+func oauthProviderTypes() map[string]bool {
+	out := map[string]bool{}
+	for _, p := range rcloneProviders() {
+		if p.OAuth {
+			out[p.Type] = true
+		}
+	}
+	return out
 }
 
 func providerByType(name string) (rcloneProvider, bool) {
@@ -110,6 +139,12 @@ func runRclone(ctx context.Context, args ...string) (string, error) {
 	}
 	return text, nil
 }
+
+// networkBounds are appended to every probe that talks to a provider. rclone
+// retries a failing request three times with a long connect timeout by default,
+// which turns a rejected token or an unreachable host into a console that looks
+// like it has hung; the probe has to come back with an answer instead.
+var networkBounds = []string{"--retries", "1", "--low-level-retries", "1", "--contimeout", "10s", "--timeout", "15s"}
 
 // remoteNames lists the configured remotes (the names rclone calls them).
 func remoteNames(ctx context.Context) ([]string, error) {
@@ -287,6 +322,123 @@ func (s *server) handleDeleteRemote(w http.ResponseWriter, r *http.Request) {
 // handleCheckRemote serves POST /api/v1/storage/remotes/{name}/check — a
 // reachability probe the Shares page runs after setup, so a wrong key or a
 // typo'd host surfaces in the UI instead of during a clone or backup.
+type remoteTokenBody struct {
+	Token        string `json:"token"`
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+}
+
+// extractRcloneToken pulls the token JSON out of whatever `rclone authorize`
+// printed. rclone wraps it in markers:
+//
+//	Paste the following into your remote machine --->
+//	{...}
+//	<---End paste
+//
+// so the JSON object is taken from the first '{' to the last '}' and compacted
+// to one line before it is handed to rclone as an argv element.
+func extractRcloneToken(raw string) (string, error) {
+	text := strings.TrimSpace(raw)
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start < 0 || end <= start {
+		return "", fmt.Errorf("no token found: paste the JSON rclone authorize printed (it starts with '{')")
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, []byte(text[start:end+1])); err != nil {
+		return "", fmt.Errorf("the pasted token is not valid JSON: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(compact.String()), &parsed); err != nil {
+		return "", fmt.Errorf("the pasted token is not valid JSON: %v", err)
+	}
+	if _, ok := parsed["access_token"]; !ok {
+		if _, ok := parsed["refresh_token"]; !ok {
+			return "", fmt.Errorf("the pasted JSON has no access_token or refresh_token — it is not an rclone token")
+		}
+	}
+	return compact.String(), nil
+}
+
+// handleSetRemoteToken serves POST /api/v1/storage/remotes/{name}/token: the
+// step that actually connects a Google Drive / OneDrive / Dropbox account.
+//
+// OAuth backends cannot be finished from the console alone — the account owner
+// has to approve access in a browser, and the callback lands on 127.0.0.1 of
+// whichever machine ran the approval. So the console takes rclone's own answer
+// and stores it: the operator runs `rclone authorize <type>` where a browser
+// works (or signs in through the provider's own OAuth app), pastes the JSON the
+// command prints, and rclone is told `config update NAME token <json>`.
+//
+// Storing the token is not enough on its own — a token that has been revoked, or
+// copied from an app with a different client id, looks exactly like a good one —
+// so the remote is probed immediately and the result is reported back with the
+// same shape the Check button uses.
+func (s *server) handleSetRemoteToken(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if err := validateRemoteName(name); err != nil {
+		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: err.Error()})
+		return
+	}
+	var body remoteTokenBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "invalid JSON body: " + err.Error()})
+		return
+	}
+	token, err := extractRcloneToken(body.Token)
+	if err != nil {
+		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: err.Error()})
+		return
+	}
+	opts := [][2]string{}
+	for _, pair := range [][2]string{{"client_id", body.ClientID}, {"client_secret", body.ClientSecret}} {
+		value := strings.TrimSpace(pair[1])
+		if value == "" {
+			continue
+		}
+		if len(value) > 1024 || strings.ContainsAny(value, "\n\r\x00") || strings.HasPrefix(value, "-") {
+			writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: pair[0] + " is not usable"})
+			return
+		}
+		opts = append(opts, [2]string{pair[0], value})
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+	if names, err := remoteNames(ctx); err != nil || !containsString(names, name) {
+		writeEnvelope(w, http.StatusNotFound, apiError{Code: "not_found", Message: fmt.Sprintf("remote %q is not configured — save the target first", name)})
+		return
+	}
+	// --non-interactive matters as much as the token itself: without it rclone
+	// asks "Already have a token - refresh?" and, when it cannot reach the
+	// provider from here, starts its own browser authorization flow and waits —
+	// the request never answers. The token is written either way, so the flag
+	// turns a hang into the probe that follows.
+	args := []string{"config", "update", name, "token", token, "--non-interactive"}
+	for _, opt := range opts {
+		args = append(args, opt[0], opt[1])
+	}
+	// Both halves are bounded: `config update` on an OAuth backend may try to
+	// refresh the token it is given, and the account probe talks to the
+	// provider. A rejected token or an unreachable provider has to come back as
+	// an answer, not as a console that waits — rclone retries by default, so the
+	// retries are cut to one and the timeouts are set.
+	updateCtx, updateCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer updateCancel()
+	if output, err := runRclone(updateCtx, append(args, networkBounds...)...); err != nil {
+		writeEnvelope(w, http.StatusBadGateway, apiError{Code: "internal", Message: "rclone config update token: " + output})
+		return
+	}
+	probeCtx, probeCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer probeCancel()
+	output, probeErr := runRclone(probeCtx, append([]string{"lsd", name + ":", "--max-depth", "1"}, networkBounds...)...)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"name":   name,
+		"stored": true,
+		"ok":     probeErr == nil,
+		"detail": output,
+	})
+}
+
 func (s *server) handleCheckRemote(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if err := validateRemoteName(name); err != nil {
@@ -295,7 +447,7 @@ func (s *server) handleCheckRemote(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
-	output, err := runRclone(ctx, "lsd", name+":", "--max-depth", "1")
+	output, err := runRclone(ctx, append([]string{"lsd", name + ":", "--max-depth", "1"}, networkBounds...)...)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"name": name, "ok": false, "detail": output})
 		return
