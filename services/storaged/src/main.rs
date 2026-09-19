@@ -42,10 +42,10 @@ use onyx::health_check_response::ServingStatus as StatusValue;
 use onyx::privd_client::PrivdClient;
 use onyx::storaged_server::{Storaged, StoragedServer};
 use onyx::{
-    Device, DeviceEvent, GetDeviceRequest, GetPoolRequest, HealthCheckRequest, HealthCheckResponse,
-    ListDevicesRequest, ListDevicesResponse, ListEventsRequest, ListEventsResponse,
-    CreatePoolRequest, ListPoolsRequest, ListPoolsResponse, MountDeviceRequest, Pool,
-    UnmountDeviceRequest, WatchDevicesRequest,
+    Device, DeviceEvent, DeletePoolRequest, DeletePoolResponse, GetDeviceRequest, GetPoolRequest,
+    HealthCheckRequest, HealthCheckResponse, ListDevicesRequest, ListDevicesResponse,
+    ListEventsRequest, ListEventsResponse, CreatePoolRequest, ListPoolsRequest, ListPoolsResponse,
+    MountDeviceRequest, Pool, UnmountDeviceRequest, WatchDevicesRequest,
 };
 use registry::Registry;
 
@@ -520,6 +520,58 @@ impl Storaged for RegistryBackend {
             state: "online".into(),
         });
         Ok(Response::new(pool))
+    }
+
+    /// Forget a pool record, releasing its mount first.
+    ///
+    /// Removal is a registry + mount operation, never a filesystem one: the
+    /// device keeps its filesystem, so a forgotten pool can be re-created on the
+    /// disk or imported again. It is how a stale record — a pool whose disk was
+    /// re-formatted, relabelled or pulled — stops being listed as an offline
+    /// duplicate of the pool that replaced it.
+    async fn delete_pool(
+        &self,
+        request: Request<DeletePoolRequest>,
+    ) -> Result<Response<DeletePoolResponse>, Status> {
+        let name = request.into_inner().name;
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(Status::invalid_argument("pool name is required"));
+        }
+        let pools = self
+            .registry
+            .list_pools()
+            .map_err(|e| Status::internal(format!("registry read failed: {e}")))?;
+        let pool = pools
+            .into_iter()
+            .find(|p| p.name == name || (!p.uuid.is_empty() && p.uuid == name))
+            .ok_or_else(|| Status::not_found(format!("pool '{name}' not found")))?;
+        // Release the mount before dropping the row: forgetting a mounted pool
+        // would leave a live mount nothing accounts for (Files would show a
+        // directory the registry cannot explain). A record whose device is gone,
+        // or that was never mounted, has nothing to release — that is the stale
+        // case this operation exists for.
+        let devices = self
+            .registry
+            .list_devices()
+            .map_err(|e| Status::internal(format!("registry read failed: {e}")))?;
+        let mut unmounted = false;
+        if let Some(dev) = devices::device_for_pool(&pool, &devices) {
+            unmounted = self
+                .manager
+                .release_pool_mount(dev)
+                .await
+                .map_err(Status::failed_precondition)?;
+        }
+        let removed = self
+            .registry
+            .delete_pool(&pool)
+            .map_err(|e| Status::internal(format!("registry delete failed: {e}")))?;
+        if removed == 0 {
+            return Err(Status::not_found(format!("pool '{name}' not found")));
+        }
+        tracing::info!(pool = %pool.name, uuid = %pool.uuid, unmounted, "pool record removed");
+        Ok(Response::new(DeletePoolResponse { pool: Some(pool), unmounted }))
     }
 
     async fn get_pool(

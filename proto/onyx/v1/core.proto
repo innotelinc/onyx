@@ -24,6 +24,11 @@ service Core {
   // CreatePool formats a verified removable whole-disk device and optionally mounts it.
   rpc CreatePool(CreatePoolRequest) returns (Pool);
 
+  // DeletePool forgets a pool record (and releases its mount), forwarded to
+  // onyx-storaged. The filesystem on the device is never modified, so the pool
+  // can still be re-created or imported later.
+  rpc DeletePool(DeletePoolRequest) returns (DeletePoolResponse);
+
   // ListDevices returns every block device the data plane has detected
   // (attached, mounted or recently detached), forwarded to onyx-storaged.
   rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);

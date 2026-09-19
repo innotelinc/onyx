@@ -34,6 +34,7 @@ Commands:
   pool list   list storage pools
   pool show   show one storage pool (<name>)
   pool create format a disk into a pool and mount it (<device> <name>)
+  pool remove forget a pool record, releasing its mount (<name>)
   device list   list detected drives (hotplug, USB, SATA)
   device show   show one device (<name>)
   device attach mount a device and expose it as a share (<name>)
@@ -172,7 +173,7 @@ func cmdStatus(ctx context.Context, c *client.Client, jsonOut bool) error {
 
 func cmdPool(ctx context.Context, c *client.Client, jsonOut bool, args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: onyx pool list|show|create [--json]")
+		return fmt.Errorf("usage: onyx pool list|show|create|remove [--json]")
 	}
 	switch args[0] {
 	case "list":
@@ -187,8 +188,13 @@ func cmdPool(ctx context.Context, c *client.Client, jsonOut bool, args []string)
 		return cmdPoolShow(ctx, c, jsonOut, args[1])
 	case "create":
 		return cmdPoolCreate(ctx, c, jsonOut, args[1:])
+	case "remove", "rm":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: onyx pool remove <name> [--json]")
+		}
+		return cmdPoolRemove(ctx, c, args[1])
 	default:
-		return fmt.Errorf("unknown pool command %q (usage: onyx pool list|show|create)", args[0])
+		return fmt.Errorf("unknown pool command %q (usage: onyx pool list|show|create|remove)", args[0])
 	}
 }
 
@@ -271,6 +277,17 @@ func cmdPoolCreate(ctx context.Context, c *client.Client, jsonOut bool, args []s
 		return printJSON(pool)
 	}
 	fmt.Printf("created pool %q (%s, %s)\n", pool.Name, pool.FSType, pool.State)
+	return nil
+}
+
+// cmdPoolRemove forgets a pool record. The mount is released and the pool is
+// dropped from the registry; the filesystem on the disk is not erased, so it is
+// the safe way to clear a pool whose record no longer matches a device.
+func cmdPoolRemove(ctx context.Context, c *client.Client, name string) error {
+	if err := c.DeletePool(ctx, name); err != nil {
+		return err
+	}
+	fmt.Printf("removed pool %q (its filesystem is untouched)\n", name)
 	return nil
 }
 

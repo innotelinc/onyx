@@ -263,6 +263,7 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("GET /api/v1/pools", s.handlePools)
 	mux.HandleFunc("POST /api/v1/pools", s.handleCreatePool)
 	mux.HandleFunc("GET /api/v1/pools/{name}", s.handlePool)
+	mux.HandleFunc("DELETE /api/v1/pools/{name}", s.handleDeletePool)
 	mux.HandleFunc("GET /api/v1/shares", s.handleShares)
 	mux.HandleFunc("POST /api/v1/shares", s.handleCreateShare)
 	mux.HandleFunc("GET /api/v1/shares/{name}", s.handleShare)
@@ -504,6 +505,30 @@ func (s *server) handlePool(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	resp, err := s.core.GetPool(ctx, &onyxv1.GetPoolRequest{Name: r.PathValue("name")})
+	if err != nil {
+		s.writeGRPCError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, protoMessage(resp))
+}
+
+// handleDeletePool serves DELETE /api/v1/pools/{name} — forget a pool record.
+//
+// The pool's mount is released and its registry row dropped; the filesystem on
+// the device is deliberately left alone, so the pool can be re-created or
+// imported again. This is what clears a stale record: a pool whose disk was
+// re-formatted, relabelled or pulled otherwise stays listed as an offline
+// duplicate of the pool that replaced it, which is exactly how one disk comes to
+// be reported three times.
+func (s *server) handleDeletePool(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	name := r.PathValue("name")
+	if name == "" {
+		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "pool name is required"})
+		return
+	}
+	resp, err := s.core.DeletePool(ctx, &onyxv1.DeletePoolRequest{Name: name})
 	if err != nil {
 		s.writeGRPCError(w, r, err)
 		return

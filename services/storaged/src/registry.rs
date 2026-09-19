@@ -64,6 +64,25 @@ impl Registry {
         Ok(())
     }
 
+    /// Forget a pool record (`DELETE /pools`). The row is keyed on the
+    /// filesystem uuid — the stable identity — falling back to the display name
+    /// only for a record that has no uuid at all, so two filesystems that share
+    /// a label never remove each other.
+    ///
+    /// This is a registry operation and nothing more: the filesystem on the
+    /// device is never written, so a forgotten pool can still be re-created or
+    /// imported. Returns how many rows were dropped (0 when it was unknown).
+    pub fn delete_pool(&self, pool: &Pool) -> rusqlite::Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        if !pool.uuid.is_empty() {
+            return conn.execute("DELETE FROM pools WHERE uuid = ?1", params![pool.uuid]);
+        }
+        if !pool.name.is_empty() {
+            return conn.execute("DELETE FROM pools WHERE name = ?1 AND uuid = ''", params![pool.name]);
+        }
+        Ok(0)
+    }
+
     /// All known pools, ordered by name.
     pub fn list_pools(&self) -> rusqlite::Result<Vec<Pool>> {
         let conn = self.conn.lock().unwrap();
@@ -165,6 +184,18 @@ impl Registry {
             params![kname],
         )?;
         Ok(())
+    }
+
+    /// Forget the pool record that carried this filesystem uuid. Called when a
+    /// disk is re-created in place: `mkfs` gives the filesystem a fresh uuid,
+    /// so without this the previous pool lingers forever as an offline
+    /// duplicate of the new one (the same disk, reported twice).
+    pub fn forget_pool_uuid(&self, uuid: &str) -> rusqlite::Result<usize> {
+        if uuid.is_empty() {
+            return Ok(0);
+        }
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM pools WHERE uuid = ?1", params![uuid])
     }
 
     /// True when the user explicitly detached this device (`onyx device
@@ -450,6 +481,48 @@ mod tests {
             temperature_c: 0,
             node_present: Some(true),
         }
+    }
+
+    fn pool(name: &str, uuid: &str) -> Pool {
+        Pool {
+            name: name.to_string(),
+            uuid: uuid.to_string(),
+            fs_type: "btrfs".to_string(),
+            total_bytes: 1000,
+            used_bytes: 100,
+            state: "online".to_string(),
+        }
+    }
+
+    /// A disk re-created in place leaves a row for the filesystem that is gone.
+    /// It has to be forgettable — keyed on the uuid, the stable identity — and a
+    /// shared label must never take the other filesystem down with it.
+    #[test]
+    fn deleting_a_pool_is_keyed_on_the_filesystem_uuid() {
+        let dir = std::env::temp_dir().join(format!("onyx-registry-pools-{}", std::process::id()));
+        let reg = Registry::open(&dir).expect("open registry");
+
+        // The same label on two filesystems: a relabel in progress, or two pools
+        // that happened to be given one name.
+        reg.upsert_pool(&pool("main-pool", "uuid-old")).unwrap();
+        reg.upsert_pool(&pool("main-pool", "uuid-new")).unwrap();
+        assert_eq!(reg.list_pools().unwrap().len(), 2);
+
+        // Re-creating the disk forgets exactly the pool that used to be there.
+        assert_eq!(reg.forget_pool_uuid("uuid-old").unwrap(), 1);
+        let left = reg.list_pools().unwrap();
+        assert_eq!(left.len(), 1, "the current filesystem's record must survive");
+        assert_eq!(left[0].uuid, "uuid-new");
+
+        // DELETE /pools resolves the record and drops that one row.
+        assert_eq!(reg.delete_pool(&left[0]).unwrap(), 1);
+        assert!(reg.list_pools().unwrap().is_empty());
+
+        // An unknown pool is a no-op, not a silent removal of something else.
+        assert_eq!(reg.delete_pool(&pool("main-pool", "uuid-new")).unwrap(), 0);
+        assert_eq!(reg.forget_pool_uuid("").unwrap(), 0);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

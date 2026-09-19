@@ -23,6 +23,7 @@ const (
 	Core_ListPools_FullMethodName     = "/onyx.v1.Core/ListPools"
 	Core_GetPool_FullMethodName       = "/onyx.v1.Core/GetPool"
 	Core_CreatePool_FullMethodName    = "/onyx.v1.Core/CreatePool"
+	Core_DeletePool_FullMethodName    = "/onyx.v1.Core/DeletePool"
 	Core_ListDevices_FullMethodName   = "/onyx.v1.Core/ListDevices"
 	Core_GetDevice_FullMethodName     = "/onyx.v1.Core/GetDevice"
 	Core_MountDevice_FullMethodName   = "/onyx.v1.Core/MountDevice"
@@ -48,6 +49,10 @@ type CoreClient interface {
 	GetPool(ctx context.Context, in *GetPoolRequest, opts ...grpc.CallOption) (*Pool, error)
 	// CreatePool formats a verified removable whole-disk device and optionally mounts it.
 	CreatePool(ctx context.Context, in *CreatePoolRequest, opts ...grpc.CallOption) (*Pool, error)
+	// DeletePool forgets a pool record (and releases its mount), forwarded to
+	// onyx-storaged. The filesystem on the device is never modified, so the pool
+	// can still be re-created or imported later.
+	DeletePool(ctx context.Context, in *DeletePoolRequest, opts ...grpc.CallOption) (*DeletePoolResponse, error)
 	// ListDevices returns every block device the data plane has detected
 	// (attached, mounted or recently detached), forwarded to onyx-storaged.
 	ListDevices(ctx context.Context, in *ListDevicesRequest, opts ...grpc.CallOption) (*ListDevicesResponse, error)
@@ -106,6 +111,16 @@ func (c *coreClient) CreatePool(ctx context.Context, in *CreatePoolRequest, opts
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Pool)
 	err := c.cc.Invoke(ctx, Core_CreatePool_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coreClient) DeletePool(ctx context.Context, in *DeletePoolRequest, opts ...grpc.CallOption) (*DeletePoolResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeletePoolResponse)
+	err := c.cc.Invoke(ctx, Core_DeletePool_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -198,6 +213,10 @@ type CoreServer interface {
 	GetPool(context.Context, *GetPoolRequest) (*Pool, error)
 	// CreatePool formats a verified removable whole-disk device and optionally mounts it.
 	CreatePool(context.Context, *CreatePoolRequest) (*Pool, error)
+	// DeletePool forgets a pool record (and releases its mount), forwarded to
+	// onyx-storaged. The filesystem on the device is never modified, so the pool
+	// can still be re-created or imported later.
+	DeletePool(context.Context, *DeletePoolRequest) (*DeletePoolResponse, error)
 	// ListDevices returns every block device the data plane has detected
 	// (attached, mounted or recently detached), forwarded to onyx-storaged.
 	ListDevices(context.Context, *ListDevicesRequest) (*ListDevicesResponse, error)
@@ -233,6 +252,9 @@ func (UnimplementedCoreServer) GetPool(context.Context, *GetPoolRequest) (*Pool,
 }
 func (UnimplementedCoreServer) CreatePool(context.Context, *CreatePoolRequest) (*Pool, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreatePool not implemented")
+}
+func (UnimplementedCoreServer) DeletePool(context.Context, *DeletePoolRequest) (*DeletePoolResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeletePool not implemented")
 }
 func (UnimplementedCoreServer) ListDevices(context.Context, *ListDevicesRequest) (*ListDevicesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListDevices not implemented")
@@ -341,6 +363,24 @@ func _Core_CreatePool_Handler(srv interface{}, ctx context.Context, dec func(int
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(CoreServer).CreatePool(ctx, req.(*CreatePoolRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Core_DeletePool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeletePoolRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).DeletePool(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_DeletePool_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).DeletePool(ctx, req.(*DeletePoolRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -468,6 +508,10 @@ var Core_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreatePool",
 			Handler:    _Core_CreatePool_Handler,
+		},
+		{
+			MethodName: "DeletePool",
+			Handler:    _Core_DeletePool_Handler,
 		},
 		{
 			MethodName: "ListDevices",

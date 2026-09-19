@@ -11,6 +11,11 @@ service Storaged {
   rpc ListPools(ListPoolsRequest) returns (ListPoolsResponse);
   rpc GetPool(GetPoolRequest) returns (Pool);
   rpc CreatePool(CreatePoolRequest) returns (Pool);
+
+  // DeletePool forgets a pool record: its mount is released (never the
+  // filesystem itself) and the registry row is dropped so a re-created pool
+  // does not leave the previous one listed forever as an offline duplicate.
+  rpc DeletePool(DeletePoolRequest) returns (DeletePoolResponse);
   rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
   rpc GetDevice(GetDeviceRequest) returns (Device);
   rpc MountDevice(MountDeviceRequest) returns (Device);
@@ -47,6 +52,20 @@ message CreatePoolRequest {
   bool auto_mount = 5;
   // Optional mount directory name; defaults to name.
   string mount_name = 6;
+}
+
+message DeletePoolRequest {
+  // Pool name as ListPools reports it (the filesystem label, or the uuid when
+  // the filesystem is unlabelled).
+  string name = 1;
+}
+
+message DeletePoolResponse {
+  // The pool record that was removed.
+  Pool pool = 1;
+  // Whether a live mount was released as part of the removal. A stale record
+  // (the device is gone) reports false and is simply forgotten.
+  bool unmounted = 2;
 }
 
 message Pool {

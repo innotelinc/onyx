@@ -622,9 +622,21 @@
       if (!pools || !devices) return Promise.resolve();
       return Promise.all([apiJSON('/pools'), apiJSON('/devices')]).then(function (parts) {
         var poolRows = parts[0].pools || [], deviceRows = parts[1].devices || [];
+        // An offline pool is a record, not storage: its device was re-created,
+        // relabelled or pulled, so the filesystem it names cannot come back as
+        // it was. Saying so — and offering Remove — is what keeps one disk from
+        // appearing as several pools, all but one of them unusable.
         pools.innerHTML = poolRows.length ? '<h3>Mounted pools</h3><div style="display:grid;gap:10px">' + poolRows.map(function (pool) {
-          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(pool.name) + '</b><div class="sub">' + esc(pool.fsType || 'unknown') + ' · ' + formatBytes(pool.usedBytes) + ' used of ' + formatBytes(pool.totalBytes) + '</div></div><span class="tag">' + esc(pool.state || 'unknown') + '</span></div>';
+          var offline = String(pool.state || '').toLowerCase() === 'offline';
+          return '<div class="event" style="justify-content:space-between;align-items:flex-start;border-bottom:1px solid var(--onyx-border);padding:10px 0"><div style="min-width:0"><b>' + esc(pool.name) + '</b><div class="sub">' + esc(pool.fsType || 'unknown') + ' · ' + formatBytes(pool.usedBytes) + ' used of ' + formatBytes(pool.totalBytes) + '</div>' + (offline ? '<div class="sub">Offline: its device is gone or was re-formatted. Remove the record to clear it.</div>' : '') + '</div><div style="display:flex;align-items:center;gap:8px;flex-shrink:0"><span class="tag">' + esc(pool.state || 'unknown') + '</span><button class="btn" data-pool-remove="' + esc(pool.name) + '">Remove</button></div></div>';
         }).join('') + '</div>' : '<div class="empty"><b>No storage pools mounted</b>Attach a readable device below or connect a pool on the host.</div>';
+        Array.prototype.forEach.call(pools.querySelectorAll('[data-pool-remove]'), function (button) {
+          button.addEventListener('click', function () {
+            if (!confirm('Remove pool "' + button.dataset.poolRemove + '"? Its mount is released and Onyx forgets the pool. The filesystem on the disk is not erased.')) return;
+            button.disabled = true;
+            apiJSON('/pools/' + encodeURIComponent(button.dataset.poolRemove), { method: 'DELETE' }).then(refreshStorage).catch(showError);
+          });
+        });
         devices.innerHTML = '<h3>Devices</h3><p class="sub">Onyx identifies disks by label, UUID, filesystem, size, mountpoint, and removable status. It never formats a device from this screen.</p>' + (deviceRows.length ? '<div style="display:grid;gap:10px">' + deviceRows.map(function (device) {
           var attached = device.state === 'mounted' || !!device.mountpoint;
           var outside = device.mountpoint && device.mountpoint.indexOf('/mnt/onyx') !== 0;

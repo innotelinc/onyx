@@ -175,6 +175,28 @@ SFTP/FTP/WebDAV and app writes, which then have no write access. The failure is
 reported, not silent: privd logs the mode it applied and returns a note when it
 cannot apply it.
 
+### 2.5 Removing a pool record (`DELETE /pools/{name}`)
+
+A pool is recorded against its filesystem **uuid**, which is the only identity that survives
+a relabel — but every `mkfs` mints a new one. Re-creating a pool on the same disk (or
+relabelling it) therefore leaves the previous record behind pointing at a filesystem that no
+longer exists anywhere: `mark_missing` marks it `offline` and keeps it, so the same disk is
+reported as several pools, all but one of them unusable. Two rules keep that list honest:
+
+- creating a pool forgets the record that carried the disk's previous filesystem uuid, as
+  part of the same destructive step (a refused operation keeps the record it did not
+  replace);
+- `DELETE /pools/{name}` forgets a record on demand — the console's *Remove* action, the CLI's
+  `onyx pool remove <name>`, and the E2E cleanup all use it, which is what clears the rows
+  left by earlier runs and by disks that were pulled.
+
+Forgetting releases the pool's mount first (a record dropped while the filesystem is still
+mounted would leave a live mount nothing accounts for, i.e. a Files directory no view can
+explain) and then drops the row. It is a registry operation, never a filesystem one: `wipefs`
+and `mkfs` are not involved, so a forgotten pool can be re-created on the disk or imported
+again, and a mount outside the storage root is refused rather than released. A record whose
+device is gone has nothing to release and is simply forgotten — that is the stale case.
+
 ## 5. Quotas and capacity
 
 - **Quotas:** `btrfs qgroup` per user and per share; enforced soft (warn) + hard (block)
@@ -260,9 +282,12 @@ backup destination *and* as a clone target:
 | `DELETE /api/v1/storage/remotes/{name}` | forget a target; data at the provider is untouched |
 | `POST /api/v1/storage/clone` | copy a storage folder out to a target (`rclone copy`, additive) |
 
-Only the options a backend declares are accepted, values for password/secret fields are
-obscured with `rclone obscure` before they are written, and every invocation uses an
-explicit argv — never a shell. OAuth backends (Google Drive, OneDrive, Dropbox, Box,
+Only the options a backend declares are accepted, and every invocation uses an explicit
+argv — never a shell. Secret values are passed through untouched and hidden at rest by
+`rclone config create` itself, which obscures exactly the options a backend marks as
+passwords: pre-obscuring in the API either double-hides a password or, for a value rclone
+stores verbatim such as an S3 `secret_access_key`, plants an obscured string that is then
+used as the real signing key and makes every request fail with `SignatureDoesNotMatch`. OAuth backends (Google Drive, OneDrive, Dropbox, Box,
 pCloud) are created without credentials and need one browser approval per target:
 `rclone config reconnect <name>:` on the host. CLI equivalents: `onyx storage
 providers|remotes|add|rm|check|clone`.

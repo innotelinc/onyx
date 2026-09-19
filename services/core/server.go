@@ -113,3 +113,10 @@ func (s *server) GetPool(ctx context.Context, req *onyxv1.GetPoolRequest) (*onyx
 func (s *server) CreatePool(ctx context.Context, req *onyxv1.CreatePoolRequest) (*onyxv1.Pool, error) {
 	return s.storaged.CreatePool(ctx, req)
 }
+
+// DeletePool forwards a pool-forgetting request to onyx-storaged. It releases
+// the pool's mount and drops its registry record; the filesystem on the device
+// is never written, so the pool can still be re-created or imported later.
+func (s *server) DeletePool(ctx context.Context, req *onyxv1.DeletePoolRequest) (*onyxv1.DeletePoolResponse, error) {
+	return s.storaged.DeletePool(ctx, req)
+}

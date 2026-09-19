@@ -81,6 +81,27 @@ pub fn dev_node_present(dev_root: &Path, kname: &str) -> bool {
     dev_node_error(dev_root, kname).is_none()
 }
 
+/// The device backing a pool: matched on filesystem uuid first (the stable
+/// identity), then on label, then on display name.
+///
+/// The control plane joins pools to devices the same way when it reports
+/// capacity (services/api/storage_overview.go), so both layers agree on which
+/// disk a pool lives on — and therefore which mount to release when the pool is
+/// removed.
+pub fn device_for_pool<'a>(pool: &Pool, devices: &'a [Device]) -> Option<&'a Device> {
+    if !pool.uuid.is_empty() {
+        if let Some(dev) = devices.iter().find(|d| d.uuid == pool.uuid) {
+            return Some(dev);
+        }
+    }
+    if pool.name.is_empty() {
+        return None;
+    }
+    devices
+        .iter()
+        .find(|d| d.label == pool.name || d.name == pool.name)
+}
+
 /// Is this (type, filesystem) pair safe to keep in the device registry?
 /// Unformatted disks are tracked for the UI but are never auto-attached.
 pub fn trackable(device_type: &str, fs_type: &str) -> bool {
@@ -701,6 +722,15 @@ impl DeviceManager {
             // handle cannot block the format. The filesystem is re-mounted
             // below when auto_mount is set.
             self.unmount_disk_mounts(&dev, true).await?;
+            // The disk may still carry a pool record from its previous life (an
+            // Onyx pool re-created in place, or a relabelled disk): `mkfs` gives
+            // the filesystem a fresh uuid, so the old row would linger forever as
+            // an offline duplicate of the same disk. Forget it as part of the
+            // re-creation — after the release, so a refused operation keeps the
+            // record it did not replace.
+            if let Err(e) = self.registry.forget_pool_uuid(&dev.uuid) {
+                tracing::warn!(kname = %dev.kname, error = %e, "could not forget the previous pool record");
+            }
             let response = self.run_op(
                 PrivOp::FormatFilesystem,
                 vec![dev.path.clone(), fs_type.to_string(), pool_name.to_string(), force.to_string()],
@@ -913,6 +943,39 @@ impl DeviceManager {
             .map_err(|e| format!("registry: {e}"))?
             .ok_or_else(|| format!("device {name_or_kname} vanished"))?;
         Ok(updated)
+    }
+
+    /// Release the mount of a device whose pool is being forgotten
+    /// (`DELETE /pools`), and forget the mount in the registry. Returns whether
+    /// anything was actually unmounted (a stale record for a device that is no
+    /// longer attached reports false).
+    ///
+    /// A mount outside the storage root is refused rather than released: that
+    /// is a host volume, and forgetting a pool record must never touch one.
+    /// Unlike `detach` this does not pin the device out of auto-attach — the
+    /// disk is untouched and may hold the next pool.
+    pub async fn release_pool_mount(&self, dev: &Device) -> Result<bool, String> {
+        if dev.mountpoint.is_empty() {
+            return Ok(false);
+        }
+        if !Path::new(&dev.mountpoint).starts_with(self.mount_root.as_path()) {
+            return Err(format!(
+                "{} is mounted at {} outside Onyx; unmount it manually before removing the pool",
+                dev.name, dev.mountpoint
+            ));
+        }
+        self.unmount_block(&dev.mountpoint, false).await?;
+        self.registry
+            .set_unmounted(&dev.kname)
+            .map_err(|e| format!("registry: {e}"))?;
+        tracing::info!(kname = %dev.kname, mountpoint = %dev.mountpoint, "pool mount released");
+        self.emit(
+            &dev.kname,
+            &dev.name,
+            "detach",
+            &format!("pool removed, unmounted {}", dev.mountpoint),
+        );
+        Ok(true)
     }
 
     /// A device disappeared from /sys: unmount ours (best effort) and mark it
@@ -1131,6 +1194,41 @@ mod tests {
         assert!(!poolable_type("part"));
         assert!(!poolable_type("rom"));
         assert!(!poolable_type("dm"));
+    }
+
+    /// A pool is matched to its disk the same way the control plane's overview
+    /// matches it: filesystem uuid first (so a relabel does not lose the disk),
+    /// then label, then display name. `DELETE /pools` uses this to decide which
+    /// mount to release.
+    #[test]
+    fn device_for_pool_matches_uuid_then_label_then_name() {
+        let mut by_uuid = test_device("sdc", "disk", "/mnt/onyx/main-pool");
+        by_uuid.uuid = "uuid-1".to_string();
+        by_uuid.label = "renamed".to_string();
+        let mut by_label = test_device("sdd", "disk", "");
+        by_label.label = "main-pool".to_string();
+        let devices = vec![by_uuid, by_label];
+
+        let pool = Pool {
+            name: "main-pool".into(),
+            uuid: "uuid-1".into(),
+            fs_type: "btrfs".into(),
+            total_bytes: 1,
+            used_bytes: 0,
+            state: "online".into(),
+        };
+        // The uuid wins even though another disk now carries the label.
+        assert_eq!(device_for_pool(&pool, &devices).map(|d| d.kname.as_str()), Some("sdc"));
+
+        // Unknown uuid (the filesystem was re-created): the label still names a
+        // disk, so the stale record can be cleared.
+        let relabelled = Pool { uuid: "uuid-missing".into(), ..pool.clone() };
+        assert_eq!(device_for_pool(&relabelled, &devices).map(|d| d.kname.as_str()), Some("sdd"));
+
+        // A pool whose disk is gone matches nothing: a stale record, which is
+        // exactly the case that must be removable without a device.
+        let orphan = Pool { name: "gone".into(), uuid: "uuid-gone".into(), ..pool.clone() };
+        assert!(device_for_pool(&orphan, &devices).is_none());
     }
 
     fn test_device(kname: &str, device_type: &str, mountpoint: &str) -> Device {

@@ -235,6 +235,107 @@ func (x *CreatePoolRequest) GetMountName() string {
 	return ""
 }
 
+type DeletePoolRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Pool name as ListPools reports it (the filesystem label, or the uuid when
+	// the filesystem is unlabelled).
+	Name          string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeletePoolRequest) Reset() {
+	*x = DeletePoolRequest{}
+	mi := &file_onyx_v1_storaged_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeletePoolRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeletePoolRequest) ProtoMessage() {}
+
+func (x *DeletePoolRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_storaged_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeletePoolRequest.ProtoReflect.Descriptor instead.
+func (*DeletePoolRequest) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *DeletePoolRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type DeletePoolResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The pool record that was removed.
+	Pool *Pool `protobuf:"bytes,1,opt,name=pool,proto3" json:"pool,omitempty"`
+	// Whether a live mount was released as part of the removal. A stale record
+	// (the device is gone) reports false and is simply forgotten.
+	Unmounted     bool `protobuf:"varint,2,opt,name=unmounted,proto3" json:"unmounted,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeletePoolResponse) Reset() {
+	*x = DeletePoolResponse{}
+	mi := &file_onyx_v1_storaged_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeletePoolResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeletePoolResponse) ProtoMessage() {}
+
+func (x *DeletePoolResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_storaged_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeletePoolResponse.ProtoReflect.Descriptor instead.
+func (*DeletePoolResponse) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *DeletePoolResponse) GetPool() *Pool {
+	if x != nil {
+		return x.Pool
+	}
+	return nil
+}
+
+func (x *DeletePoolResponse) GetUnmounted() bool {
+	if x != nil {
+		return x.Unmounted
+	}
+	return false
+}
+
 type Pool struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -251,7 +352,7 @@ type Pool struct {
 
 func (x *Pool) Reset() {
 	*x = Pool{}
-	mi := &file_onyx_v1_storaged_proto_msgTypes[4]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -263,7 +364,7 @@ func (x *Pool) String() string {
 func (*Pool) ProtoMessage() {}
 
 func (x *Pool) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_storaged_proto_msgTypes[4]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -276,7 +377,7 @@ func (x *Pool) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Pool.ProtoReflect.Descriptor instead.
 func (*Pool) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{4}
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Pool) GetName() string {
@@ -377,7 +478,7 @@ type Device struct {
 
 func (x *Device) Reset() {
 	*x = Device{}
-	mi := &file_onyx_v1_storaged_proto_msgTypes[5]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -389,7 +490,7 @@ func (x *Device) String() string {
 func (*Device) ProtoMessage() {}
 
 func (x *Device) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_storaged_proto_msgTypes[5]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -402,7 +503,7 @@ func (x *Device) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Device.ProtoReflect.Descriptor instead.
 func (*Device) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{5}
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Device) GetName() string {
@@ -531,7 +632,7 @@ type DeviceEvent struct {
 
 func (x *DeviceEvent) Reset() {
 	*x = DeviceEvent{}
-	mi := &file_onyx_v1_storaged_proto_msgTypes[6]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -543,7 +644,7 @@ func (x *DeviceEvent) String() string {
 func (*DeviceEvent) ProtoMessage() {}
 
 func (x *DeviceEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_storaged_proto_msgTypes[6]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -556,7 +657,7 @@ func (x *DeviceEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceEvent.ProtoReflect.Descriptor instead.
 func (*DeviceEvent) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{6}
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *DeviceEvent) GetId() uint64 {
@@ -609,7 +710,7 @@ type ListDevicesRequest struct {
 
 func (x *ListDevicesRequest) Reset() {
 	*x = ListDevicesRequest{}
-	mi := &file_onyx_v1_storaged_proto_msgTypes[7]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -621,7 +722,7 @@ func (x *ListDevicesRequest) String() string {
 func (*ListDevicesRequest) ProtoMessage() {}
 
 func (x *ListDevicesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_storaged_proto_msgTypes[7]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -634,7 +735,7 @@ func (x *ListDevicesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDevicesRequest.ProtoReflect.Descriptor instead.
 func (*ListDevicesRequest) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{7}
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{9}
 }
 
 type ListDevicesResponse struct {
@@ -646,7 +747,7 @@ type ListDevicesResponse struct {
 
 func (x *ListDevicesResponse) Reset() {
 	*x = ListDevicesResponse{}
-	mi := &file_onyx_v1_storaged_proto_msgTypes[8]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -658,7 +759,7 @@ func (x *ListDevicesResponse) String() string {
 func (*ListDevicesResponse) ProtoMessage() {}
 
 func (x *ListDevicesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_storaged_proto_msgTypes[8]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -671,7 +772,7 @@ func (x *ListDevicesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDevicesResponse.ProtoReflect.Descriptor instead.
 func (*ListDevicesResponse) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{8}
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ListDevicesResponse) GetDevices() []*Device {
@@ -690,7 +791,7 @@ type GetDeviceRequest struct {
 
 func (x *GetDeviceRequest) Reset() {
 	*x = GetDeviceRequest{}
-	mi := &file_onyx_v1_storaged_proto_msgTypes[9]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -702,7 +803,7 @@ func (x *GetDeviceRequest) String() string {
 func (*GetDeviceRequest) ProtoMessage() {}
 
 func (x *GetDeviceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_storaged_proto_msgTypes[9]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -715,7 +816,7 @@ func (x *GetDeviceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDeviceRequest.ProtoReflect.Descriptor instead.
 func (*GetDeviceRequest) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{9}
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetDeviceRequest) GetName() string {
@@ -734,7 +835,7 @@ type MountDeviceRequest struct {
 
 func (x *MountDeviceRequest) Reset() {
 	*x = MountDeviceRequest{}
-	mi := &file_onyx_v1_storaged_proto_msgTypes[10]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -746,7 +847,7 @@ func (x *MountDeviceRequest) String() string {
 func (*MountDeviceRequest) ProtoMessage() {}
 
 func (x *MountDeviceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_storaged_proto_msgTypes[10]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -759,7 +860,7 @@ func (x *MountDeviceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MountDeviceRequest.ProtoReflect.Descriptor instead.
 func (*MountDeviceRequest) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{10}
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *MountDeviceRequest) GetName() string {
@@ -778,7 +879,7 @@ type UnmountDeviceRequest struct {
 
 func (x *UnmountDeviceRequest) Reset() {
 	*x = UnmountDeviceRequest{}
-	mi := &file_onyx_v1_storaged_proto_msgTypes[11]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -790,7 +891,7 @@ func (x *UnmountDeviceRequest) String() string {
 func (*UnmountDeviceRequest) ProtoMessage() {}
 
 func (x *UnmountDeviceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_storaged_proto_msgTypes[11]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -803,7 +904,7 @@ func (x *UnmountDeviceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnmountDeviceRequest.ProtoReflect.Descriptor instead.
 func (*UnmountDeviceRequest) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{11}
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *UnmountDeviceRequest) GetName() string {
@@ -827,7 +928,7 @@ type ListEventsRequest struct {
 
 func (x *ListEventsRequest) Reset() {
 	*x = ListEventsRequest{}
-	mi := &file_onyx_v1_storaged_proto_msgTypes[12]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -839,7 +940,7 @@ func (x *ListEventsRequest) String() string {
 func (*ListEventsRequest) ProtoMessage() {}
 
 func (x *ListEventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_storaged_proto_msgTypes[12]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -852,7 +953,7 @@ func (x *ListEventsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListEventsRequest.ProtoReflect.Descriptor instead.
 func (*ListEventsRequest) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{12}
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ListEventsRequest) GetLimit() uint32 {
@@ -885,7 +986,7 @@ type ListEventsResponse struct {
 
 func (x *ListEventsResponse) Reset() {
 	*x = ListEventsResponse{}
-	mi := &file_onyx_v1_storaged_proto_msgTypes[13]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -897,7 +998,7 @@ func (x *ListEventsResponse) String() string {
 func (*ListEventsResponse) ProtoMessage() {}
 
 func (x *ListEventsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_storaged_proto_msgTypes[13]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -910,7 +1011,7 @@ func (x *ListEventsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListEventsResponse.ProtoReflect.Descriptor instead.
 func (*ListEventsResponse) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{13}
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ListEventsResponse) GetEvents() []*DeviceEvent {
@@ -928,7 +1029,7 @@ type WatchDevicesRequest struct {
 
 func (x *WatchDevicesRequest) Reset() {
 	*x = WatchDevicesRequest{}
-	mi := &file_onyx_v1_storaged_proto_msgTypes[14]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -940,7 +1041,7 @@ func (x *WatchDevicesRequest) String() string {
 func (*WatchDevicesRequest) ProtoMessage() {}
 
 func (x *WatchDevicesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_storaged_proto_msgTypes[14]
+	mi := &file_onyx_v1_storaged_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -953,7 +1054,7 @@ func (x *WatchDevicesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchDevicesRequest.ProtoReflect.Descriptor instead.
 func (*WatchDevicesRequest) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{14}
+	return file_onyx_v1_storaged_proto_rawDescGZIP(), []int{16}
 }
 
 var File_onyx_v1_storaged_proto protoreflect.FileDescriptor
@@ -974,7 +1075,12 @@ const file_onyx_v1_storaged_proto_rawDesc = "" +
 	"\n" +
 	"auto_mount\x18\x05 \x01(\bR\tautoMount\x12\x1d\n" +
 	"\n" +
-	"mount_name\x18\x06 \x01(\tR\tmountName\"\x9d\x01\n" +
+	"mount_name\x18\x06 \x01(\tR\tmountName\"'\n" +
+	"\x11DeletePoolRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"U\n" +
+	"\x12DeletePoolResponse\x12!\n" +
+	"\x04pool\x18\x01 \x01(\v2\r.onyx.v1.PoolR\x04pool\x12\x1c\n" +
+	"\tunmounted\x18\x02 \x01(\bR\tunmounted\"\x9d\x01\n" +
 	"\x04Pool\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04uuid\x18\x02 \x01(\tR\x04uuid\x12\x17\n" +
@@ -1027,12 +1133,14 @@ const file_onyx_v1_storaged_proto_rawDesc = "" +
 	"\x05kname\x18\x03 \x01(\tR\x05kname\"B\n" +
 	"\x12ListEventsResponse\x12,\n" +
 	"\x06events\x18\x01 \x03(\v2\x14.onyx.v1.DeviceEventR\x06events\"\x15\n" +
-	"\x13WatchDevicesRequest2\xc8\x04\n" +
+	"\x13WatchDevicesRequest2\x8f\x05\n" +
 	"\bStoraged\x12B\n" +
 	"\tListPools\x12\x19.onyx.v1.ListPoolsRequest\x1a\x1a.onyx.v1.ListPoolsResponse\x121\n" +
 	"\aGetPool\x12\x17.onyx.v1.GetPoolRequest\x1a\r.onyx.v1.Pool\x127\n" +
 	"\n" +
-	"CreatePool\x12\x1a.onyx.v1.CreatePoolRequest\x1a\r.onyx.v1.Pool\x12H\n" +
+	"CreatePool\x12\x1a.onyx.v1.CreatePoolRequest\x1a\r.onyx.v1.Pool\x12E\n" +
+	"\n" +
+	"DeletePool\x12\x1a.onyx.v1.DeletePoolRequest\x1a\x1b.onyx.v1.DeletePoolResponse\x12H\n" +
 	"\vListDevices\x12\x1b.onyx.v1.ListDevicesRequest\x1a\x1c.onyx.v1.ListDevicesResponse\x127\n" +
 	"\tGetDevice\x12\x19.onyx.v1.GetDeviceRequest\x1a\x0f.onyx.v1.Device\x12;\n" +
 	"\vMountDevice\x12\x1b.onyx.v1.MountDeviceRequest\x1a\x0f.onyx.v1.Device\x12?\n" +
@@ -1053,51 +1161,56 @@ func file_onyx_v1_storaged_proto_rawDescGZIP() []byte {
 	return file_onyx_v1_storaged_proto_rawDescData
 }
 
-var file_onyx_v1_storaged_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_onyx_v1_storaged_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_onyx_v1_storaged_proto_goTypes = []any{
 	(*ListPoolsRequest)(nil),     // 0: onyx.v1.ListPoolsRequest
 	(*ListPoolsResponse)(nil),    // 1: onyx.v1.ListPoolsResponse
 	(*GetPoolRequest)(nil),       // 2: onyx.v1.GetPoolRequest
 	(*CreatePoolRequest)(nil),    // 3: onyx.v1.CreatePoolRequest
-	(*Pool)(nil),                 // 4: onyx.v1.Pool
-	(*Device)(nil),               // 5: onyx.v1.Device
-	(*DeviceEvent)(nil),          // 6: onyx.v1.DeviceEvent
-	(*ListDevicesRequest)(nil),   // 7: onyx.v1.ListDevicesRequest
-	(*ListDevicesResponse)(nil),  // 8: onyx.v1.ListDevicesResponse
-	(*GetDeviceRequest)(nil),     // 9: onyx.v1.GetDeviceRequest
-	(*MountDeviceRequest)(nil),   // 10: onyx.v1.MountDeviceRequest
-	(*UnmountDeviceRequest)(nil), // 11: onyx.v1.UnmountDeviceRequest
-	(*ListEventsRequest)(nil),    // 12: onyx.v1.ListEventsRequest
-	(*ListEventsResponse)(nil),   // 13: onyx.v1.ListEventsResponse
-	(*WatchDevicesRequest)(nil),  // 14: onyx.v1.WatchDevicesRequest
+	(*DeletePoolRequest)(nil),    // 4: onyx.v1.DeletePoolRequest
+	(*DeletePoolResponse)(nil),   // 5: onyx.v1.DeletePoolResponse
+	(*Pool)(nil),                 // 6: onyx.v1.Pool
+	(*Device)(nil),               // 7: onyx.v1.Device
+	(*DeviceEvent)(nil),          // 8: onyx.v1.DeviceEvent
+	(*ListDevicesRequest)(nil),   // 9: onyx.v1.ListDevicesRequest
+	(*ListDevicesResponse)(nil),  // 10: onyx.v1.ListDevicesResponse
+	(*GetDeviceRequest)(nil),     // 11: onyx.v1.GetDeviceRequest
+	(*MountDeviceRequest)(nil),   // 12: onyx.v1.MountDeviceRequest
+	(*UnmountDeviceRequest)(nil), // 13: onyx.v1.UnmountDeviceRequest
+	(*ListEventsRequest)(nil),    // 14: onyx.v1.ListEventsRequest
+	(*ListEventsResponse)(nil),   // 15: onyx.v1.ListEventsResponse
+	(*WatchDevicesRequest)(nil),  // 16: onyx.v1.WatchDevicesRequest
 }
 var file_onyx_v1_storaged_proto_depIdxs = []int32{
-	4,  // 0: onyx.v1.ListPoolsResponse.pools:type_name -> onyx.v1.Pool
-	5,  // 1: onyx.v1.ListDevicesResponse.devices:type_name -> onyx.v1.Device
-	6,  // 2: onyx.v1.ListEventsResponse.events:type_name -> onyx.v1.DeviceEvent
-	0,  // 3: onyx.v1.Storaged.ListPools:input_type -> onyx.v1.ListPoolsRequest
-	2,  // 4: onyx.v1.Storaged.GetPool:input_type -> onyx.v1.GetPoolRequest
-	3,  // 5: onyx.v1.Storaged.CreatePool:input_type -> onyx.v1.CreatePoolRequest
-	7,  // 6: onyx.v1.Storaged.ListDevices:input_type -> onyx.v1.ListDevicesRequest
-	9,  // 7: onyx.v1.Storaged.GetDevice:input_type -> onyx.v1.GetDeviceRequest
-	10, // 8: onyx.v1.Storaged.MountDevice:input_type -> onyx.v1.MountDeviceRequest
-	11, // 9: onyx.v1.Storaged.UnmountDevice:input_type -> onyx.v1.UnmountDeviceRequest
-	12, // 10: onyx.v1.Storaged.ListEvents:input_type -> onyx.v1.ListEventsRequest
-	14, // 11: onyx.v1.Storaged.WatchDevices:input_type -> onyx.v1.WatchDevicesRequest
-	1,  // 12: onyx.v1.Storaged.ListPools:output_type -> onyx.v1.ListPoolsResponse
-	4,  // 13: onyx.v1.Storaged.GetPool:output_type -> onyx.v1.Pool
-	4,  // 14: onyx.v1.Storaged.CreatePool:output_type -> onyx.v1.Pool
-	8,  // 15: onyx.v1.Storaged.ListDevices:output_type -> onyx.v1.ListDevicesResponse
-	5,  // 16: onyx.v1.Storaged.GetDevice:output_type -> onyx.v1.Device
-	5,  // 17: onyx.v1.Storaged.MountDevice:output_type -> onyx.v1.Device
-	5,  // 18: onyx.v1.Storaged.UnmountDevice:output_type -> onyx.v1.Device
-	13, // 19: onyx.v1.Storaged.ListEvents:output_type -> onyx.v1.ListEventsResponse
-	6,  // 20: onyx.v1.Storaged.WatchDevices:output_type -> onyx.v1.DeviceEvent
-	12, // [12:21] is the sub-list for method output_type
-	3,  // [3:12] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	6,  // 0: onyx.v1.ListPoolsResponse.pools:type_name -> onyx.v1.Pool
+	6,  // 1: onyx.v1.DeletePoolResponse.pool:type_name -> onyx.v1.Pool
+	7,  // 2: onyx.v1.ListDevicesResponse.devices:type_name -> onyx.v1.Device
+	8,  // 3: onyx.v1.ListEventsResponse.events:type_name -> onyx.v1.DeviceEvent
+	0,  // 4: onyx.v1.Storaged.ListPools:input_type -> onyx.v1.ListPoolsRequest
+	2,  // 5: onyx.v1.Storaged.GetPool:input_type -> onyx.v1.GetPoolRequest
+	3,  // 6: onyx.v1.Storaged.CreatePool:input_type -> onyx.v1.CreatePoolRequest
+	4,  // 7: onyx.v1.Storaged.DeletePool:input_type -> onyx.v1.DeletePoolRequest
+	9,  // 8: onyx.v1.Storaged.ListDevices:input_type -> onyx.v1.ListDevicesRequest
+	11, // 9: onyx.v1.Storaged.GetDevice:input_type -> onyx.v1.GetDeviceRequest
+	12, // 10: onyx.v1.Storaged.MountDevice:input_type -> onyx.v1.MountDeviceRequest
+	13, // 11: onyx.v1.Storaged.UnmountDevice:input_type -> onyx.v1.UnmountDeviceRequest
+	14, // 12: onyx.v1.Storaged.ListEvents:input_type -> onyx.v1.ListEventsRequest
+	16, // 13: onyx.v1.Storaged.WatchDevices:input_type -> onyx.v1.WatchDevicesRequest
+	1,  // 14: onyx.v1.Storaged.ListPools:output_type -> onyx.v1.ListPoolsResponse
+	6,  // 15: onyx.v1.Storaged.GetPool:output_type -> onyx.v1.Pool
+	6,  // 16: onyx.v1.Storaged.CreatePool:output_type -> onyx.v1.Pool
+	5,  // 17: onyx.v1.Storaged.DeletePool:output_type -> onyx.v1.DeletePoolResponse
+	10, // 18: onyx.v1.Storaged.ListDevices:output_type -> onyx.v1.ListDevicesResponse
+	7,  // 19: onyx.v1.Storaged.GetDevice:output_type -> onyx.v1.Device
+	7,  // 20: onyx.v1.Storaged.MountDevice:output_type -> onyx.v1.Device
+	7,  // 21: onyx.v1.Storaged.UnmountDevice:output_type -> onyx.v1.Device
+	15, // 22: onyx.v1.Storaged.ListEvents:output_type -> onyx.v1.ListEventsResponse
+	8,  // 23: onyx.v1.Storaged.WatchDevices:output_type -> onyx.v1.DeviceEvent
+	14, // [14:24] is the sub-list for method output_type
+	4,  // [4:14] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_onyx_v1_storaged_proto_init() }
@@ -1105,14 +1218,14 @@ func file_onyx_v1_storaged_proto_init() {
 	if File_onyx_v1_storaged_proto != nil {
 		return
 	}
-	file_onyx_v1_storaged_proto_msgTypes[5].OneofWrappers = []any{}
+	file_onyx_v1_storaged_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_onyx_v1_storaged_proto_rawDesc), len(file_onyx_v1_storaged_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
