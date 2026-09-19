@@ -33,15 +33,6 @@ type rcloneProvider struct {
 	Hint  string `json:"hint,omitempty"`
 }
 
-// rcloneSecretFields are the option names rclone stores obscured. Values for
-// these are passed through `rclone obscure` rather than the config verb flag,
-// which keeps working across rclone versions.
-var rcloneSecretFields = map[string]bool{
-	"pass":              true,
-	"key":               true,
-	"secret_access_key": true,
-}
-
 func rcloneProviders() []rcloneProvider {
 	return []rcloneProvider{
 		{
@@ -199,6 +190,14 @@ func validateRemoteName(name string) error {
 // handleCreateRemote serves POST /api/v1/storage/remotes. It writes one remote
 // into the shared rclone config so the Shares page can publish a folder to a
 // cloud or remote server and backups can target it.
+//
+// Secret values are handed to rclone untouched, because obscuring them is
+// rclone's job and not ours: `rclone config create` obscures the options a
+// backend marks as passwords (an SFTP/SMB/WebDAV/FTP `pass`) and stores the rest
+// verbatim — an S3 `secret_access_key` or a B2 `key` goes to the provider
+// exactly as written. Pre-obscuring here did neither: it corrupted the raw
+// fields, so an S3 remote built from the Shares page failed every request with
+// SignatureDoesNotMatch and never authenticated.
 func (s *server) handleCreateRemote(w http.ResponseWriter, r *http.Request) {
 	var body createRemoteBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -256,14 +255,6 @@ func (s *server) handleCreateRemote(w http.ResponseWriter, r *http.Request) {
 		if strings.ContainsAny(value, "\n\r\x00") || strings.HasPrefix(value, "-") {
 			writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: fmt.Sprintf("%s contains characters rclone cannot take on the command line", field)})
 			return
-		}
-		if rcloneSecretFields[field] {
-			obscured, err := runRclone(ctx, "obscure", value)
-			if err != nil {
-				writeEnvelope(w, http.StatusBadGateway, apiError{Code: "internal", Message: "rclone obscure: " + err.Error()})
-				return
-			}
-			value = obscured
 		}
 		args = append(args, field, value)
 	}

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -77,5 +80,41 @@ func TestContainsString(t *testing.T) {
 	}
 	if containsString([]string{"a"}, "b") || containsString(nil, "b") {
 		t.Error("containsString found a missing entry")
+	}
+}
+
+// A connection is only usable if the secret reaches rclone exactly as the
+// operator typed it: obscuring an S3 secret_access_key made every request fail
+// with SignatureDoesNotMatch, so the argv is pinned here. A fake rclone on PATH
+// records what the handler actually runs — no rclone binary or network needed.
+func TestCreateRemotePassesSecretsThroughRaw(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "rclone.args")
+	fake := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + logPath + "'\n"
+	if err := os.WriteFile(filepath.Join(dir, "rclone"), []byte(fake), 0o755); err != nil {
+		t.Fatalf("write fake rclone: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	s := &server{}
+	body := `{"name":"onyx-test","type":"s3","params":{"provider":"Other","access_key_id":"AKIAEXAMPLE","secret_access_key":"hunter2","endpoint":"http://minio:9000"}}`
+	rec := post(t, s.handleCreateRemote, "/api/v1/storage/remotes", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+
+	logged, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("fake rclone was never invoked: %v", err)
+	}
+	got := string(logged)
+	if !strings.Contains(got, "config create onyx-test s3") {
+		t.Errorf("the remote was not created through rclone:\n%s", got)
+	}
+	if !strings.Contains(got, "secret_access_key hunter2") {
+		t.Errorf("the secret was not passed through raw:\n%s", got)
+	}
+	if strings.Contains(got, "obscure") {
+		t.Errorf("the handler obscured a secret itself:\n%s", got)
 	}
 }
