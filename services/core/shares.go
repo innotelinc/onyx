@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"regexp"
+	"sort"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -17,6 +18,11 @@ import (
 // shareNameRe: share names are stable ids used in paths, exports and SMB share
 // sections (docs/design/05#6). Keep them conservative.
 var shareNameRe = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
+
+// validUsernameRe keeps a grantee name renderable into every share backend: a
+// name with whitespace or a quote in it could break out of a `valid users`
+// line or a davd.conf list, so it is refused at the door instead.
+var validUsernameRe = regexp.MustCompile(`^[A-Za-z0-9._@-]{1,64}$`)
 
 // protoName maps a protocol enum to its DB key; returns ("", false) for
 // unknown values so we never persist junk.
@@ -58,6 +64,143 @@ func protoFromName(name string) (onyxv1.ShareProtocol, bool) {
 	default:
 		return onyxv1.ShareProtocol_SHARE_PROTOCOL_UNSPECIFIED, false
 	}
+}
+
+// Access modes a grant may carry (docs/design/08#2). Anything else is refused
+// rather than stored, so the renderers only ever see these two words.
+const (
+	accessRead      = "read"
+	accessReadWrite = "read-write"
+)
+
+func validAccessMode(mode string) bool {
+	return mode == accessRead || mode == accessReadWrite
+}
+
+// loadShareAccess reads the grants for one share (empty name = every share).
+// Rows come back in a deterministic order so renders are stable.
+func (s *server) loadShareAccess(share, username string) (map[string][]*onyxv1.ShareAccess, error) {
+	query := `SELECT share, username, mode FROM share_access`
+	var (
+		where []string
+		args  []any
+	)
+	if share != "" {
+		where = append(where, "share = ?")
+		args = append(args, share)
+	}
+	if username != "" {
+		where = append(where, "username = ?")
+		args = append(args, username)
+	}
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	query += " ORDER BY share, username"
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byShare := map[string][]*onyxv1.ShareAccess{}
+	for rows.Next() {
+		var a onyxv1.ShareAccess
+		if err := rows.Scan(&a.Share, &a.Username, &a.Mode); err != nil {
+			return nil, err
+		}
+		byShare[a.Share] = append(byShare[a.Share], &a)
+	}
+	return byShare, rows.Err()
+}
+
+// attachShareAccess fills each share's access list, so every path that reports
+// or renders a share (ListShares, GetShare, the config applier) sees the grants
+// the Users page wrote.
+func (s *server) attachShareAccess(shares []*onyxv1.Share) error {
+	if len(shares) == 0 {
+		return nil
+	}
+	byShare, err := s.loadShareAccess("", "")
+	if err != nil {
+		return err
+	}
+	for _, share := range shares {
+		share.Access = byShare[share.Name]
+	}
+	return nil
+}
+
+// SetShareAccess records, changes or removes one grant (docs/design/08#2).
+// Removing is what an empty mode means: the row goes away rather than being
+// kept with a null, so "no grant" is one state and not two.
+func (s *server) SetShareAccess(ctx context.Context, req *onyxv1.SetShareAccessRequest) (*onyxv1.SetShareAccessResponse, error) {
+	a := req.GetAccess()
+	if a == nil || a.Share == "" || a.Username == "" {
+		return nil, status.Error(codes.InvalidArgument, "access requires a share and a username")
+	}
+	if !shareNameRe.MatchString(a.Share) {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid share name %q", a.Share)
+	}
+	if !validUsernameRe.MatchString(a.Username) {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid username %q", a.Username)
+	}
+	if a.Mode != "" && !validAccessMode(a.Mode) {
+		return nil, status.Errorf(codes.InvalidArgument, "mode must be %q, %q or empty to remove the grant, got %q", accessRead, accessReadWrite, a.Mode)
+	}
+	// The share has to exist: a grant on a share nobody can mount is a promise
+	// the backends cannot keep.
+	if _, err := s.getShare(ctx, a.Share); err != nil {
+		return nil, err
+	}
+
+	if a.Mode == "" {
+		if _, err := s.db.Exec(`DELETE FROM share_access WHERE share = ? AND username = ?`, a.Share, a.Username); err != nil {
+			return nil, status.Errorf(codes.Internal, "remove share access: %v", err)
+		}
+	} else {
+		if _, err := s.db.Exec(
+			`INSERT INTO share_access (share, username, mode) VALUES (?, ?, ?)
+			 ON CONFLICT(share, username) DO UPDATE SET mode = excluded.mode`,
+			a.Share, a.Username, a.Mode,
+		); err != nil {
+			return nil, status.Errorf(codes.Internal, "record share access: %v", err)
+		}
+	}
+
+	// The grant is only real once the daemons serve it, so re-render now
+	// (docs/design/02#6 steps 3-4). A failure leaves the row recorded and the
+	// reconciler's next apply retries, exactly like a share mutation.
+	if s.config != nil {
+		if err := s.config.apply(ctx); err != nil {
+			slogWarn("apply daemon config after access change", "share", a.Share, "user", a.Username, "error", err)
+		}
+	}
+	return &onyxv1.SetShareAccessResponse{Access: a}, nil
+}
+
+// ListShareAccess reports grants, optionally filtered by share and/or username.
+func (s *server) ListShareAccess(ctx context.Context, req *onyxv1.ListShareAccessRequest) (*onyxv1.ListShareAccessResponse, error) {
+	byShare, err := s.loadShareAccess(req.GetShare(), req.GetUsername())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "query share access: %v", err)
+	}
+	resp := &onyxv1.ListShareAccessResponse{}
+	for _, share := range sortedShareKeys(byShare) {
+		resp.Access = append(resp.Access, byShare[share]...)
+	}
+	return resp, nil
+}
+
+// sortedShareKeys keeps ListShareAccess deterministic (the query is ordered by
+// share already, but the map is not).
+func sortedShareKeys(m map[string][]*onyxv1.ShareAccess) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // scanShare converts a DB row into the proto Share.
@@ -143,6 +286,9 @@ func (s *server) ListShares(ctx context.Context, _ *onyxv1.ListSharesRequest) (*
 		}
 		shares = append(shares, share)
 	}
+	if err := s.attachShareAccess(shares); err != nil {
+		return nil, status.Errorf(codes.Internal, "load share access: %v", err)
+	}
 	return &onyxv1.ListSharesResponse{Shares: shares}, nil
 }
 
@@ -159,6 +305,9 @@ func (s *server) getShare(ctx context.Context, name string) (*onyxv1.Share, erro
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "query share: %v", err)
 	}
+	if err := s.attachShareAccess([]*onyxv1.Share{share}); err != nil {
+		return nil, status.Errorf(codes.Internal, "load share access: %v", err)
+	}
 	return share, nil
 }
 
@@ -170,6 +319,11 @@ func (s *server) DeleteShare(ctx context.Context, req *onyxv1.DeleteShareRequest
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return nil, status.Errorf(codes.NotFound, "share %q does not exist", req.Name)
+	}
+	// The grants go with the share: a row naming a share that no longer exists
+	// would re-appear as an access rule if the name were ever reused.
+	if _, err := s.db.Exec(`DELETE FROM share_access WHERE share = ?`, req.Name); err != nil {
+		return nil, status.Errorf(codes.Internal, "delete share access: %v", err)
 	}
 	// The share is gone: rewrite smb.conf/exports and reload so the removed
 	// share stops being served (change-guarded, so no-ops if unrelated).

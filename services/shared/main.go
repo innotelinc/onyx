@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -245,6 +246,12 @@ func (s *server) RenderConfig(_ context.Context, req *onyxv1.RenderConfigRequest
 
 // renderSmbConf emits the [share] section for smb.conf
 // (docs/design/05#6, SMB row: SMB2/3, btrfs VFS, no guest by default).
+//
+// Admission follows the share's grants (docs/design/08#2): with no grants the
+// share stays open to the Onyx users group, and the first grant narrows it to
+// exactly the users it names — `valid users` is what Samba enforces, so the
+// Access panel is a restriction rather than a note. A `read` grant on a
+// read-write share goes to `read list`, which Samba honours per connection.
 func renderSmbConf(share *onyxv1.Share) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[%s]\n", share.Name)
@@ -254,9 +261,53 @@ func renderSmbConf(share *onyxv1.Share) string {
 	fmt.Fprintf(&b, "\tread only = %s\n", yesNo(share.Readonly))
 	fmt.Fprintf(&b, "\tguest ok = no\n")
 	fmt.Fprintf(&b, "\tvfs objects = btrfs\n") // reflink copy-offload
-	fmt.Fprintf(&b, "\tvalid users = @onyx-users\n")
+	if users := accessUsers(share); len(users) > 0 {
+		fmt.Fprintf(&b, "\tvalid users = %s\n", strings.Join(users, " "))
+	} else {
+		fmt.Fprintf(&b, "\tvalid users = @onyx-users\n")
+	}
+	if ro := readOnlyUsers(share); len(ro) > 0 && !share.Readonly {
+		fmt.Fprintf(&b, "\tread list = %s\n", strings.Join(ro, " "))
+	}
 	return b.String()
 }
+
+// accessUsers lists the users a share's grants admit, sorted and de-duplicated
+// so identical intent renders identical bytes. Empty means "no grants", which
+// the renderers read as the group-wide default.
+func accessUsers(share *onyxv1.Share) []string {
+	seen := map[string]bool{}
+	var users []string
+	for _, a := range share.GetAccess() {
+		if a.GetUsername() == "" || seen[a.GetUsername()] {
+			continue
+		}
+		seen[a.GetUsername()] = true
+		users = append(users, a.GetUsername())
+	}
+	sort.Strings(users)
+	return users
+}
+
+// readOnlyUsers lists the users whose grant is read-only. On a share that is
+// already read-only this is empty: nobody could write anyway.
+func readOnlyUsers(share *onyxv1.Share) []string {
+	var users []string
+	for _, a := range share.GetAccess() {
+		if a.GetUsername() != "" && a.GetMode() == "read" {
+			users = append(users, a.GetUsername())
+		}
+	}
+	sort.Strings(users)
+	return users
+}
+
+// webdavAllowedUsers / webdavReadonlyUsers expose the same grants to davd,
+// which authenticates a named user through the gateway's identity header and
+// can therefore enforce them exactly (docs/design/05#6 WebDAV row).
+func webdavAllowedUsers(share *onyxv1.Share) []string { return accessUsers(share) }
+
+func webdavReadonlyUsers(share *onyxv1.Share) []string { return readOnlyUsers(share) }
 
 // renderNfsExports emits the /etc/exports line
 // (docs/design/05#6, NFS row: fsid per share, squash, not exposed by default).
@@ -375,14 +426,33 @@ func webdavGlobalSkeleton() string {
 		"# One [[share]] table per WebDAV-enabled share.\n"
 }
 
-// renderWebdavShare emits one `[[share]]` table mapping the share to its path.
+// renderWebdavShare emits one `[[share]]` table mapping the share to its path,
+// plus the grants davd enforces for it. The lists are JSON arrays because the
+// value is a list; davd rejects an unknown key rather than ignoring it, so the
+// two sides cannot drift into a config that says something nobody applies.
 func renderWebdavShare(share *onyxv1.Share) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[[share]]\n")
 	fmt.Fprintf(&b, "name = %q\n", share.Name)
 	fmt.Fprintf(&b, "path = %q\n", share.Path)
 	fmt.Fprintf(&b, "readonly = %t\n", share.Readonly)
+	fmt.Fprintf(&b, "allowed_users = %s\n", jsonList(webdavAllowedUsers(share)))
+	fmt.Fprintf(&b, "readonly_users = %s\n", jsonList(webdavReadonlyUsers(share)))
 	return b.String()
+}
+
+// jsonList renders a user list as a JSON array. json.Marshal is used (rather
+// than string concatenation) so a name containing a quote is escaped instead of
+// producing a config davd has to reject.
+func jsonList(users []string) string {
+	if users == nil {
+		users = []string{}
+	}
+	b, err := json.Marshal(users)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
 }
 
 // --- Rsync (rsyncd, docs/design/05#6 Rsync row) ---

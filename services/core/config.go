@@ -49,6 +49,21 @@ func newConfigApplier(db *sql.DB, shared onyxv1.SharedClient, privd onyxv1.Privd
 	}
 }
 
+// shares loads the share set the daemons are rendered from, with each share's
+// per-user grants attached: a grant that never reached the renderer would be a
+// permission the console shows and the backends ignore.
+func (c *configApplier) shares(ctx context.Context) ([]*onyxv1.Share, error) {
+	shares, err := listSharesForConfig(ctx, c.db)
+	if err != nil {
+		return nil, err
+	}
+	srv := &server{db: c.db}
+	if err := srv.attachShareAccess(shares); err != nil {
+		return nil, err
+	}
+	return shares, nil
+}
+
 // configTargets are reconciled unconditionally: smb.conf always carries a
 // global section, and the exports file is rewritten (possibly empty) so a
 // removed last NFS share stops being exported.
@@ -67,7 +82,7 @@ func (c *configApplier) apply(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	shares, err := listSharesForConfig(ctx, c.db)
+	shares, err := c.shares(ctx)
 	if err != nil {
 		return fmt.Errorf("config apply: list shares: %w", err)
 	}

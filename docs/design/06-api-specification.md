@@ -155,7 +155,7 @@ reconnect.
 | GET/POST | `/users` |
 | GET/PATCH/DELETE | `/users/{id}` (password, quota, groups, 2FA reset) |
 | GET/POST | `/groups`, `/roles` |
-| GET/PUT | `/users/{id}/permissions` |
+| GET/PUT | `/users/{id}/permissions` (per-share grants; recorded in core, enforced by the share backends) |
 | GET/POST/DELETE | `/api-keys` (scoped, expiring) |
 | GET/POST | `/auth/login`, `/auth/logout`, `/auth/refresh` |
 | GET/POST/DELETE | `/auth/webauthn`, `/auth/totp` |

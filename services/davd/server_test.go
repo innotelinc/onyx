@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // renderedConf mirrors the exact shape onyx-shared emits for two shares, so the
@@ -25,11 +26,15 @@ auth = "gateway"
 name = "media"
 path = "/mnt/onyx/main-pool/media"
 readonly = false
+allowed_users = []
+readonly_users = []
 
 [[share]]
 name = "archive"
 path = "/mnt/onyx/main-pool/archive"
 readonly = true
+allowed_users = []
+readonly_users = []
 `
 
 func TestParseConfigRenderedShape(t *testing.T) {
@@ -54,6 +59,10 @@ func TestParseConfigRenderedShape(t *testing.T) {
 	}
 	if !cfg.Shares[1].Readonly {
 		t.Errorf("share[1] should be read-only: %+v", cfg.Shares[1])
+	}
+	// The renderer always emits the grant lists; empty means no restriction.
+	if len(cfg.Shares[0].AllowedUsers) != 0 || len(cfg.Shares[0].ReadonlyUsers) != 0 {
+		t.Errorf("share[0] grants = %v / %v, want none", cfg.Shares[0].AllowedUsers, cfg.Shares[0].ReadonlyUsers)
 	}
 }
 
@@ -82,6 +91,11 @@ func TestParseConfigRejectsBadInput(t *testing.T) {
 		"unknown auth":        "[server]\nauth = \"trust-me\"\n",
 		"listen without port": "[server]\nlisten = \"127.0.0.1\"\n",
 		"unsupported section": "[dav]\nlisten = \"127.0.0.1:8081\"\n",
+		// A grant list has to be a list: a bare string would parse as nothing
+		// and read as "no restriction", the opposite of what it says.
+		"scalar user list":  "[[share]]\nname = \"media\"\npath = \"/mnt/onyx/media\"\nallowed_users = \"alice\"\n",
+		"invalid grantee":  "[[share]]\nname = \"media\"\npath = \"/mnt/onyx/media\"\nallowed_users = [\"a b\"]\n",
+		"invalid readonly": "[[share]]\nname = \"media\"\npath = \"/mnt/onyx/media\"\nreadonly_users = [\"\"]\n",
 	}
 	for name, input := range cases {
 		if _, err := parseConfig([]byte(input)); err == nil {
@@ -291,4 +305,154 @@ func boolStr(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func confWithGrants(root, allowed, readonly string) string {
+	return "[server]\nlisten = \"127.0.0.1:8081\"\nauth = \"gateway\"\n\n" +
+		"[[share]]\nname = \"media\"\npath = " + `"` + root + `"` + "\nreadonly = false\n" +
+		"allowed_users = " + allowed + "\nreadonly_users = " + readonly + "\n"
+}
+
+// The grants the Access panel writes are enforced here, against the identity
+// the gateway passed: a name outside the list is refused the share entirely,
+// and a `read` grant cannot write even on a read-write share. Without this the
+// panel would only change what the page says.
+func TestGrantsRestrictWebdavAccess(t *testing.T) {
+	root := t.TempDir()
+	h := newTestServer(t, confWithGrants(root, `["alice"]`, `["alice"]`))
+
+	// The grantee may read, but the grant says read-only, so a write is 403.
+	if rec := doAs(t, h, "alice", "PROPFIND", "/webdav/media/", nil); rec.Code != http.StatusMultiStatus {
+		t.Fatalf("grantee PROPFIND: status = %d, want 207 (%s)", rec.Code, rec.Body.String())
+	}
+	rec := doAs(t, h, "alice", http.MethodPut, "/webdav/media/note.txt", strings.NewReader("nope"))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("read grant accepted a write: status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "read-only for alice") {
+		t.Errorf("refusal should name the user and the reason: %s", rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "note.txt")); !os.IsNotExist(err) {
+		t.Error("a read grant wrote to the share")
+	}
+
+	// Somebody the share does not name gets nothing — not even the listing.
+	if rec := doAs(t, h, "bob", "PROPFIND", "/webdav/media/", nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("ungranted user PROPFIND: status = %d, want 403", rec.Code)
+	}
+
+	// The index is filtered the same way, so grants cannot be enumerated
+	// around.
+	rec = doAs(t, h, "bob", http.MethodGet, "/", nil)
+	if strings.Contains(rec.Body.String(), `"media"`) {
+		t.Errorf("index leaked a share bob cannot reach: %s", rec.Body.String())
+	}
+	rec = doAs(t, h, "alice", http.MethodGet, "/", nil)
+	if !strings.Contains(rec.Body.String(), `"media"`) {
+		t.Errorf("index hid a share alice can reach: %s", rec.Body.String())
+	}
+}
+
+// A read-write grant still writes; the read-only rule belongs to the other
+// user, not to the share.
+func TestReadWriteGrantIsNotBlockedByAnothersReadGrant(t *testing.T) {
+	root := t.TempDir()
+	h := newTestServer(t, confWithGrants(root, `["alice","bob"]`, `["bob"]`))
+
+	rec := doAs(t, h, "alice", http.MethodPut, "/webdav/media/note.txt", strings.NewReader("hello"))
+	if rec.Code != http.StatusCreated && rec.Code != http.StatusNoContent && rec.Code != http.StatusOK {
+		t.Fatalf("alice PUT: status = %d, want 2xx (%s)", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "note.txt")); err != nil {
+		t.Fatalf("alice's write did not land: %v", err)
+	}
+
+	rec = doAs(t, h, "bob", http.MethodPut, "/webdav/media/other.txt", strings.NewReader("nope"))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("bob PUT: status = %d, want 403", rec.Code)
+	}
+	if rec := doAs(t, h, "bob", "PROPFIND", "/webdav/media/", nil); rec.Code != http.StatusMultiStatus {
+		t.Fatalf("bob PROPFIND: status = %d, want 207", rec.Code)
+	}
+}
+
+// A container has no systemd to signal this daemon, so the config file is the
+// trigger: the watcher has to notice a rewrite and swap the share table (grants
+// included) without a restart. Without this, an access change written by the
+// console would only take effect the next time the container was recreated.
+func TestWatchConfigAppliesAChangeWithoutASignal(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "davd.conf")
+	root := t.TempDir()
+
+	write := func(body string) {
+		t.Helper()
+		// Replace through a temp file + rename, the way onyx-privd writes it, so
+		// the watcher sees a whole revision rather than a truncated one.
+		tmp := path + ".tmp"
+		if err := os.WriteFile(tmp, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(tmp, path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(confWithGrants(root, `[]`, `[]`))
+
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	active := &reloadable{}
+	active.swap(newHandler(cfg), cfg.Shares)
+	go watchConfig(path, "", active, "", fingerprint(path), 2*time.Millisecond)
+
+	if rec := doAs(t, active, "bob", "PROPFIND", "/webdav/media/", nil); rec.Code != http.StatusMultiStatus {
+		t.Fatalf("before the change: status = %d, want 207", rec.Code)
+	}
+
+	write(confWithGrants(root, `["alice"]`, `["alice"]`))
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		rec := doAs(t, active, "bob", "PROPFIND", "/webdav/media/", nil)
+		if rec.Code == http.StatusForbidden {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the watcher never applied the new grants: status = %d", rec.Code)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// The grantee is admitted, and read-only per the grant.
+	if rec := doAs(t, active, "alice", "PROPFIND", "/webdav/media/", nil); rec.Code != http.StatusMultiStatus {
+		t.Errorf("grantee after reload: status = %d, want 207", rec.Code)
+	}
+	if rec := doAs(t, active, "alice", http.MethodPut, "/webdav/media/x.txt", strings.NewReader("no")); rec.Code != http.StatusForbidden {
+		t.Errorf("read grant after reload: status = %d, want 403", rec.Code)
+	}
+}
+
+// "No grants" is the default and must keep behaving exactly as before: any
+// authenticated identity reaches the share.
+func TestNoGrantsKeepsTheShareOpenToAuthenticatedUsers(t *testing.T) {
+	h := newTestServer(t, shareConf(t.TempDir(), false))
+	if rec := doAs(t, h, "someone-else", "PROPFIND", "/webdav/media/", nil); rec.Code != http.StatusMultiStatus {
+		t.Fatalf("status = %d, want 207", rec.Code)
+	}
+}
+
+// doAs is do for a named caller.
+func doAs(t *testing.T, h http.Handler, user, method, target string, body *strings.Reader) *httptest.ResponseRecorder {
+	t.Helper()
+	var req *http.Request
+	if body == nil {
+		req = httptest.NewRequest(method, target, nil)
+	} else {
+		req = httptest.NewRequest(method, target, body)
+	}
+	req.Header.Set("X-Onyx-User", user)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
 }

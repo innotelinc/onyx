@@ -1442,7 +1442,7 @@
           }).catch(function () { return { user: u, mode: '' }; });
         })).then(function (rows) {
           panel.innerHTML = '<h3>Who can reach ' + esc(shareName) + '</h3>' +
-            '<p class="sub">This grant applies to this share only; removing access deletes nothing.</p>' +
+            '<p class="sub">This grant applies to this share only; removing access deletes nothing. SMB and WebDAV serve a granted share to exactly the people listed here; NFS, FTP, SFTP and rsync authenticate per share rather than per user, so there they follow the share\u2019s own read-only setting.</p>' +
             '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));align-items:end">' +
             rows.map(function (r) {
               var options = [['', 'No access'], ['read', 'Read only'], ['read-write', 'Read & write']].map(function (pair) {

@@ -15,14 +15,18 @@ import (
 type fakeShared struct {
 	smb, nfs, ftp, sftp, webdav, rsync string
 	calls                              int
+	// last is the most recent RenderAllRequest, so a test can assert what the
+	// applier actually handed the renderer (grants included).
+	last *onyxv1.RenderAllRequest
 }
 
 func (f *fakeShared) RenderConfig(context.Context, *onyxv1.RenderConfigRequest, ...grpc.CallOption) (*onyxv1.RenderConfigResponse, error) {
 	return nil, fmt.Errorf("unexpected RenderConfig call")
 }
 
-func (f *fakeShared) RenderAll(_ context.Context, _ *onyxv1.RenderAllRequest, _ ...grpc.CallOption) (*onyxv1.RenderAllResponse, error) {
+func (f *fakeShared) RenderAll(_ context.Context, in *onyxv1.RenderAllRequest, _ ...grpc.CallOption) (*onyxv1.RenderAllResponse, error) {
 	f.calls++
+	f.last = in
 	return &onyxv1.RenderAllResponse{
 		SmbConf:    f.smb,
 		NfsExports: f.nfs,
@@ -124,6 +128,46 @@ func TestConfigApplyWritesAndReloadsChangedTargets(t *testing.T) {
 	}
 	if len(p.reloads) != 2 || strings.Join(p.reloads[1], ",") != "smb" {
 		t.Errorf("expected reload of only smb, got %v", p.reloads)
+	}
+}
+
+// A grant that the config applier does not carry would be a permission the
+// console shows and the backends ignore, so the renderer must receive it.
+func TestConfigApplyCarriesShareGrants(t *testing.T) {
+	a, fakeS, _ := applierFixture(t,
+		&onyxv1.Share{Name: "media", Path: "/mnt/onyx/media", Protocols: []onyxv1.ShareProtocol{onyxv1.ShareProtocol_SHARE_PROTOCOL_SMB}},
+	)
+	if _, err := a.db.Exec(
+		`INSERT INTO share_access (share, username, mode) VALUES ('media', 'alice', 'read-write'), ('media', 'bob', 'read')`,
+	); err != nil {
+		t.Fatalf("insert grants: %v", err)
+	}
+	if err := a.apply(context.Background()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if fakeS.last == nil || len(fakeS.last.Shares) != 1 {
+		t.Fatalf("render request = %+v, want one share", fakeS.last)
+	}
+	got := map[string]string{}
+	for _, g := range fakeS.last.Shares[0].Access {
+		got[g.Username] = g.Mode
+	}
+	if got["alice"] != "read-write" || got["bob"] != "read" {
+		t.Errorf("renderer received grants %v, want alice=read-write bob=read", got)
+	}
+}
+
+// A share with no grants must say so explicitly (an empty list), because the
+// renderers read "no grants" as the group-wide default.
+func TestConfigApplyWithoutGrantsSendsNoAccess(t *testing.T) {
+	a, fakeS, _ := applierFixture(t,
+		&onyxv1.Share{Name: "media", Path: "/mnt/onyx/media", Protocols: []onyxv1.ShareProtocol{onyxv1.ShareProtocol_SHARE_PROTOCOL_SMB}},
+	)
+	if err := a.apply(context.Background()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(fakeS.last.Shares[0].Access) != 0 {
+		t.Errorf("ungranted share carried access %v", fakeS.last.Shares[0].Access)
 	}
 }
 

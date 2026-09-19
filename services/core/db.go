@@ -49,6 +49,18 @@ var migrations = []string{
 	// user/CLI and never touched automatically; "device:<kname>" = created by
 	// the hotplug reconciler, which deletes exactly those on detach.
 	`ALTER TABLE shares ADD COLUMN source TEXT NOT NULL DEFAULT 'manual';`,
+	// v4: share_access — the per-share, per-user grants (docs/design/08#2).
+	// core owns them because core renders the daemon config: the row is what the
+	// Users page writes, what the config renders from, and what the backends
+	// enforce, so those three cannot disagree. A share with no rows keeps the
+	// group-wide default; the first row restricts it to the users it names.
+	`CREATE TABLE IF NOT EXISTS share_access (
+		share      TEXT NOT NULL,
+		username   TEXT NOT NULL,
+		mode       TEXT NOT NULL,
+		created_at TEXT NOT NULL DEFAULT (datetime('now')),
+		PRIMARY KEY (share, username)
+	);`,
 }
 
 func migrate(db *sql.DB) error {

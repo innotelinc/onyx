@@ -341,7 +341,18 @@ equivalents: `onyx storage providers|remotes|add|rm|check|clone`.
 Share setup carries the same practical bent: presets (media library, team folder, backup
 target, read-only guest drop) set the protocol matrix, each share offers per-OS connection
 steps (Explorer map-drive, Finder connect-to-server, `/etc/fstab` lines) and a per-user
-access panel writing the `read`/`read-write` grant Onyx already stores per share per user.
+access panel writing the `read`/`read-write` grant.
+
+The grant is a record, not a hint. `onyx-core` owns it (the `share_access` table, written
+through `SetShareAccess`/`ListShareAccess`; the console's `/users/{id}/permissions` endpoints
+forward to it), `onyx-shared` renders it, and the backends enforce it: `valid users` +
+`read list` in smb.conf, and `allowed_users` + `readonly_users` in davd.conf, which onyx-davd
+applies to the identity the gateway passed (`X-Onyx-User`) — a name outside the list gets 403,
+a `read` grant cannot write, and the share index is filtered the same way. A share with **no**
+grants keeps the group-wide default, so nothing changes until an admin restricts somebody.
+NFS, FTP, SFTP and rsync authenticate per share rather than per user, so there the grants
+cannot narrow anything and the share's own read-only setting is what applies — the panel says
+so rather than implying a restriction the protocol cannot make.
 
 ## 9. Performance tuning (defaults, expert-overridable)
 

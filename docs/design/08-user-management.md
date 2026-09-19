@@ -42,7 +42,10 @@ Group { id, name, members[], default_share_permissions? }
 ## 3. Share and quota management
 
 - Share grants are per user/group with `read` / `read-write`; visible in both directions
-  (user view: "You can access: Photos (rw), Family (ro)").
+  (user view: "You can access: Photos (rw), Family (ro)"). The grant is recorded once, in
+  onyx-core (`share_access`), and rendered into the backends that can enforce it (SMB's
+  `valid users`/`read list`, WebDAV's `allowed_users`/`readonly_users`), so the panel and the
+  daemons read the same row. Deleting a user's mapping clears their grants with it.
 - **Quotas:** per-user soft/hard on the home subvolume; per-share quotas at the share
   subvolume. Soft → warning banner + notification; hard → writes blocked with a clear UI
   message. Admins get a quota overview table with usage bars and one-click "grant more".

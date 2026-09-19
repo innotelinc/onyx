@@ -24,6 +24,10 @@ import (
 // safe to place in a URL path without escaping.
 var shareNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
+// userNameRe matches the grantee names onyx-core accepts, so a name that
+// reaches the config is always safe to compare against the identity header.
+var userNameRe = regexp.MustCompile(`^[A-Za-z0-9._@-]{1,64}$`)
+
 // defaultConfigPath is where onyx-core/privd write the rendered davd.conf.
 const defaultConfigPath = "/etc/onyx/conf.d/davd.conf"
 
@@ -31,11 +35,16 @@ const defaultConfigPath = "/etc/onyx/conf.d/davd.conf"
 // so a huge one is a mistake worth failing on rather than buffering.
 const maxConfigBytes = 1 << 20
 
-// share is one WebDAV-visible share: a URL segment mapped onto a directory.
+// share is one WebDAV-visible share: a URL segment mapped onto a directory,
+// plus the per-user grants that decide who may reach it and who may write
+// (docs/design/08#2). Both lists empty is the default: any identity the gateway
+// authenticated may use the share, under the share's own read-only policy.
 type share struct {
-	Name     string
-	Path     string
-	Readonly bool
+	Name          string
+	Path          string
+	Readonly      bool
+	AllowedUsers  []string
+	ReadonlyUsers []string
 }
 
 // config is the parsed davd.conf. Only the fields onyx-shared renders are
@@ -99,14 +108,14 @@ func parseConfig(data []byte) (*config, error) {
 		if !ok {
 			return nil, fmt.Errorf("line %d: expected key = value, got %q", n+1, line)
 		}
-		key = strings.TrimSpace(key)
-		val, err := parseValue(strings.TrimSpace(value))
-		if err != nil {
-			return nil, fmt.Errorf("line %d: %w", n+1, err)
-		}
+		key, raw := strings.TrimSpace(key), strings.TrimSpace(value)
 
 		switch section {
 		case "server":
+			val, err := parseValue(raw)
+			if err != nil {
+				return nil, fmt.Errorf("line %d: %w", n+1, err)
+			}
 			switch key {
 			case "listen":
 				cfg.Listen = val
@@ -125,12 +134,31 @@ func parseConfig(data []byte) (*config, error) {
 			}
 			s := &cfg.Shares[len(cfg.Shares)-1]
 			switch key {
-			case "name":
-				s.Name = val
-			case "path":
-				s.Path = val
-			case "readonly":
-				s.Readonly = val == "true"
+			case "name", "path", "readonly":
+				val, err := parseValue(raw)
+				if err != nil {
+					return nil, fmt.Errorf("line %d: %w", n+1, err)
+				}
+				switch key {
+				case "name":
+					s.Name = val
+				case "path":
+					s.Path = val
+				case "readonly":
+					s.Readonly = val == "true"
+				}
+			case "allowed_users":
+				list, err := parseStringList(raw)
+				if err != nil {
+					return nil, fmt.Errorf("line %d: %w", n+1, err)
+				}
+				s.AllowedUsers = list
+			case "readonly_users":
+				list, err := parseStringList(raw)
+				if err != nil {
+					return nil, fmt.Errorf("line %d: %w", n+1, err)
+				}
+				s.ReadonlyUsers = list
 			default:
 				return nil, fmt.Errorf("line %d: unknown share key %q", n+1, key)
 			}
@@ -186,8 +214,41 @@ func (c *config) validate() error {
 		if clean != s.Path || strings.Contains(s.Path, "..") {
 			return fmt.Errorf("share %q path %q must be a clean absolute path", s.Name, s.Path)
 		}
+		for _, u := range s.AllowedUsers {
+			if !userNameRe.MatchString(u) {
+				return fmt.Errorf("share %q grants access to invalid user %q", s.Name, u)
+			}
+		}
+		for _, u := range s.ReadonlyUsers {
+			if !userNameRe.MatchString(u) {
+				return fmt.Errorf("share %q marks invalid user %q read-only", s.Name, u)
+			}
+		}
 	}
 	return nil
+}
+
+// allows reports whether the caller may reach the share at all. No grants means
+// no per-user restriction: the gateway already authenticated the caller.
+func (s share) allows(user string) bool {
+	if len(s.AllowedUsers) == 0 {
+		return true
+	}
+	return containsUser(s.AllowedUsers, user) || containsUser(s.ReadonlyUsers, user)
+}
+
+// readOnlyFor reports a read-only grant. It is narrower than the share's own
+// policy and applies to one user, which is how a `read` grant on a read-write
+// share actually stops writes.
+func (s share) readOnlyFor(user string) bool { return containsUser(s.ReadonlyUsers, user) }
+
+func containsUser(list []string, user string) bool {
+	for _, u := range list {
+		if u == user {
+			return true
+		}
+	}
+	return false
 }
 
 // stripComment removes a trailing `#` comment, ignoring hashes inside a quoted
@@ -205,6 +266,20 @@ func stripComment(line string) string {
 		}
 	}
 	return line
+}
+
+// parseStringList accepts the JSON array onyx-shared renders for a user list
+// (`["alice","bob"]`), which is also what an operator editing the file by hand
+// would write. An empty list is valid and means no restriction.
+func parseStringList(v string) ([]string, error) {
+	if !strings.HasPrefix(v, "[") {
+		return nil, fmt.Errorf("expected a list such as [\"alice\",\"bob\"], got %s", v)
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(v), &out); err != nil {
+		return nil, fmt.Errorf("invalid user list %s", v)
+	}
+	return out, nil
 }
 
 // parseValue accepts the two value forms the renderer emits: a quoted string
@@ -294,7 +369,7 @@ func newHandler(cfg *config) http.Handler {
 	})
 
 	for _, s := range cfg.Shares {
-		h := newShareHandler(s)
+		h := newShareHandler(s, cfg.IdentityHeader)
 		for _, prefix := range []string{"/webdav/", "/dav/"} {
 			mux.Handle(prefix+s.Name+"/", http.StripPrefix(prefix+s.Name, h))
 			// A client that opens the collection without the trailing slash
@@ -306,9 +381,17 @@ func newHandler(cfg *config) http.Handler {
 	}
 
 	// The index tells the gateway (and an operator) which shares exist without
-	// exposing the share contents.
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSONStatus(w, http.StatusOK, map[string]any{"service": "onyx-davd", "shares": shareList(cfg.Shares)})
+	// exposing the share contents — and only the ones the caller may reach, so
+	// the index cannot be used to enumerate shares behind someone's back.
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		user := strings.TrimSpace(r.Header.Get(cfg.IdentityHeader))
+		visible := make([]share, 0, len(cfg.Shares))
+		for _, s := range cfg.Shares {
+			if s.allows(user) {
+				visible = append(visible, s)
+			}
+		}
+		writeJSONStatus(w, http.StatusOK, map[string]any{"service": "onyx-davd", "shares": shareList(visible)})
 	})
 
 	return authenticate(cfg, mux)
@@ -323,21 +406,33 @@ func shareList(shares []share) []map[string]any {
 	return out
 }
 
-// newShareHandler mounts one share, wrapping the WebDAV handler with its write
-// policy. LockSystem is in-memory: Onyx shares are reached through this single
-// process, so there is no second node to coordinate locks with.
-func newShareHandler(s share) http.Handler {
+// newShareHandler mounts one share, applying its access policy to the caller the
+// gateway named: a share with grants serves only the users those grants name,
+// and a `read` grant cannot write even where the share is read-write. LockSystem
+// is in-memory: Onyx shares are reached through this single process, so there is
+// no second node to coordinate locks with.
+func newShareHandler(s share, identityHeader string) http.Handler {
 	dav := &webdav.Handler{
 		FileSystem: webdav.Dir(s.Path),
 		LockSystem: webdav.NewMemLS(),
 	}
-	if !s.Readonly {
-		return dav
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isWriteMethod(r.Method) {
+		user := strings.TrimSpace(r.Header.Get(identityHeader))
+		if !s.allows(user) {
 			writeJSONStatus(w, http.StatusForbidden, map[string]any{
-				"error": map[string]any{"code": "permission_denied", "message": "share " + s.Name + " is read-only"},
+				"error": map[string]any{"code": "permission_denied", "message": "share " + s.Name + " is not granted to " + user},
+			})
+			return
+		}
+		if (s.Readonly || s.readOnlyFor(user)) && isWriteMethod(r.Method) {
+			// The share-wide case keeps its original wording; the per-user case
+			// names the user, because "read-only" for everyone would be wrong.
+			msg := "share " + s.Name + " is read-only"
+			if !s.Readonly {
+				msg += " for " + user
+			}
+			writeJSONStatus(w, http.StatusForbidden, map[string]any{
+				"error": map[string]any{"code": "permission_denied", "message": msg},
 			})
 			return
 		}
