@@ -1431,6 +1431,62 @@ mod tests {
             .expect("a forced erase may deactivate swap and continue");
     }
 
+    /// Forgetting a pool releases its mount — but only a mount Onyx owns. A
+    /// mount outside the storage root is a host volume, and removing a pool
+    /// record must never touch one; the refusal also leaves the record intact,
+    /// so the operator still sees what was not removed.
+    #[tokio::test]
+    async fn release_pool_mount_refuses_a_host_mount() {
+        let reg = registry_for_test();
+        let dev = test_device("sdc", "disk", "/etc");
+        reg.upsert_device(&dev).unwrap();
+        let mgr = pool_delete_manager(reg.clone());
+
+        let err = mgr
+            .release_pool_mount(&dev)
+            .await
+            .expect_err("a host mount must be refused");
+        assert!(err.contains("outside Onyx"), "{err}");
+        assert_eq!(
+            reg.get_device("sdc").unwrap().unwrap().mountpoint,
+            "/etc",
+            "a refused release must leave the record alone"
+        );
+    }
+
+    /// The stale case: a record whose device is gone, or that was never mounted,
+    /// has nothing to release — and that is not an error, because it is exactly
+    /// the row the console's Remove action exists to clear.
+    #[tokio::test]
+    async fn release_pool_mount_is_a_noop_for_an_unmounted_record() {
+        let reg = registry_for_test();
+        let dev = test_device("sdc", "disk", "");
+        reg.upsert_device(&dev).unwrap();
+        let mgr = pool_delete_manager(reg.clone());
+
+        assert!(!mgr
+            .release_pool_mount(&dev)
+            .await
+            .expect("nothing to release is not a failure"));
+    }
+
+    fn pool_delete_manager(reg: Arc<Registry>) -> DeviceManager {
+        DeviceManager {
+            registry: reg,
+            privd: Arc::new(AsyncMutex::new(privd_dummy())),
+            mount_root: PathBuf::from("/mnt/onyx"),
+            dev_root: PathBuf::from("/dev"),
+            auto_attach: "removable".into(),
+            detached_ttl_minutes: 10,
+            mount_uid: 1000,
+            mount_gid: 100,
+            fat_umask: 0o002,
+            events: broadcast::channel(1).0,
+            ops: Mutex::new(HashSet::new()),
+            scan: AsyncMutex::new(()),
+        }
+    }
+
     fn registry_for_test() -> Arc<Registry> {
         let dir = std::env::temp_dir().join(format!(
             "onyx-reg-test-{}-{}",

@@ -49,6 +49,13 @@ services:
       - onyx-sockets:/run/onyx
       - /dev:/dev
       - /mnt/onyx:/mnt/onyx:rshared
+      # The pool + device registry. This is data-plane *state*, not a cache: it
+      # outlives a pool's mount and is what lets a pool be recognized again
+      # after a restart (and what the console's Remove action edits). Without a
+      # volume a `docker compose up --force-recreate` — or an image update —
+      # silently empties it, so every pool disappears from the Storage page and
+      # the device names shares are keyed on are regenerated from scratch.
+      - onyx-storaged-state:/var/lib/onyx/onyx-storaged
     command: ["--mount-root", "/mnt/onyx"]
     restart: unless-stopped
 
@@ -359,6 +366,7 @@ services:
 volumes:
   onyx-sockets:
   onyx-config:
+  onyx-storaged-state:
   onyx-core-state:
   onyx-api-state:
   onyx-snapd-state:

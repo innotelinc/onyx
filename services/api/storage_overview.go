@@ -82,6 +82,30 @@ type storageOverview struct {
 // mounts.
 type capacityFn func(path string) (int64, int64, bool)
 
+// dataPlaneMountsRoot reports whether the data plane says the storage root *is*
+// a filesystem of its own: a pool (through its backing device) or a device
+// whose mountpoint is the root itself.
+//
+// This is the difference between the classic single-pool install — where
+// /mnt/onyx is the pool rather than a parent of it, mounted by onyx-pool before
+// any daemon starts — and a normal install, where the root sits on whatever the
+// host gave it (its system disk, or a bind mount of one). Only the data plane's
+// answer can tell them apart, and statfs'ing the second is how a 220 GB root
+// disk came to be reported as "Storage" with every pool offline.
+func dataPlaneMountsRoot(root string, pools []*onyxv1.Pool, devices []*onyxv1.Device) bool {
+	for _, pool := range pools {
+		if dev := deviceForPool(pool, devices); dev != nil && dev.GetMountpoint() == root {
+			return true
+		}
+	}
+	for _, dev := range devices {
+		if dev.GetMountpoint() == root {
+			return true
+		}
+	}
+	return false
+}
+
 // deviceForPool finds the device backing a pool: by filesystem UUID first (the
 // stable identity), then by label, then by the pool's display name.
 func deviceForPool(pool *onyxv1.Pool, devices []*onyxv1.Device) *onyxv1.Device {
@@ -169,11 +193,14 @@ func buildStorageOverview(root string, pools []*onyxv1.Pool, devices []*onyxv1.D
 		addMount(path)
 	}
 
-	// 3. The root itself may be the mount (the classic single-pool install,
-	// where /mnt/onyx is the filesystem rather than a parent of it). Whether it
-	// is a mount point at all is capacity()'s call — production's mountCapacity
-	// verifies it, and duplicating the check here would only diverge from it.
-	if !claimed[root] {
+	// 3. The root itself may be the mount: the classic single-pool install,
+	// where /mnt/onyx is the filesystem rather than a parent of it. It is only
+	// storage when the data plane says so — the root is a mount point in almost
+	// every deployment (a system disk, a dataset, or the API container's bind
+	// of the host path) and reporting its capacity is what put the host's root
+	// filesystem behind the "Storage" headline while the pools were offline.
+	// Whether the root is a mount at all is still capacity()'s call.
+	if !claimed[root] && dataPlaneMountsRoot(root, pools, devices) {
 		if total, free, visible := capacity(root); visible {
 			out.Entries = append(out.Entries, storageEntry{
 				Name: filepath.Base(root), Mountpoint: root, Mounted: true, Visible: true,

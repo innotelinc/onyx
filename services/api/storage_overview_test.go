@@ -125,16 +125,68 @@ func TestStorageOverviewUnclaimedMountIsListed(t *testing.T) {
 	}
 }
 
-// A single-pool install mounts the pool at the storage root itself.
+// A single-pool install mounts the pool at the storage root itself: the pool,
+// through its backing device, reports /mnt/onyx as its mountpoint.
 func TestStorageOverviewStorageRootIsTheMount(t *testing.T) {
 	root := t.TempDir()
+	pools := []*onyxv1.Pool{pool("onyx-pool", "uuid-1", "btrfs", 1000, 400)}
+	devices := []*onyxv1.Device{dev("sdc", "onyx-pool", "uuid-1", root, "mounted")}
 	capacity := fakeCapacity(map[string][2]int64{root: {4000, 1000}})
-	got := buildStorageOverview(root, nil, nil, capacity)
+
+	got := buildStorageOverview(root, pools, devices, capacity)
+	if len(got.Entries) != 1 {
+		t.Fatalf("entries = %+v, want one entry", got.Entries)
+	}
+	e := got.Entries[0]
+	if !e.Visible || e.Mountpoint != root || e.Name != "onyx-pool" {
+		t.Errorf("entry = %+v, want the visible pool at %s", e, root)
+	}
+	if got.Primary == nil || got.Primary.Name != "onyx-pool" || got.FreeBytes != 1000 {
+		t.Fatalf("primary = %+v, want the root mount", got.Primary)
+	}
+}
+
+// A device the data plane mounted at the root, with no pool record above it yet
+// (the whole-disk mount onyx-pool makes before storaged scans), is the root
+// mount too.
+func TestStorageOverviewStorageRootDeviceMount(t *testing.T) {
+	root := t.TempDir()
+	devices := []*onyxv1.Device{dev("sdc", "data", "uuid-1", root, "mounted")}
+
+	got := buildStorageOverview(root, nil, devices, fakeCapacity(map[string][2]int64{root: {4000, 1000}}))
 	if len(got.Entries) != 1 || got.Entries[0].Source != "storage-root" {
 		t.Fatalf("entries = %+v, want one storage-root entry", got.Entries)
 	}
 	if got.Primary == nil || got.FreeBytes != 1000 {
 		t.Fatalf("primary = %+v, want the root mount", got.Primary)
+	}
+}
+
+// The headline bug this guards: the storage root is a mount point in nearly
+// every deployment — the host's system disk, its own dataset, or the API
+// container's bind of the host path — so with the pools offline statfs'ing it
+// reported a 220 GB root disk as the pool's capacity. Only the data plane may
+// say the root is storage.
+func TestStorageOverviewRootOnTheSystemDiskIsNotStorage(t *testing.T) {
+	root := t.TempDir()
+	pools := []*onyxv1.Pool{pool("main-pool", "uuid-1", "btrfs", 500_000_000_000, 147_456)}
+	// The pool's device is gone (a stale/offline record), so nothing claims the
+	// root — which the local namespace can still statfs, because it is a mount.
+	devices := []*onyxv1.Device{dev("sdc", "main-pool", "uuid-1", "", "detached")}
+	capacity := fakeCapacity(map[string][2]int64{root: {220_000_000_000, 100_000_000_000}})
+
+	got := buildStorageOverview(root, pools, devices, capacity)
+	if len(got.Entries) != 1 || got.Entries[0].Source != "pool" {
+		t.Fatalf("entries = %+v, want only the offline pool", got.Entries)
+	}
+	if got.Entries[0].Visible {
+		t.Errorf("entry = %+v, want it reported as not visible", got.Entries[0])
+	}
+	if got.Primary != nil {
+		t.Errorf("primary = %+v, want nil — the system disk must never stand in", got.Primary)
+	}
+	if got.TotalBytes != 0 || got.FreeBytes != 0 {
+		t.Errorf("totals = %d/%d, want 0/0", got.TotalBytes, got.FreeBytes)
 	}
 }
 
