@@ -1081,10 +1081,15 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
             });
         }
         AllowedCommand::ReloadDaemons { targets } => {
-            // Build the (bin, argv) list for every target, then run them
-            // sequentially, failing closed: if validation fails, no reload.
-            let mut steps: Vec<(String, Vec<String>)> = Vec::new();
+            // Build one (bin, argv) plan per target, then run each plan in
+            // order, failing closed *within* a target: a failed validation
+            // stops that target's reload, not every other daemon's. A host
+            // without samba has no testparm, and a container has no systemctl;
+            // aborting the whole batch there would leave a WebDAV or rsync
+            // change unwritten (docs/design/02#6 step 4).
+            let mut plans: Vec<(String, Vec<(String, Vec<String>)>)> = Vec::new();
             for t in targets {
+                let mut steps: Vec<(String, Vec<String>)> = Vec::new();
                 match t.as_str() {
                     "smb" => {
                         let conf = allowlist.config_path("smb");
@@ -1143,19 +1148,35 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
                     }
                     _ => unreachable!("validated target"),
                 }
+                plans.push((t.clone(), steps));
             }
             let mut resp = PrivResponse {
                 exit_code: 0,
                 stdout: Vec::new(),
                 stderr: Vec::new(),
             };
-            for (bin, args) in steps {
-                let out = run_argv(&bin, &args).await?;
-                if !out.status.success() {
-                    resp.exit_code = out.status.code().unwrap_or(-1) as i32;
-                    resp.stdout.extend_from_slice(&out.stdout);
-                    resp.stderr.extend_from_slice(&out.stderr);
-                    break; // validation gate: don't reload an invalid config
+            for (target, steps) in plans {
+                for (bin, args) in steps {
+                    match run_argv(&bin, &args).await {
+                        // The binary is not part of this deployment, so there is
+                        // nothing here to reload. That is not a failure of the
+                        // config: a missing testparm means no samba, and a
+                        // missing systemctl means the daemon is reached another
+                        // way. Say so and move on.
+                        Err(status) if status.code() == tonic::Code::NotFound => {
+                            resp.stdout.extend_from_slice(
+                                format!("{target}: skipped {bin} (not installed)\n").as_bytes(),
+                            );
+                        }
+                        Err(status) => return Err(status),
+                        Ok(out) if !out.status.success() => {
+                            resp.exit_code = out.status.code().unwrap_or(-1) as i32;
+                            resp.stdout.extend_from_slice(&out.stdout);
+                            resp.stderr.extend_from_slice(&out.stderr);
+                            break; // this target's validation gate: don't reload an invalid config
+                        }
+                        Ok(_) => {}
+                    }
                 }
             }
             return Ok(resp);
@@ -1483,6 +1504,12 @@ async fn run_argv(bin: &str, args: &[String]) -> Result<std::process::Output, St
     child.args(args);
     match tokio::time::timeout(CMD_TIMEOUT, child.output()).await {
         Ok(Ok(output)) => Ok(output),
+        // A missing binary is its own answer: callers that can carry on without
+        // it (a reload on a host that does not run that daemon) need to tell it
+        // apart from a command that ran and failed.
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+            Err(Status::not_found(format!("{bin} is not installed")))
+        }
         Ok(Err(e)) => Err(Status::internal(format!("failed to run {bin}: {e} (is it installed?)"))),
         Err(_) => Err(Status::deadline_exceeded(format!("{bin} timed out"))),
     }
@@ -2116,6 +2143,61 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{target} did not land in {filename}: {e}"));
             assert_eq!(written, content);
         }
+    }
+
+    /// A reload target whose tool is not installed here is skipped, and the
+    /// other targets still reload: a container has no systemctl and a host
+    /// without samba has no testparm, and aborting the batch would leave a
+    /// WebDAV or rsync change unwritten.
+    #[tokio::test]
+    async fn reload_daemons_skips_a_binary_this_host_lacks() {
+        let dir = TempDir::new("reloadskip");
+        let mut a = test_allowlist(dir.path());
+        a.testparm_bin = dir.path().join("no-such-testparm").display().to_string();
+
+        let resp = run_request(
+            &a,
+            &PrivRequest {
+                op: PrivOp::ReloadDaemons as i32,
+                args: ["smb", "webdav"].iter().map(|s| s.to_string()).collect(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&resp.stderr));
+        let stdout = String::from_utf8_lossy(&resp.stdout);
+        assert!(stdout.contains("skipped"), "the skip must be reported: {stdout}");
+        let log = fs::read_to_string(dir.path().join("argv.log")).unwrap();
+        assert!(
+            log.contains("reload-or-restart|onyx-davd"),
+            "webdav must still reload:\n{log}"
+        );
+    }
+
+    /// A target that fails validation stops *its* reload and says so, but does
+    /// not take the other targets down with it.
+    #[tokio::test]
+    async fn reload_daemons_one_targets_failure_does_not_stop_the_rest() {
+        let dir = TempDir::new("reloadfail");
+        let mut a = test_allowlist(dir.path());
+        a.testparm_bin = fake_bin(dir.path(), "testparm-rejects", "#!/bin/sh\necho 'bad config' >&2\nexit 3\n");
+
+        let resp = run_request(
+            &a,
+            &PrivRequest {
+                op: PrivOp::ReloadDaemons as i32,
+                args: ["smb", "webdav"].iter().map(|s| s.to_string()).collect(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp.exit_code, 3, "the failing target's code is reported");
+        let log = fs::read_to_string(dir.path().join("argv.log")).unwrap();
+        assert!(!log.contains("smbd"), "an invalid smb config must not be reloaded:\n{log}");
+        assert!(
+            log.contains("reload-or-restart|onyx-davd"),
+            "the healthy target must still reload:\n{log}"
+        );
     }
 
     #[tokio::test]
