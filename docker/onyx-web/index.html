@@ -1423,60 +1423,90 @@
       if (panel.scrollIntoView) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
-    // shareAccessPanel shows who can reach one share. Per-user access is already
-    // in the data model (a `read`/`read-write` grant per share per user), so this
-    // is the UI for it rather than a new permission system.
+    // shareAccessPanel shows who can reach one share, and whether their name can
+    // actually sign in over SMB. The grants live in onyx-core, which renders them
+    // into smb.conf and davd.conf, so this reads the share's own access endpoint
+    // rather than rebuilding the picture from every user's permissions.
     function shareAccessPanel(shareName) {
       var panel = document.getElementById('share-detail');
       if (!panel) return;
-      panel.innerHTML = '<div class="sub">Loading users…</div>';
-      apiJSON('/users').then(function (data) {
-        var users = data.users || [];
+      panel.innerHTML = '<div class="sub">Loading access for ' + esc(shareName) + '…</div>';
+      return Promise.all([
+        apiJSON('/shares/' + encodeURIComponent(shareName) + '/access'),
+        apiJSON('/users').catch(function () { return { users: [] }; }),
+      ]).then(function (results) {
+        var grants = {};
+        (results[0].access || []).forEach(function (g) { grants[g.username] = g.mode; });
+        var accounts = results[0].samba_accounts || [];
+        var users = results[1].users || [];
         if (!users.length) {
           panel.innerHTML = '<h3>Who can reach ' + esc(shareName) + '</h3><div class="sub">No users yet — add one on the Users page first.</div>';
           return;
         }
-        return Promise.all(users.map(function (u) {
-          return apiJSON('/users/' + encodeURIComponent(u.id) + '/permissions').then(function (p) {
-            return { user: u, mode: (p.permissions || {})[shareName] || '' };
-          }).catch(function () { return { user: u, mode: '' }; });
-        })).then(function (rows) {
-          panel.innerHTML = '<h3>Who can reach ' + esc(shareName) + '</h3>' +
-            '<p class="sub">This grant applies to this share only; removing access deletes nothing. SMB and WebDAV serve a granted share to exactly the people listed here; NFS, FTP, SFTP and rsync authenticate per share rather than per user, so there they follow the share\u2019s own read-only setting.</p>' +
-            '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));align-items:end">' +
-            rows.map(function (r) {
-              var options = [['', 'No access'], ['read', 'Read only'], ['read-write', 'Read & write']].map(function (pair) {
-                return '<option value="' + pair[0] + '"' + (pair[0] === r.mode ? ' selected' : '') + '>' + pair[1] + '</option>';
-              }).join('');
-              return '<label>' + esc(r.user.username) + '<select class="search" data-share-grant="' + esc(r.user.id) + '" style="width:100%;max-width:none">' + options + '</select></label>';
-            }).join('') +
-            '<button class="btn primary" id="share-grant-save">Save access</button><button class="btn" id="share-grant-close">Close</button></div>';
-          document.getElementById('share-grant-close').addEventListener('click', function () { panel.innerHTML = ''; });
-          document.getElementById('share-grant-save').addEventListener('click', function () {
-            var button = this;
-            button.disabled = true;
-            button.textContent = 'Saving…';
-            var queue = Promise.resolve();
-            Array.prototype.forEach.call(panel.querySelectorAll('[data-share-grant]'), function (select) {
-              var userID = select.dataset.shareGrant;
-              var mode = select.value;
-              queue = queue.then(function () {
-                // The endpoint replaces the whole map, so the user's other
-                // shares are read back first and carried over.
-                return apiJSON('/users/' + encodeURIComponent(userID) + '/permissions').then(function (p) {
-                  var perms = p.permissions || {};
-                  if (mode) perms[shareName] = mode; else delete perms[shareName];
-                  return apiJSON('/users/' + encodeURIComponent(userID) + '/permissions', { method: 'PUT', body: JSON.stringify({ permissions: perms }) });
-                });
-              });
-            });
-            queue.then(function () {
-              button.disabled = false;
-              button.textContent = 'Save access';
-              panel.insertAdjacentHTML('afterbegin', '<div class="sub" style="color:var(--onyx-success)">Access updated.</div>');
-            }).catch(function (err) { button.disabled = false; button.textContent = 'Save access'; showError(err); });
+        // A grant names a person in `valid users`, and Samba treats a name it
+        // has no account for as nobody: the grant is recorded and the share
+        // still refuses them, which is the confusing case this calls out.
+        var sambaMissing = users.filter(function (u) { return grants[u.username] && accounts.indexOf(u.username) < 0; });
+        var notice = '';
+        if (sambaMissing.length) {
+          notice = '<div class="card" style="border-color:var(--onyx-warning);margin:8px 0"><h4 style="margin:0 0 4px">SMB sign-in needed</h4><div class="sub">' + sambaMissing.map(function (u) { return esc(u.username); }).join(', ') + ' can be granted this share but Samba has no account for them yet, so an SMB client will be refused. Set an SMB password on the Users page and they can connect.</div></div>';
+        }
+        panel.innerHTML = '<h3>Who can reach ' + esc(shareName) + '</h3>' +
+          '<p class="sub">This grant applies to this share only; removing access deletes nothing. SMB and WebDAV serve a granted share to exactly the people listed here; NFS, FTP, SFTP and rsync authenticate per share rather than per user, so there they follow the share\u2019s own read-only setting.</p>' + notice +
+          '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));align-items:end">' +
+          users.map(function (u) {
+            var mode = grants[u.username] || '';
+            var options = [['', 'No access'], ['read', 'Read only'], ['read-write', 'Read & write']].map(function (pair) {
+              return '<option value="' + pair[0] + '"' + (pair[0] === mode ? ' selected' : '') + '>' + pair[1] + '</option>';
+            }).join('');
+            var missing = grants[u.username] && accounts.indexOf(u.username) < 0;
+            return '<label>' + esc(u.username) + (missing ? ' <span class="sub">(no SMB account)</span>' : '') + '<select class="search" data-share-grant="' + esc(u.username) + '" style="width:100%;max-width:none">' + options + '</select></label>';
+          }).join('') +
+          '<button class="btn primary" id="share-grant-save">Save access</button><button class="btn" id="share-grant-history">History</button><button class="btn" id="share-grant-close">Close</button></div>';
+        document.getElementById('share-grant-close').addEventListener('click', function () { panel.innerHTML = ''; });
+        document.getElementById('share-grant-history').addEventListener('click', function () { shareAuditPanel(shareName); });
+        document.getElementById('share-grant-save').addEventListener('click', function () {
+          var button = this;
+          button.disabled = true;
+          button.textContent = 'Saving…';
+          // The endpoint takes the share's whole map, so one request both
+          // grants and revokes, and nobody's other shares are touched.
+          var wanted = {};
+          Array.prototype.forEach.call(panel.querySelectorAll('[data-share-grant]'), function (select) {
+            if (select.value) wanted[select.dataset.shareGrant] = select.value;
+          });
+          apiJSON('/shares/' + encodeURIComponent(shareName) + '/access', {
+            method: 'PUT', body: JSON.stringify({ access: wanted }),
+          }).then(function () {
+            return shareAccessPanel(shareName);
+          }).then(function () {
+            panel.insertAdjacentHTML('afterbegin', '<div class="sub" style="color:var(--onyx-success)">Access updated.</div>');
+          }).catch(function (err) {
+            button.disabled = false;
+            button.textContent = 'Save access';
+            showError(err);
           });
         });
+      }).catch(showError);
+    }
+
+    // shareAuditPanel answers "why can this person not reach this share?" from
+    // the access trail: the grant changes and the refusals, newest first.
+    function shareAuditPanel(shareName) {
+      var panel = document.getElementById('share-detail');
+      if (!panel) return;
+      panel.innerHTML = '<div class="sub">Loading the access trail…</div>';
+      return apiJSON('/audit/access?share=' + encodeURIComponent(shareName)).then(function (data) {
+        var events = data.events || [];
+        panel.innerHTML = '<h3>' + esc(shareName) + ' \u2014 access trail</h3>' +
+          (events.length ? '<div style="display:grid;gap:6px">' + events.map(function (e) {
+            var verb = e.kind === 'denied' ? 'refused' : (e.kind === 'revoke' ? 'removed' : 'granted');
+            var what = e.kind === 'denied' ? (e.method || '') : (e.mode || 'access');
+            var when = e.ts ? String(e.ts).replace('T', ' ').replace('Z', ' UTC') : '';
+            return '<div class="event" style="border-bottom:1px solid var(--onyx-border);padding-bottom:6px"><div><b>' + esc(e.username) + '</b> ' + esc(verb) + ' <span class="tag">' + esc(String(what)) + '</span><div class="sub">' + esc(when) + (e.actor ? ' · by ' + esc(e.actor) : '') + (e.detail ? ' · ' + esc(e.detail) : '') + '</div></div></div>';
+          }).join('') + '</div>' : '<div class="empty"><b>Nothing recorded for this share yet</b>Grant changes and refused requests appear here as they happen.</div>') +
+          '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn" id="share-audit-back">Back to access</button></div>';
+        document.getElementById('share-audit-back').addEventListener('click', function () { shareAccessPanel(shareName); });
       }).catch(showError);
     }
 
@@ -1508,11 +1538,81 @@
       }).catch(showError);
     }
 
+    // reportUserCleanup surfaces the parts of a removal that can be left behind
+    // even though the deletion itself succeeded: a share grant that could not be
+    // cleared, or an SMB account still accepting the name. Both are permissions
+    // the console has stopped showing, which is exactly when they are dangerous.
+    function reportUserCleanup(res, username) {
+      userCleanupWarnings(res, username).forEach(function (message) {
+        showError({ error: { message: message } });
+      });
+    }
+
+    // userCleanupWarnings is the list of things a removal left behind, so the
+    // decision is testable apart from painting it.
+    function userCleanupWarnings(res, username) {
+      var warnings = [];
+      if (!res) return warnings;
+      if (res.grants_error) {
+        warnings.push('The Onyx mapping for ' + username + ' is gone, but its share grants could not be cleared: ' + res.grants_error);
+      }
+      if (res.samba_account && res.samba_account !== 'removed' && res.samba_account !== 'skipped') {
+        warnings.push(username + ' still has an SMB account: ' + res.samba_account);
+      }
+      return warnings;
+    }
+
     function viewUsers() {
       return '<div class="page-head"><div><h1>Users</h1><p>Identity is owned by Authentik and mirrored here: adding a user creates the account in both, and an Authentik account gets an Onyx role automatically the first time it is seen.</p></div><a class="btn" href="https://auth.onyx.innotel.us/if/admin/" target="_blank" rel="noopener">Open Authentik</a></div>' +
         '<div id="user-sync" class="sub" style="margin-bottom:12px"></div>' +
         '<div class="card" style="margin-bottom:16px"><h3>Add a user</h3><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end"><label>Username<input id="user-username" class="search" style="width:100%;max-width:none" placeholder="alex"></label><label>Full name<input id="user-display-name" class="search" style="width:100%;max-width:none" placeholder="Alex Doe"></label><label>Email<input id="user-email" class="search" style="width:100%;max-width:none" placeholder="alex@example.com"></label><label>Onyx role<select id="user-role" class="search" style="width:100%;max-width:none"><option>user</option><option>viewer</option><option>operator</option><option>admin</option></select></label><button class="btn primary" id="user-create">Create user</button></div><p class="sub" style="margin:8px 0 0">No password is set here: the account is created in Authentik and the person chooses their own through its recovery and passkey flow.</p></div>' +
+        '<div id="user-detail"></div>' +
         '<div class="card" id="user-list"><div class="empty"><b>Loading users…</b>Reading Authentik accounts and Onyx roles.</div></div>';
+    }
+
+    // userSambaPanel sets the SMB password for one person. A grant renders their
+    // name into smb.conf's `valid users`, and Samba only admits a name that has
+    // an account in its own passdb — without one the grant is recorded and the
+    // share still refuses them, which looks like a broken permission.
+    function userSambaPanel(userID, username) {
+      var panel = document.getElementById('user-detail');
+      if (!panel) return;
+      panel.innerHTML = '<div class="card"><h3>SMB password for ' + esc(username) + '</h3>' +
+        '<p class="sub">File Explorer, Finder and smbclient sign in with this name and password. It is stored only inside Samba\u2019s own passdb and is never shown again; the Onyx account and its Authentik sign-in are separate.</p>' +
+        '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));align-items:end">' +
+        '<label>Password<input id="smb-password" type="password" class="search" style="width:100%;max-width:none" autocomplete="new-password"></label>' +
+        '<label>Repeat<input id="smb-password-repeat" type="password" class="search" style="width:100%;max-width:none" autocomplete="new-password"></label>' +
+        '<button class="btn primary" id="smb-save">Set password</button><button class="btn" id="smb-cancel">Cancel</button></div>' +
+        '<div id="smb-status" class="sub" style="margin-top:8px"></div></div>';
+      document.getElementById('smb-cancel').addEventListener('click', function () { panel.innerHTML = ''; });
+      document.getElementById('smb-save').addEventListener('click', function () {
+        var button = this;
+        var status = document.getElementById('smb-status');
+        var password = document.getElementById('smb-password').value;
+        var repeat = document.getElementById('smb-password-repeat').value;
+        // Checked here so a typo does not become an account nobody knows the
+        // password to; core enforces the length it will actually accept.
+        if (password !== repeat) { status.textContent = 'The two passwords do not match.'; return; }
+        if (password.length < 8) { status.textContent = 'Use at least 8 characters.'; return; }
+        button.disabled = true;
+        button.textContent = 'Setting…';
+        apiJSON('/users/' + encodeURIComponent(userID) + '/smb-password', {
+          method: 'POST', body: JSON.stringify({ password: password }),
+        }).then(function () {
+          status.style.color = 'var(--onyx-success)';
+          status.textContent = username + ' can now sign in to the SMB shares they are granted.';
+          document.getElementById('smb-password').value = '';
+          document.getElementById('smb-password-repeat').value = '';
+          button.disabled = false;
+          button.textContent = 'Set password';
+          loadUsers();
+        }).catch(function (err) {
+          button.disabled = false;
+          button.textContent = 'Set password';
+          status.style.color = 'var(--onyx-danger)';
+          status.textContent = err && err.error && err.error.message ? err.error.message : 'Could not set the SMB password.';
+        });
+      });
     }
 
     // loadUsers presents one row per person: the identity Authentik owns, the
@@ -1521,7 +1621,15 @@
     function loadUsers() {
       var list = document.getElementById('user-list');
       if (!list) return Promise.resolve();
-      return apiJSON('/users').then(function (data) {
+      // The Samba half is fetched beside the identities: a share grant only
+      // works over SMB when the grantee has an account here, so the page has to
+      // show both to be honest about who can actually connect.
+      return Promise.all([
+        apiJSON('/users'),
+        apiJSON('/samba/accounts').catch(function () { return { available: false, accounts: [] }; }),
+      ]).then(function (results) {
+        var data = results[0];
+        var smb = results[1];
         var rows = data.users || [];
         var sync = data.authentik || {};
         var banner = document.getElementById('user-sync');
@@ -1529,24 +1637,51 @@
           if (sync.error) banner.innerHTML = '<div class="card" style="border-color:var(--onyx-danger);margin-bottom:12px"><h3>Authentik sync failed</h3><div class="sub">' + esc(sync.error) + '</div></div>';
           else if (sync.enabled) banner.innerHTML = '<div class="sub" style="color:var(--onyx-success)">Connected to Authentik' + (sync.authentik_users != null ? ' · ' + sync.authentik_users + ' account(s)' : '') + ' · users are mirrored both ways.</div>';
           else banner.innerHTML = '<div class="card" style="margin-bottom:12px"><h3>Authentik sync is off</h3><div class="sub">' + esc(sync.reason || 'Set AUTHENTIK_URL and AUTHENTIK_TOKEN to mirror users.') + '</div><div class="sub">Until then this page shows Onyx roles only.</div></div>';
+          if (smb.available === false) {
+            banner.innerHTML += '<div class="card" style="margin-bottom:12px"><h3>SMB accounts are unavailable</h3><div class="sub">' + esc(smb.reason || 'Samba is not part of this deployment, so a share cannot be reached over SMB.') + '</div></div>';
+          }
         }
+        var accounts = smb.accounts || [];
         list.innerHTML = rows.length ? '<div style="display:grid;gap:10px">' + rows.map(function (u) {
           var source = u.source === 'authentik+onyx' ? 'Authentik + Onyx role' : (u.source === 'authentik' ? 'Authentik (auto-mapped)' : 'Onyx role only');
           var provider = u.in_authentik ? (u.active ? 'can sign in' : 'disabled in Authentik') : 'not in Authentik';
-          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(u.display_name || u.username) + '</b><div class="sub">' + esc(u.username) + ' · ' + esc(u.status) + ' · ' + esc(source) + ' · ' + esc(provider) + '</div></div><div style="display:flex;gap:8px;align-items:center;flex-shrink:0"><span class="tag">' + esc(u.role) + '</span><button class="btn" data-user-disable="' + esc(u.id) + '" data-user-name="' + esc(u.username) + '">Disable</button><button class="btn" data-user-purge="' + esc(u.id) + '" data-user-name="' + esc(u.username) + '">Delete everywhere</button></div></div>';
+          // SMB is the one protocol that needs a credential the identity
+          // provider does not issue, so it is shown per person rather than
+          // assumed from the Authentik account.
+          var hasSMB = accounts.indexOf(u.username) >= 0;
+          var smbTag = hasSMB ? '<span class="tag">SMB ready</span>' : '';
+          var smbButton = '<button class="btn" data-user-smb="' + esc(u.id) + '" data-user-name="' + esc(u.username) + '">SMB password</button>';
+          if (hasSMB) smbButton += '<button class="btn" data-user-smb-remove="' + esc(u.id) + '" data-user-name="' + esc(u.username) + '">Remove SMB</button>';
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(u.display_name || u.username) + '</b><div class="sub">' + esc(u.username) + ' · ' + esc(u.status) + ' · ' + esc(source) + ' · ' + esc(provider) + '</div></div><div style="display:flex;gap:8px;align-items:center;flex-shrink:0;flex-wrap:wrap"><span class="tag">' + esc(u.role) + '</span>' + smbTag + smbButton + '<button class="btn" data-user-disable="' + esc(u.id) + '" data-user-name="' + esc(u.username) + '">Disable</button><button class="btn" data-user-purge="' + esc(u.id) + '" data-user-name="' + esc(u.username) + '">Delete everywhere</button></div></div>';
         }).join('') + '</div>' : '<div class="empty"><b>No users yet</b>Add one above, or create it in Authentik and reload.</div>';
+        Array.prototype.forEach.call(list.querySelectorAll('[data-user-smb]'), function (button) {
+          button.addEventListener('click', function () { userSambaPanel(button.dataset.userSmb, button.dataset.userName); });
+        });
+        Array.prototype.forEach.call(list.querySelectorAll('[data-user-smb-remove]'), function (button) {
+          button.addEventListener('click', function () {
+            if (!confirm('Remove the SMB account for ' + button.dataset.userName + '? SMB will stop accepting this name. The Onyx account, its role and any WebDAV access are unchanged.')) return;
+            button.disabled = true;
+            apiJSON('/users/' + encodeURIComponent(button.dataset.userSmbRemove) + '/smb-password', { method: 'DELETE' })
+              .then(loadUsers)
+              .catch(function (err) { button.disabled = false; showError(err); });
+          });
+        });
         Array.prototype.forEach.call(list.querySelectorAll('[data-user-disable]'), function (button) {
           button.addEventListener('click', function () {
             if (!confirm('Disable ' + button.dataset.userName + '? The Onyx role is removed and the account is disabled in Authentik, so it can no longer sign in. Nothing about the identity is erased.')) return;
             button.disabled = true;
-            apiJSON('/users/' + encodeURIComponent(button.dataset.userDisable), { method: 'DELETE' }).then(loadUsers).catch(function (err) { button.disabled = false; showError(err); });
+            apiJSON('/users/' + encodeURIComponent(button.dataset.userDisable), { method: 'DELETE' })
+              .then(function (res) { loadUsers(); reportUserCleanup(res, button.dataset.userName); })
+              .catch(function (err) { button.disabled = false; showError(err); });
           });
         });
         Array.prototype.forEach.call(list.querySelectorAll('[data-user-purge]'), function (button) {
           button.addEventListener('click', function () {
             if (!confirm('Delete ' + button.dataset.userName + ' everywhere? The account is erased in Authentik as well as here. This cannot be undone.')) return;
             button.disabled = true;
-            apiJSON('/users/' + encodeURIComponent(button.dataset.userPurge) + '?purge=true', { method: 'DELETE' }).then(loadUsers).catch(function (err) { button.disabled = false; showError(err); });
+            apiJSON('/users/' + encodeURIComponent(button.dataset.userPurge) + '?purge=true', { method: 'DELETE' })
+              .then(function (res) { loadUsers(); reportUserCleanup(res, button.dataset.userName); })
+              .catch(function (err) { button.disabled = false; showError(err); });
           });
         });
       }).catch(showError);

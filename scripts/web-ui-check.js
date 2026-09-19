@@ -32,6 +32,9 @@ const hook =
   '\n    globalThis.__onyx = { loadStorageOverview: loadStorageOverview, formatBytes: formatBytes,' +
   ' viewShares: viewShares, viewStorage: viewStorage, viewFiles: viewFiles,' +
   ' viewApps: viewApps, viewVMs: viewVMs, viewObjects: viewObjects, loadBuckets: loadBuckets,' +
+  ' loadUsers: loadUsers, viewUsers: viewUsers, userSambaPanel: userSambaPanel,' +
+  ' shareAccessPanel: shareAccessPanel, shareAuditPanel: shareAuditPanel,' +
+  ' userCleanupWarnings: userCleanupWarnings,' +
   ' views: VIEWS };\n';
 const instrumented = code.replace(/\}\)\(\);\s*$/, hook + '  })();\n');
 
@@ -98,7 +101,9 @@ const ui = sandbox.__onyx;
 const el = (id) => (elements[id] || (elements[id] = element(id)));
 
 const failures = [];
+let checkCount = 0;
 function check(name, ok, detail) {
+  checkCount++;
   if (ok) return;
   failures.push(name + (detail ? ': ' + detail : ''));
 }
@@ -160,6 +165,70 @@ const cases = [
   check('Storage page has a working refresh control', storage.includes('id="storage-refresh"'));
   check('Files page has room for the storage notice', ui.viewFiles().includes('id="file-storage-warning"'));
 
+  // --- Shares: who can reach a share, and whether SMB will actually let them ---
+  // A grant is rendered into smb.conf's `valid users`, and Samba treats a name
+  // with no account of its own as nobody: the share is granted and still
+  // refuses them, which is the confusing case the panel has to name.
+  payloadFor = (target) => {
+    if (target === '/shares/media/access') return { access: [{ share: 'media', username: 'alex', mode: 'read' }], samba_accounts: ['dana'] };
+    if (target === '/users') return { users: [{ id: 'u1', username: 'alex' }, { id: 'u2', username: 'dana' }] };
+    return {};
+  };
+  const detail = el('share-detail');
+  detail.innerHTML = '';
+  await ui.shareAccessPanel('media');
+  check('the access panel offers a save', detail.innerHTML.includes('id="share-grant-save"'), detail.innerHTML);
+  check('the access panel lists every user', detail.innerHTML.includes('data-share-grant="alex"') && detail.innerHTML.includes('data-share-grant="dana"'), detail.innerHTML);
+  check('a grant with no SMB account is called out', detail.innerHTML.includes('SMB sign-in needed') && detail.innerHTML.includes('no SMB account'), detail.innerHTML);
+  check('a grant with an account is not called out', (detail.innerHTML.match(/no SMB account/g) || []).length === 1, detail.innerHTML);
+  check('the access panel links to the trail', detail.innerHTML.includes('id="share-grant-history"'), detail.innerHTML);
+
+  payloadFor = (target) => (target === '/audit/access?share=media' ? {
+    events: [
+      { kind: 'denied', username: 'mallory', method: 'PUT', detail: 'PUT not granted', ts: '2026-09-19T10:00:00Z' },
+      { kind: 'grant', username: 'dana', mode: 'read-write', actor: 'ada', ts: '2026-09-19T09:00:00Z' },
+    ],
+  } : {});
+  detail.innerHTML = '';
+  await ui.shareAuditPanel('media');
+  check('the trail shows a refusal with its method', detail.innerHTML.includes('mallory') && detail.innerHTML.includes('refused') && detail.innerHTML.includes('PUT'), detail.innerHTML);
+  check('the trail shows a grant with its mode and actor', detail.innerHTML.includes('dana') && detail.innerHTML.includes('read-write') && detail.innerHTML.includes('by ada'), detail.innerHTML);
+
+  // --- Users: the SMB side of an account ---
+  payloadFor = (target) => {
+    if (target === '/users') return { users: [{ id: 'u1', username: 'alex', role: 'user' }, { id: 'u2', username: 'dana', role: 'user' }], authentik: { enabled: true } };
+    if (target === '/samba/accounts') return { available: true, accounts: ['dana'] };
+    return {};
+  };
+  const users = el('user-list');
+  users.innerHTML = '';
+  await ui.loadUsers();
+  check('a user with a Samba account is marked SMB ready', users.innerHTML.includes('SMB ready'), users.innerHTML);
+  check('SMB readiness is per user, not per page', (users.innerHTML.match(/SMB ready/g) || []).length === 1, users.innerHTML);
+  check('every user can be given an SMB password', (users.innerHTML.match(/SMB password/g) || []).length === 2, users.innerHTML);
+  check('an existing SMB account can be removed', users.innerHTML.includes('data-user-smb-remove="u2"'), users.innerHTML);
+  check('the Users page has room for the password form', ui.viewUsers().includes('id="user-detail"'));
+
+  // A removal that succeeds can still leave a permission behind. That is the
+  // case worth warning about, and a clean removal must stay quiet.
+  check('a left-behind SMB account is warned about',
+    ui.userCleanupWarnings({ samba_account: 'onyx-core is not reachable' }, 'dana').some((m) => m.includes('still has an SMB account')),
+    JSON.stringify(ui.userCleanupWarnings({ samba_account: 'onyx-core is not reachable' }, 'dana')));
+  check('uncleared share grants are warned about',
+    ui.userCleanupWarnings({ grants_error: 'boom' }, 'dana').some((m) => m.includes('could not be cleared')),
+    JSON.stringify(ui.userCleanupWarnings({ grants_error: 'boom' }, 'dana')));
+  check('a clean removal warns about nothing',
+    ui.userCleanupWarnings({ samba_account: 'removed', grants_removed: 2 }, 'dana').length === 0,
+    JSON.stringify(ui.userCleanupWarnings({ samba_account: 'removed', grants_removed: 2 }, 'dana')));
+  check('a missing Samba half is not an error',
+    ui.userCleanupWarnings({ samba_account: 'skipped' }, 'dana').length === 0,
+    JSON.stringify(ui.userCleanupWarnings({ samba_account: 'skipped' }, 'dana')));
+
+  const userDetail = el('user-detail');
+  userDetail.innerHTML = '';
+  ui.userSambaPanel('u1', 'alex');
+  check('the SMB password form asks twice', userDetail.innerHTML.includes('id="smb-password"') && userDetail.innerHTML.includes('id="smb-password-repeat"'), userDetail.innerHTML);
+
   // v0.4 "Jade" platform pages. The Apps page used to be a placeholder saying
   // the app store would land later; these checks are what keep it from quietly
   // becoming one again when someone reverts a render branch.
@@ -219,5 +288,5 @@ const cases = [
     for (const f of failures) console.error('  - ' + f);
     process.exit(1);
   }
-  process.stdout.write('web-ui-check: ok (' + (cases.length + bucketCases.length) + ' render cases + 17 structure checks)\n');
+  process.stdout.write('web-ui-check: ok (' + (cases.length + bucketCases.length) + ' render cases + ' + checkCount + ' checks)\n');
 })();
