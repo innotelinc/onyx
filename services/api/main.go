@@ -250,6 +250,7 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("POST /api/v1/storage/remotes", s.handleCreateRemote)
 	mux.HandleFunc("DELETE /api/v1/storage/remotes/{name}", s.handleDeleteRemote)
 	mux.HandleFunc("POST /api/v1/storage/remotes/{name}/check", s.handleCheckRemote)
+	mux.HandleFunc("POST /api/v1/storage/remotes/{name}/token", s.handleSetRemoteToken)
 	mux.HandleFunc("POST /api/v1/storage/clone", s.handleCloneToRemote)
 	mux.HandleFunc("POST /api/v1/files/upload", s.handleFileUpload)
 	mux.HandleFunc("POST /api/v1/files/mkdir", s.handleFileMkdir)
