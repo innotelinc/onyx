@@ -61,6 +61,20 @@ var migrations = []string{
 		created_at TEXT NOT NULL DEFAULT (datetime('now')),
 		PRIMARY KEY (share, username)
 	);`,
+	// v5: access_events — the access audit trail (docs/design/08#2): who was
+	// granted or denied what, and by whom. core owns it because core decides
+	// policy; the timestamps are stored as RFC3339 UTC so a reader never has to
+	// guess the zone.
+	`CREATE TABLE IF NOT EXISTS access_events (
+		id       INTEGER PRIMARY KEY AUTOINCREMENT,
+		ts       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+		kind     TEXT NOT NULL,
+		share    TEXT NOT NULL DEFAULT '',
+		username TEXT NOT NULL DEFAULT '',
+		mode     TEXT NOT NULL DEFAULT '',
+		actor    TEXT NOT NULL DEFAULT '',
+		detail   TEXT NOT NULL DEFAULT ''
+	);`,
 }
 
 func migrate(db *sql.DB) error {

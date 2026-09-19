@@ -93,7 +93,7 @@ func TestParseConfigRejectsBadInput(t *testing.T) {
 		"unsupported section": "[dav]\nlisten = \"127.0.0.1:8081\"\n",
 		// A grant list has to be a list: a bare string would parse as nothing
 		// and read as "no restriction", the opposite of what it says.
-		"scalar user list":  "[[share]]\nname = \"media\"\npath = \"/mnt/onyx/media\"\nallowed_users = \"alice\"\n",
+		"scalar user list": "[[share]]\nname = \"media\"\npath = \"/mnt/onyx/media\"\nallowed_users = \"alice\"\n",
 		"invalid grantee":  "[[share]]\nname = \"media\"\npath = \"/mnt/onyx/media\"\nallowed_users = [\"a b\"]\n",
 		"invalid readonly": "[[share]]\nname = \"media\"\npath = \"/mnt/onyx/media\"\nreadonly_users = [\"\"]\n",
 	}
@@ -439,6 +439,49 @@ func TestNoGrantsKeepsTheShareOpenToAuthenticatedUsers(t *testing.T) {
 	h := newTestServer(t, shareConf(t.TempDir(), false))
 	if rec := doAs(t, h, "someone-else", "PROPFIND", "/webdav/media/", nil); rec.Code != http.StatusMultiStatus {
 		t.Fatalf("status = %d, want 207", rec.Code)
+	}
+}
+
+// A refusal is the moment the audit trail exists for, so each one is reported
+// to onyx-core with enough to answer "why": the share, the identity, the method
+// and whether the grant or the share's own mode caused it. A request that is
+// allowed is never reported.
+func TestDenialsAreReportedToTheAuditTrail(t *testing.T) {
+	root := t.TempDir()
+	h := newTestServer(t, confWithGrants(root, `["alice"]`, `["alice"]`))
+
+	var reported []string
+	original := recordDenial
+	recordDenial = func(share, user, method, reason string) {
+		reported = append(reported, share+" "+user+" "+method+" "+reason)
+	}
+	t.Cleanup(func() { recordDenial = original })
+
+	if rec := doAs(t, h, "bob", "PROPFIND", "/webdav/media/", nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("ungranted PROPFIND: status = %d, want 403", rec.Code)
+	}
+	if len(reported) != 1 || reported[0] != "media bob PROPFIND not granted" {
+		t.Fatalf("reported = %v, want the ungranted refusal", reported)
+	}
+
+	// A `read` grant on a read-write share is a different cause, and the trail
+	// has to tell them apart.
+	reported = nil
+	if rec := doAs(t, h, "alice", http.MethodPut, "/webdav/media/note.txt", strings.NewReader("nope")); rec.Code != http.StatusForbidden {
+		t.Fatalf("read grant PUT: status = %d, want 403", rec.Code)
+	}
+	if len(reported) != 1 || reported[0] != "media alice PUT read-only grant" {
+		t.Fatalf("reported = %v, want the read-grant refusal", reported)
+	}
+
+	// A request the grant allows is not a refusal, and recording it would bury
+	// the real ones.
+	reported = nil
+	if rec := doAs(t, h, "alice", "PROPFIND", "/webdav/media/", nil); rec.Code != http.StatusMultiStatus {
+		t.Fatalf("grantee PROPFIND: status = %d, want 207", rec.Code)
+	}
+	if len(reported) != 0 {
+		t.Errorf("an allowed request was reported as a denial: %v", reported)
 	}
 }
 

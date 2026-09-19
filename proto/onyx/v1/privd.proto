@@ -75,12 +75,25 @@ enum PrivOp {
   // directory. The path must resolve under /mnt/onyx/. rmdir semantics: a
   // directory that still holds anything is never removed.
   REMOVE_MOUNTPOINT = 11;
+
+  // `smbpasswd` / `pdbedit` — one Samba account for one Onyx user, so an
+  // smb.conf `valid users` line names an account Samba has actually heard of
+  // (docs/design/05#6 SMB row). args = [action, username], where action is
+  // "add" (`smbpasswd -a -s`, taking the password from the request's `secret`
+  // field on stdin), "remove" (`smbpasswd -x`), "disable" (`smbpasswd -d`) or
+  // "list" (`pdbedit -L`). The password is never on the command line: argv is
+  // world-readable in /proc.
+  SAMBA_USER = 12;
 }
 
 message PrivRequest {
   PrivOp op = 1;
   // Positional arguments; validated per-op before execution.
   repeated string args = 2;
+  // Secret input for the ops that consume one (SAMBA_USER "add"). Never
+  // logged and never placed on the child's command line: it is written to the
+  // process's stdin.
+  bytes secret = 3;
 }
 
 message PrivResponse {

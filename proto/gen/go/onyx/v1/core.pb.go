@@ -21,6 +21,434 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type ProvisionSambaUserRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Onyx username the account is for (the same name the grant renders).
+	Username string `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	// "add" (create, or change the password of an existing account), "remove"
+	// (delete the account), "disable" (keep it but refuse sign-in) or "list"
+	// (change nothing; just report the accounts that exist).
+	Action string `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`
+	// The account's password. Required by "add"; never logged or echoed.
+	Password      string `protobuf:"bytes,3,opt,name=password,proto3" json:"password,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProvisionSambaUserRequest) Reset() {
+	*x = ProvisionSambaUserRequest{}
+	mi := &file_onyx_v1_core_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProvisionSambaUserRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProvisionSambaUserRequest) ProtoMessage() {}
+
+func (x *ProvisionSambaUserRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_core_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProvisionSambaUserRequest.ProtoReflect.Descriptor instead.
+func (*ProvisionSambaUserRequest) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_core_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *ProvisionSambaUserRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *ProvisionSambaUserRequest) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *ProvisionSambaUserRequest) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+type ProvisionSambaUserResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// True when the account exists and can sign in after this call.
+	Provisioned bool `protobuf:"varint,1,opt,name=provisioned,proto3" json:"provisioned,omitempty"`
+	// Every Onyx-style account Samba knows, as the console lists them.
+	Accounts      []string `protobuf:"bytes,2,rep,name=accounts,proto3" json:"accounts,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProvisionSambaUserResponse) Reset() {
+	*x = ProvisionSambaUserResponse{}
+	mi := &file_onyx_v1_core_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProvisionSambaUserResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProvisionSambaUserResponse) ProtoMessage() {}
+
+func (x *ProvisionSambaUserResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_core_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProvisionSambaUserResponse.ProtoReflect.Descriptor instead.
+func (*ProvisionSambaUserResponse) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_core_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ProvisionSambaUserResponse) GetProvisioned() bool {
+	if x != nil {
+		return x.Provisioned
+	}
+	return false
+}
+
+func (x *ProvisionSambaUserResponse) GetAccounts() []string {
+	if x != nil {
+		return x.Accounts
+	}
+	return nil
+}
+
+type RecordAccessDenialRequest struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Share    string                 `protobuf:"bytes,1,opt,name=share,proto3" json:"share,omitempty"`
+	Username string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	// The WebDAV method that was refused, for the trail's detail line.
+	Method        string `protobuf:"bytes,3,opt,name=method,proto3" json:"method,omitempty"`
+	Reason        string `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecordAccessDenialRequest) Reset() {
+	*x = RecordAccessDenialRequest{}
+	mi := &file_onyx_v1_core_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecordAccessDenialRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecordAccessDenialRequest) ProtoMessage() {}
+
+func (x *RecordAccessDenialRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_core_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecordAccessDenialRequest.ProtoReflect.Descriptor instead.
+func (*RecordAccessDenialRequest) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_core_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *RecordAccessDenialRequest) GetShare() string {
+	if x != nil {
+		return x.Share
+	}
+	return ""
+}
+
+func (x *RecordAccessDenialRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *RecordAccessDenialRequest) GetMethod() string {
+	if x != nil {
+		return x.Method
+	}
+	return ""
+}
+
+func (x *RecordAccessDenialRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type RecordAccessDenialResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecordAccessDenialResponse) Reset() {
+	*x = RecordAccessDenialResponse{}
+	mi := &file_onyx_v1_core_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecordAccessDenialResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecordAccessDenialResponse) ProtoMessage() {}
+
+func (x *RecordAccessDenialResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_core_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecordAccessDenialResponse.ProtoReflect.Descriptor instead.
+func (*RecordAccessDenialResponse) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_core_proto_rawDescGZIP(), []int{3}
+}
+
+// AccessEvent is one line of the access audit trail: a grant being set, changed
+// or cleared, or a request being refused.
+type AccessEvent struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Ts    string                 `protobuf:"bytes,2,opt,name=ts,proto3" json:"ts,omitempty"`
+	// "grant" (set or changed), "revoke" (cleared) or "denied".
+	Kind     string `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
+	Share    string `protobuf:"bytes,4,opt,name=share,proto3" json:"share,omitempty"`
+	Username string `protobuf:"bytes,5,opt,name=username,proto3" json:"username,omitempty"`
+	// For a grant event, the mode it was set to; empty for a revocation/denial.
+	Mode string `protobuf:"bytes,6,opt,name=mode,proto3" json:"mode,omitempty"`
+	// Who caused it: the console's identity for a change, or the caller's for a
+	// denial.
+	Actor         string `protobuf:"bytes,7,opt,name=actor,proto3" json:"actor,omitempty"`
+	Detail        string `protobuf:"bytes,8,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccessEvent) Reset() {
+	*x = AccessEvent{}
+	mi := &file_onyx_v1_core_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccessEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccessEvent) ProtoMessage() {}
+
+func (x *AccessEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_core_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccessEvent.ProtoReflect.Descriptor instead.
+func (*AccessEvent) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_core_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *AccessEvent) GetId() int64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *AccessEvent) GetTs() string {
+	if x != nil {
+		return x.Ts
+	}
+	return ""
+}
+
+func (x *AccessEvent) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *AccessEvent) GetShare() string {
+	if x != nil {
+		return x.Share
+	}
+	return ""
+}
+
+func (x *AccessEvent) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *AccessEvent) GetMode() string {
+	if x != nil {
+		return x.Mode
+	}
+	return ""
+}
+
+func (x *AccessEvent) GetActor() string {
+	if x != nil {
+		return x.Actor
+	}
+	return ""
+}
+
+func (x *AccessEvent) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+type ListAccessEventsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Optional filter; empty returns every share.
+	Share string `protobuf:"bytes,1,opt,name=share,proto3" json:"share,omitempty"`
+	// Newest-first cap. Zero or negative means the server's default.
+	Limit         int32 `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListAccessEventsRequest) Reset() {
+	*x = ListAccessEventsRequest{}
+	mi := &file_onyx_v1_core_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListAccessEventsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListAccessEventsRequest) ProtoMessage() {}
+
+func (x *ListAccessEventsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_core_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListAccessEventsRequest.ProtoReflect.Descriptor instead.
+func (*ListAccessEventsRequest) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_core_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ListAccessEventsRequest) GetShare() string {
+	if x != nil {
+		return x.Share
+	}
+	return ""
+}
+
+func (x *ListAccessEventsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type ListAccessEventsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Events        []*AccessEvent         `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListAccessEventsResponse) Reset() {
+	*x = ListAccessEventsResponse{}
+	mi := &file_onyx_v1_core_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListAccessEventsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListAccessEventsResponse) ProtoMessage() {}
+
+func (x *ListAccessEventsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_core_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListAccessEventsResponse.ProtoReflect.Descriptor instead.
+func (*ListAccessEventsResponse) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_core_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ListAccessEventsResponse) GetEvents() []*AccessEvent {
+	if x != nil {
+		return x.Events
+	}
+	return nil
+}
+
 type SystemStatusRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -29,7 +457,7 @@ type SystemStatusRequest struct {
 
 func (x *SystemStatusRequest) Reset() {
 	*x = SystemStatusRequest{}
-	mi := &file_onyx_v1_core_proto_msgTypes[0]
+	mi := &file_onyx_v1_core_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -41,7 +469,7 @@ func (x *SystemStatusRequest) String() string {
 func (*SystemStatusRequest) ProtoMessage() {}
 
 func (x *SystemStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_core_proto_msgTypes[0]
+	mi := &file_onyx_v1_core_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -54,7 +482,7 @@ func (x *SystemStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SystemStatusRequest.ProtoReflect.Descriptor instead.
 func (*SystemStatusRequest) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_core_proto_rawDescGZIP(), []int{0}
+	return file_onyx_v1_core_proto_rawDescGZIP(), []int{7}
 }
 
 type SystemStatusResponse struct {
@@ -67,7 +495,7 @@ type SystemStatusResponse struct {
 
 func (x *SystemStatusResponse) Reset() {
 	*x = SystemStatusResponse{}
-	mi := &file_onyx_v1_core_proto_msgTypes[1]
+	mi := &file_onyx_v1_core_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -79,7 +507,7 @@ func (x *SystemStatusResponse) String() string {
 func (*SystemStatusResponse) ProtoMessage() {}
 
 func (x *SystemStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_core_proto_msgTypes[1]
+	mi := &file_onyx_v1_core_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -92,7 +520,7 @@ func (x *SystemStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SystemStatusResponse.ProtoReflect.Descriptor instead.
 func (*SystemStatusResponse) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_core_proto_rawDescGZIP(), []int{1}
+	return file_onyx_v1_core_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SystemStatusResponse) GetCoreVersion() string {
@@ -121,7 +549,7 @@ type ServiceStatus struct {
 
 func (x *ServiceStatus) Reset() {
 	*x = ServiceStatus{}
-	mi := &file_onyx_v1_core_proto_msgTypes[2]
+	mi := &file_onyx_v1_core_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -133,7 +561,7 @@ func (x *ServiceStatus) String() string {
 func (*ServiceStatus) ProtoMessage() {}
 
 func (x *ServiceStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_core_proto_msgTypes[2]
+	mi := &file_onyx_v1_core_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -146,7 +574,7 @@ func (x *ServiceStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceStatus.ProtoReflect.Descriptor instead.
 func (*ServiceStatus) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_core_proto_rawDescGZIP(), []int{2}
+	return file_onyx_v1_core_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ServiceStatus) GetName() string {
@@ -174,7 +602,34 @@ var File_onyx_v1_core_proto protoreflect.FileDescriptor
 
 const file_onyx_v1_core_proto_rawDesc = "" +
 	"\n" +
-	"\x12onyx/v1/core.proto\x12\aonyx.v1\x1a\x14onyx/v1/health.proto\x1a\x16onyx/v1/storaged.proto\"\x15\n" +
+	"\x12onyx/v1/core.proto\x12\aonyx.v1\x1a\x14onyx/v1/health.proto\x1a\x16onyx/v1/storaged.proto\"k\n" +
+	"\x19ProvisionSambaUserRequest\x12\x1a\n" +
+	"\busername\x18\x01 \x01(\tR\busername\x12\x16\n" +
+	"\x06action\x18\x02 \x01(\tR\x06action\x12\x1a\n" +
+	"\bpassword\x18\x03 \x01(\tR\bpassword\"Z\n" +
+	"\x1aProvisionSambaUserResponse\x12 \n" +
+	"\vprovisioned\x18\x01 \x01(\bR\vprovisioned\x12\x1a\n" +
+	"\baccounts\x18\x02 \x03(\tR\baccounts\"}\n" +
+	"\x19RecordAccessDenialRequest\x12\x14\n" +
+	"\x05share\x18\x01 \x01(\tR\x05share\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\x12\x16\n" +
+	"\x06method\x18\x03 \x01(\tR\x06method\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\"\x1c\n" +
+	"\x1aRecordAccessDenialResponse\"\xb5\x01\n" +
+	"\vAccessEvent\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x0e\n" +
+	"\x02ts\x18\x02 \x01(\tR\x02ts\x12\x12\n" +
+	"\x04kind\x18\x03 \x01(\tR\x04kind\x12\x14\n" +
+	"\x05share\x18\x04 \x01(\tR\x05share\x12\x1a\n" +
+	"\busername\x18\x05 \x01(\tR\busername\x12\x12\n" +
+	"\x04mode\x18\x06 \x01(\tR\x04mode\x12\x14\n" +
+	"\x05actor\x18\a \x01(\tR\x05actor\x12\x16\n" +
+	"\x06detail\x18\b \x01(\tR\x06detail\"E\n" +
+	"\x17ListAccessEventsRequest\x12\x14\n" +
+	"\x05share\x18\x01 \x01(\tR\x05share\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\x05R\x05limit\"H\n" +
+	"\x18ListAccessEventsResponse\x12,\n" +
+	"\x06events\x18\x01 \x03(\v2\x14.onyx.v1.AccessEventR\x06events\"\x15\n" +
 	"\x13SystemStatusRequest\"m\n" +
 	"\x14SystemStatusResponse\x12!\n" +
 	"\fcore_version\x18\x01 \x01(\tR\vcoreVersion\x122\n" +
@@ -182,7 +637,7 @@ const file_onyx_v1_core_proto_rawDesc = "" +
 	"\rServiceStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12B\n" +
-	"\x06status\x18\x03 \x01(\x0e2*.onyx.v1.HealthCheckResponse.ServingStatusR\x06status2\xd8\x05\n" +
+	"\x06status\x18\x03 \x01(\x0e2*.onyx.v1.HealthCheckResponse.ServingStatusR\x06status2\xef\a\n" +
 	"\x04Core\x12K\n" +
 	"\fSystemStatus\x12\x1c.onyx.v1.SystemStatusRequest\x1a\x1d.onyx.v1.SystemStatusResponse\x12B\n" +
 	"\tListPools\x12\x19.onyx.v1.ListPoolsRequest\x1a\x1a.onyx.v1.ListPoolsResponse\x121\n" +
@@ -197,7 +652,10 @@ const file_onyx_v1_core_proto_rawDesc = "" +
 	"\rUnmountDevice\x12\x1d.onyx.v1.UnmountDeviceRequest\x1a\x0f.onyx.v1.Device\x12E\n" +
 	"\n" +
 	"ListEvents\x12\x1a.onyx.v1.ListEventsRequest\x1a\x1b.onyx.v1.ListEventsResponse\x12D\n" +
-	"\fWatchDevices\x12\x1c.onyx.v1.WatchDevicesRequest\x1a\x14.onyx.v1.DeviceEvent0\x01B8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
+	"\fWatchDevices\x12\x1c.onyx.v1.WatchDevicesRequest\x1a\x14.onyx.v1.DeviceEvent0\x01\x12]\n" +
+	"\x12ProvisionSambaUser\x12\".onyx.v1.ProvisionSambaUserRequest\x1a#.onyx.v1.ProvisionSambaUserResponse\x12]\n" +
+	"\x12RecordAccessDenial\x12\".onyx.v1.RecordAccessDenialRequest\x1a#.onyx.v1.RecordAccessDenialResponse\x12W\n" +
+	"\x10ListAccessEvents\x12 .onyx.v1.ListAccessEventsRequest\x1a!.onyx.v1.ListAccessEventsResponseB8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 
 var (
 	file_onyx_v1_core_proto_rawDescOnce sync.Once
@@ -211,60 +669,74 @@ func file_onyx_v1_core_proto_rawDescGZIP() []byte {
 	return file_onyx_v1_core_proto_rawDescData
 }
 
-var file_onyx_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_onyx_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_onyx_v1_core_proto_goTypes = []any{
-	(*SystemStatusRequest)(nil),            // 0: onyx.v1.SystemStatusRequest
-	(*SystemStatusResponse)(nil),           // 1: onyx.v1.SystemStatusResponse
-	(*ServiceStatus)(nil),                  // 2: onyx.v1.ServiceStatus
-	(HealthCheckResponse_ServingStatus)(0), // 3: onyx.v1.HealthCheckResponse.ServingStatus
-	(*ListPoolsRequest)(nil),               // 4: onyx.v1.ListPoolsRequest
-	(*GetPoolRequest)(nil),                 // 5: onyx.v1.GetPoolRequest
-	(*CreatePoolRequest)(nil),              // 6: onyx.v1.CreatePoolRequest
-	(*DeletePoolRequest)(nil),              // 7: onyx.v1.DeletePoolRequest
-	(*ListDevicesRequest)(nil),             // 8: onyx.v1.ListDevicesRequest
-	(*GetDeviceRequest)(nil),               // 9: onyx.v1.GetDeviceRequest
-	(*MountDeviceRequest)(nil),             // 10: onyx.v1.MountDeviceRequest
-	(*UnmountDeviceRequest)(nil),           // 11: onyx.v1.UnmountDeviceRequest
-	(*ListEventsRequest)(nil),              // 12: onyx.v1.ListEventsRequest
-	(*WatchDevicesRequest)(nil),            // 13: onyx.v1.WatchDevicesRequest
-	(*ListPoolsResponse)(nil),              // 14: onyx.v1.ListPoolsResponse
-	(*Pool)(nil),                           // 15: onyx.v1.Pool
-	(*DeletePoolResponse)(nil),             // 16: onyx.v1.DeletePoolResponse
-	(*ListDevicesResponse)(nil),            // 17: onyx.v1.ListDevicesResponse
-	(*Device)(nil),                         // 18: onyx.v1.Device
-	(*ListEventsResponse)(nil),             // 19: onyx.v1.ListEventsResponse
-	(*DeviceEvent)(nil),                    // 20: onyx.v1.DeviceEvent
+	(*ProvisionSambaUserRequest)(nil),      // 0: onyx.v1.ProvisionSambaUserRequest
+	(*ProvisionSambaUserResponse)(nil),     // 1: onyx.v1.ProvisionSambaUserResponse
+	(*RecordAccessDenialRequest)(nil),      // 2: onyx.v1.RecordAccessDenialRequest
+	(*RecordAccessDenialResponse)(nil),     // 3: onyx.v1.RecordAccessDenialResponse
+	(*AccessEvent)(nil),                    // 4: onyx.v1.AccessEvent
+	(*ListAccessEventsRequest)(nil),        // 5: onyx.v1.ListAccessEventsRequest
+	(*ListAccessEventsResponse)(nil),       // 6: onyx.v1.ListAccessEventsResponse
+	(*SystemStatusRequest)(nil),            // 7: onyx.v1.SystemStatusRequest
+	(*SystemStatusResponse)(nil),           // 8: onyx.v1.SystemStatusResponse
+	(*ServiceStatus)(nil),                  // 9: onyx.v1.ServiceStatus
+	(HealthCheckResponse_ServingStatus)(0), // 10: onyx.v1.HealthCheckResponse.ServingStatus
+	(*ListPoolsRequest)(nil),               // 11: onyx.v1.ListPoolsRequest
+	(*GetPoolRequest)(nil),                 // 12: onyx.v1.GetPoolRequest
+	(*CreatePoolRequest)(nil),              // 13: onyx.v1.CreatePoolRequest
+	(*DeletePoolRequest)(nil),              // 14: onyx.v1.DeletePoolRequest
+	(*ListDevicesRequest)(nil),             // 15: onyx.v1.ListDevicesRequest
+	(*GetDeviceRequest)(nil),               // 16: onyx.v1.GetDeviceRequest
+	(*MountDeviceRequest)(nil),             // 17: onyx.v1.MountDeviceRequest
+	(*UnmountDeviceRequest)(nil),           // 18: onyx.v1.UnmountDeviceRequest
+	(*ListEventsRequest)(nil),              // 19: onyx.v1.ListEventsRequest
+	(*WatchDevicesRequest)(nil),            // 20: onyx.v1.WatchDevicesRequest
+	(*ListPoolsResponse)(nil),              // 21: onyx.v1.ListPoolsResponse
+	(*Pool)(nil),                           // 22: onyx.v1.Pool
+	(*DeletePoolResponse)(nil),             // 23: onyx.v1.DeletePoolResponse
+	(*ListDevicesResponse)(nil),            // 24: onyx.v1.ListDevicesResponse
+	(*Device)(nil),                         // 25: onyx.v1.Device
+	(*ListEventsResponse)(nil),             // 26: onyx.v1.ListEventsResponse
+	(*DeviceEvent)(nil),                    // 27: onyx.v1.DeviceEvent
 }
 var file_onyx_v1_core_proto_depIdxs = []int32{
-	2,  // 0: onyx.v1.SystemStatusResponse.services:type_name -> onyx.v1.ServiceStatus
-	3,  // 1: onyx.v1.ServiceStatus.status:type_name -> onyx.v1.HealthCheckResponse.ServingStatus
-	0,  // 2: onyx.v1.Core.SystemStatus:input_type -> onyx.v1.SystemStatusRequest
-	4,  // 3: onyx.v1.Core.ListPools:input_type -> onyx.v1.ListPoolsRequest
-	5,  // 4: onyx.v1.Core.GetPool:input_type -> onyx.v1.GetPoolRequest
-	6,  // 5: onyx.v1.Core.CreatePool:input_type -> onyx.v1.CreatePoolRequest
-	7,  // 6: onyx.v1.Core.DeletePool:input_type -> onyx.v1.DeletePoolRequest
-	8,  // 7: onyx.v1.Core.ListDevices:input_type -> onyx.v1.ListDevicesRequest
-	9,  // 8: onyx.v1.Core.GetDevice:input_type -> onyx.v1.GetDeviceRequest
-	10, // 9: onyx.v1.Core.MountDevice:input_type -> onyx.v1.MountDeviceRequest
-	11, // 10: onyx.v1.Core.UnmountDevice:input_type -> onyx.v1.UnmountDeviceRequest
-	12, // 11: onyx.v1.Core.ListEvents:input_type -> onyx.v1.ListEventsRequest
-	13, // 12: onyx.v1.Core.WatchDevices:input_type -> onyx.v1.WatchDevicesRequest
-	1,  // 13: onyx.v1.Core.SystemStatus:output_type -> onyx.v1.SystemStatusResponse
-	14, // 14: onyx.v1.Core.ListPools:output_type -> onyx.v1.ListPoolsResponse
-	15, // 15: onyx.v1.Core.GetPool:output_type -> onyx.v1.Pool
-	15, // 16: onyx.v1.Core.CreatePool:output_type -> onyx.v1.Pool
-	16, // 17: onyx.v1.Core.DeletePool:output_type -> onyx.v1.DeletePoolResponse
-	17, // 18: onyx.v1.Core.ListDevices:output_type -> onyx.v1.ListDevicesResponse
-	18, // 19: onyx.v1.Core.GetDevice:output_type -> onyx.v1.Device
-	18, // 20: onyx.v1.Core.MountDevice:output_type -> onyx.v1.Device
-	18, // 21: onyx.v1.Core.UnmountDevice:output_type -> onyx.v1.Device
-	19, // 22: onyx.v1.Core.ListEvents:output_type -> onyx.v1.ListEventsResponse
-	20, // 23: onyx.v1.Core.WatchDevices:output_type -> onyx.v1.DeviceEvent
-	13, // [13:24] is the sub-list for method output_type
-	2,  // [2:13] is the sub-list for method input_type
-	2,  // [2:2] is the sub-list for extension type_name
-	2,  // [2:2] is the sub-list for extension extendee
-	0,  // [0:2] is the sub-list for field type_name
+	4,  // 0: onyx.v1.ListAccessEventsResponse.events:type_name -> onyx.v1.AccessEvent
+	9,  // 1: onyx.v1.SystemStatusResponse.services:type_name -> onyx.v1.ServiceStatus
+	10, // 2: onyx.v1.ServiceStatus.status:type_name -> onyx.v1.HealthCheckResponse.ServingStatus
+	7,  // 3: onyx.v1.Core.SystemStatus:input_type -> onyx.v1.SystemStatusRequest
+	11, // 4: onyx.v1.Core.ListPools:input_type -> onyx.v1.ListPoolsRequest
+	12, // 5: onyx.v1.Core.GetPool:input_type -> onyx.v1.GetPoolRequest
+	13, // 6: onyx.v1.Core.CreatePool:input_type -> onyx.v1.CreatePoolRequest
+	14, // 7: onyx.v1.Core.DeletePool:input_type -> onyx.v1.DeletePoolRequest
+	15, // 8: onyx.v1.Core.ListDevices:input_type -> onyx.v1.ListDevicesRequest
+	16, // 9: onyx.v1.Core.GetDevice:input_type -> onyx.v1.GetDeviceRequest
+	17, // 10: onyx.v1.Core.MountDevice:input_type -> onyx.v1.MountDeviceRequest
+	18, // 11: onyx.v1.Core.UnmountDevice:input_type -> onyx.v1.UnmountDeviceRequest
+	19, // 12: onyx.v1.Core.ListEvents:input_type -> onyx.v1.ListEventsRequest
+	20, // 13: onyx.v1.Core.WatchDevices:input_type -> onyx.v1.WatchDevicesRequest
+	0,  // 14: onyx.v1.Core.ProvisionSambaUser:input_type -> onyx.v1.ProvisionSambaUserRequest
+	2,  // 15: onyx.v1.Core.RecordAccessDenial:input_type -> onyx.v1.RecordAccessDenialRequest
+	5,  // 16: onyx.v1.Core.ListAccessEvents:input_type -> onyx.v1.ListAccessEventsRequest
+	8,  // 17: onyx.v1.Core.SystemStatus:output_type -> onyx.v1.SystemStatusResponse
+	21, // 18: onyx.v1.Core.ListPools:output_type -> onyx.v1.ListPoolsResponse
+	22, // 19: onyx.v1.Core.GetPool:output_type -> onyx.v1.Pool
+	22, // 20: onyx.v1.Core.CreatePool:output_type -> onyx.v1.Pool
+	23, // 21: onyx.v1.Core.DeletePool:output_type -> onyx.v1.DeletePoolResponse
+	24, // 22: onyx.v1.Core.ListDevices:output_type -> onyx.v1.ListDevicesResponse
+	25, // 23: onyx.v1.Core.GetDevice:output_type -> onyx.v1.Device
+	25, // 24: onyx.v1.Core.MountDevice:output_type -> onyx.v1.Device
+	25, // 25: onyx.v1.Core.UnmountDevice:output_type -> onyx.v1.Device
+	26, // 26: onyx.v1.Core.ListEvents:output_type -> onyx.v1.ListEventsResponse
+	27, // 27: onyx.v1.Core.WatchDevices:output_type -> onyx.v1.DeviceEvent
+	1,  // 28: onyx.v1.Core.ProvisionSambaUser:output_type -> onyx.v1.ProvisionSambaUserResponse
+	3,  // 29: onyx.v1.Core.RecordAccessDenial:output_type -> onyx.v1.RecordAccessDenialResponse
+	6,  // 30: onyx.v1.Core.ListAccessEvents:output_type -> onyx.v1.ListAccessEventsResponse
+	17, // [17:31] is the sub-list for method output_type
+	3,  // [3:17] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_onyx_v1_core_proto_init() }
@@ -280,7 +752,7 @@ func file_onyx_v1_core_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_onyx_v1_core_proto_rawDesc), len(file_onyx_v1_core_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

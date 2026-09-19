@@ -74,6 +74,10 @@ func main() {
 	slog.Info("onyx-davd configuration loaded",
 		"config", *configPath, "listen", cfg.Listen, "auth", cfg.Auth, "shares", len(cfg.Shares))
 
+	// Refusals go into onyx-core's access audit trail, beside the grant that
+	// caused them (docs/design/08#2).
+	recordDenial = auditDenials(*socketDir)
+
 	active := &reloadable{}
 	active.swap(newHandler(cfg), cfg.Shares)
 	boundListen := cfg.Listen

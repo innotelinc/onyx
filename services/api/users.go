@@ -387,6 +387,23 @@ func (s *server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	if grantErr != nil {
 		out["grants_error"] = grantErr.Error()
 	}
+	// And the Samba account goes with it: a name SMB still accepts would keep
+	// reaching shares after the console stopped showing the user at all.
+	samba := "skipped"
+	switch {
+	case s.core == nil:
+		samba = "onyx-core is not reachable, so the Samba account was left alone"
+	default:
+		if _, err := s.core.ProvisionSambaUser(r.Context(), &onyxv1.ProvisionSambaUserRequest{
+			Username: user.Username,
+			Action:   "remove",
+		}); err != nil {
+			samba = err.Error()
+		} else {
+			samba = "removed"
+		}
+	}
+	out["samba_account"] = samba
 	writeJSON(w, 200, out)
 }
 
@@ -460,6 +477,7 @@ func (s *server) handleSetUserPermissions(w http.ResponseWriter, r *http.Request
 		}
 		if _, err := s.coreShares.SetShareAccess(ctx, &onyxv1.SetShareAccessRequest{
 			Access: &onyxv1.ShareAccess{Share: share, Username: u.Username, Mode: want},
+			Actor:  requestActor(r),
 		}); err != nil {
 			s.writeGRPCError(w, r, err)
 			return

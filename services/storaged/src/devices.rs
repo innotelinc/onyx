@@ -506,7 +506,13 @@ impl DeviceManager {
     async fn run_op(&self, op: PrivOp, args: Vec<String>) -> Result<PrivResponse, String> {
         let mut privd = self.privd.lock().await;
         privd
-            .run(PrivRequest { op: op as i32, args })
+            // Storage operations carry no secret: the password field exists for
+            // the operations that do (the Samba account), and is sent empty here.
+            .run(PrivRequest {
+                op: op as i32,
+                args,
+                secret: Vec::new(),
+            })
             .await
             .map(|r| r.into_inner())
             .map_err(|e| format!("privd {op:?}: {e}"))

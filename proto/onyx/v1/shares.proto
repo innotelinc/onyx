@@ -107,6 +107,9 @@ message DeleteShareResponse {}
 
 message SetShareAccessRequest {
   ShareAccess access = 1;
+  // Who is making the change, for the audit trail. Empty means "console" — the
+  // gateway knows the operator's identity but the gRPC caller may not.
+  string actor = 2;
 }
 
 message SetShareAccessResponse {

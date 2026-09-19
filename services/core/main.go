@@ -174,6 +174,7 @@ func main() {
 	gs := grpc.NewServer()
 	srv := &server{
 		db:             db,
+		privd:          privdClient,
 		storaged:       onyxv1.NewStoragedClient(storagedConn),
 		storagedHealth: onyxv1.NewHealthClient(storagedConn),
 		sharedHealth:   onyxv1.NewHealthClient(sharedConn),

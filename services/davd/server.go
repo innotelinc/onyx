@@ -24,9 +24,10 @@ import (
 // safe to place in a URL path without escaping.
 var shareNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
-// userNameRe matches the grantee names onyx-core accepts, so a name that
+// userNameRe matches the grantee names onyx-core accepts (no leading '-',
+// which the account tool a name reaches would read as a flag), so a name that
 // reaches the config is always safe to compare against the identity header.
-var userNameRe = regexp.MustCompile(`^[A-Za-z0-9._@-]{1,64}$`)
+var userNameRe = regexp.MustCompile(`^[A-Za-z0-9._@][A-Za-z0-9._@-]{0,63}$`)
 
 // defaultConfigPath is where onyx-core/privd write the rendered davd.conf.
 const defaultConfigPath = "/etc/onyx/conf.d/davd.conf"
@@ -242,6 +243,11 @@ func (s share) allows(user string) bool {
 // share actually stops writes.
 func (s share) readOnlyFor(user string) bool { return containsUser(s.ReadonlyUsers, user) }
 
+// recordDenial reports one refused request to the access audit trail. It is a
+// variable so a test can observe refusals without a core to talk to; main
+// points it at onyx-core (audit.go).
+var recordDenial = func(share, user, method, reason string) {}
+
 func containsUser(list []string, user string) bool {
 	for _, u := range list {
 		if u == user {
@@ -419,6 +425,7 @@ func newShareHandler(s share, identityHeader string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := strings.TrimSpace(r.Header.Get(identityHeader))
 		if !s.allows(user) {
+			recordDenial(s.Name, user, r.Method, "not granted")
 			writeJSONStatus(w, http.StatusForbidden, map[string]any{
 				"error": map[string]any{"code": "permission_denied", "message": "share " + s.Name + " is not granted to " + user},
 			})
@@ -428,9 +435,12 @@ func newShareHandler(s share, identityHeader string) http.Handler {
 			// The share-wide case keeps its original wording; the per-user case
 			// names the user, because "read-only" for everyone would be wrong.
 			msg := "share " + s.Name + " is read-only"
+			reason := "read-only share"
 			if !s.Readonly {
 				msg += " for " + user
+				reason = "read-only grant"
 			}
+			recordDenial(s.Name, user, r.Method, reason)
 			writeJSONStatus(w, http.StatusForbidden, map[string]any{
 				"error": map[string]any{"code": "permission_denied", "message": msg},
 			})

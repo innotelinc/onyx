@@ -132,13 +132,13 @@ func TestOnyxMounted(t *testing.T) {
 		want bool
 	}{
 		{ok("mounted", "/mnt/onyx/usb-stick"), true},
-		{ok("mounted", "/mnt/onyx"), false},          // the root itself
-		{ok("mounted", "/mnt/onyx/"), false},         // root with trailing slash
-		{ok("mounted", "/"), false},                  // OS root
-		{ok("mounted", "/mnt/onyxx"), false},         // sibling of root
-		{ok("mounted", "/boot"), false},              // OS boot
+		{ok("mounted", "/mnt/onyx"), false},            // the root itself
+		{ok("mounted", "/mnt/onyx/"), false},           // root with trailing slash
+		{ok("mounted", "/"), false},                    // OS root
+		{ok("mounted", "/mnt/onyxx"), false},           // sibling of root
+		{ok("mounted", "/boot"), false},                // OS boot
 		{ok("attached", "/mnt/onyx/usb-stick"), false}, // not mounted
-		{ok("mounted", ""), false},                   // no mountpoint
+		{ok("mounted", ""), false},                     // no mountpoint
 	}
 	for _, c := range cases {
 		if got := onyxMounted(testMountRoot, c.d); got != c.want {

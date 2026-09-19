@@ -19,10 +19,11 @@ import (
 type fakeCoreShares struct {
 	grants map[string]string // "share\x00user" -> mode
 	calls  []string          // "set <share> <user> <mode>" in order
+	actors map[string]string // grant key -> the actor that set it
 }
 
 func newFakeCoreShares() *fakeCoreShares {
-	return &fakeCoreShares{grants: map[string]string{}}
+	return &fakeCoreShares{grants: map[string]string{}, actors: map[string]string{}}
 }
 
 func grantKey(share, user string) string { return share + "\x00" + user }
@@ -51,6 +52,7 @@ func (f *fakeCoreShares) SetShareAccess(_ context.Context, in *onyxv1.SetShareAc
 	} else {
 		f.grants[grantKey(a.GetShare(), a.GetUsername())] = a.GetMode()
 	}
+	f.actors[grantKey(a.GetShare(), a.GetUsername())] = in.GetActor()
 	return &onyxv1.SetShareAccessResponse{Access: a}, nil
 }
 
