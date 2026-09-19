@@ -33,19 +33,60 @@ impl Registry {
 
     /// Upsert a discovered pool. Total/used are refresh fields; everything else
     /// is keyed on the Btrfs uuid (stable across renames).
+    ///
+    /// The remembered `mountpoint` is never cleared by a scan — discovery does
+    /// not know where a pool is mounted, and it is what lets a restart put the
+    /// pool back where it was — but a non-empty one (a mount we just performed)
+    /// wins.
     pub fn upsert_pool(&self, p: &Pool) -> rusqlite::Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO pools (uuid, name, fs_type, total_bytes, used_bytes, state, discovered_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
+            "INSERT INTO pools (uuid, name, fs_type, total_bytes, used_bytes, state, mountpoint, discovered_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))
              ON CONFLICT(uuid) DO UPDATE SET
                name = excluded.name,
                fs_type = excluded.fs_type,
                total_bytes = excluded.total_bytes,
                used_bytes = excluded.used_bytes,
                state = excluded.state,
+               mountpoint = CASE WHEN excluded.mountpoint != '' THEN excluded.mountpoint ELSE pools.mountpoint END,
                discovered_at = datetime('now')",
-            params![p.uuid, p.name, p.fs_type, p.total_bytes as i64, p.used_bytes as i64, p.state],
+            params![p.uuid, p.name, p.fs_type, p.total_bytes as i64, p.used_bytes as i64, p.state, p.mountpoint],
+        )?;
+        Ok(())
+    }
+
+    /// Remember where a pool is mounted, recording the pool itself when the
+    /// scan has not seen it yet (a freshly formatted filesystem is only known to
+    /// `btrfs filesystem show` after the next refresh).
+    ///
+    /// This is what makes the mount survive a restart: the row carries the path,
+    /// so startup can put the pool back under the storage root instead of
+    /// leaving it listed and unreachable.
+    pub fn set_pool_mountpoint(
+        &self,
+        name: &str,
+        uuid: &str,
+        mountpoint: &str,
+        fs_type: &str,
+    ) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        if !uuid.is_empty() {
+            conn.execute(
+                "INSERT INTO pools (uuid, name, fs_type, total_bytes, used_bytes, state, mountpoint, discovered_at)
+                 VALUES (?1, ?2, ?3, 0, 0, 'online', ?4, datetime('now'))
+                 ON CONFLICT(uuid) DO UPDATE SET
+                   name = excluded.name,
+                   fs_type = excluded.fs_type,
+                   mountpoint = excluded.mountpoint,
+                   discovered_at = datetime('now')",
+                params![uuid, name, fs_type, mountpoint],
+            )?;
+            return Ok(());
+        }
+        conn.execute(
+            "UPDATE pools SET name = ?1, fs_type = ?2, mountpoint = ?3 WHERE uuid = '' AND name = ?1",
+            params![name, fs_type, mountpoint],
         )?;
         Ok(())
     }
@@ -87,7 +128,7 @@ impl Registry {
     pub fn list_pools(&self) -> rusqlite::Result<Vec<Pool>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT uuid, name, fs_type, total_bytes, used_bytes, state FROM pools ORDER BY name",
+            "SELECT uuid, name, fs_type, total_bytes, used_bytes, state, mountpoint FROM pools ORDER BY name",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(Pool {
@@ -97,6 +138,7 @@ impl Registry {
                 total_bytes: row.get::<_, i64>(3)? as u64,
                 used_bytes: row.get::<_, i64>(4)? as u64,
                 state: row.get(5)?,
+                mountpoint: row.get(6)?,
             })
         })?;
         rows.collect()
@@ -405,6 +447,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
            total_bytes   INTEGER NOT NULL DEFAULT 0,
            used_bytes    INTEGER NOT NULL DEFAULT 0,
            state         TEXT NOT NULL DEFAULT 'unknown',
+           mountpoint    TEXT NOT NULL DEFAULT '',
            discovered_at TEXT NOT NULL DEFAULT (datetime('now'))
          );
          CREATE TABLE IF NOT EXISTS devices (
@@ -441,6 +484,9 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     ensure_column(conn, "devices", "health_status", "TEXT NOT NULL DEFAULT 'unknown'")?;
     ensure_column(conn, "devices", "temperature_c", "INTEGER NOT NULL DEFAULT 0")?;
     ensure_column(conn, "devices", "user_detached", "INTEGER NOT NULL DEFAULT 0")?;
+    // Registries written before the mountpoint was remembered have none; add it
+    // in place rather than dropping the table (the rows are the pool history).
+    ensure_column(conn, "pools", "mountpoint", "TEXT NOT NULL DEFAULT ''")?;
     Ok(())
 }
 
@@ -491,6 +537,7 @@ mod tests {
             total_bytes: 1000,
             used_bytes: 100,
             state: "online".to_string(),
+            mountpoint: String::new(),
         }
     }
 
@@ -521,6 +568,36 @@ mod tests {
         // An unknown pool is a no-op, not a silent removal of something else.
         assert_eq!(reg.delete_pool(&pool("main-pool", "uuid-new")).unwrap(), 0);
         assert_eq!(reg.forget_pool_uuid("").unwrap(), 0);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The remembered mountpoint is what a restart restores, so a scan — which
+    /// knows only the filesystem, not where it is mounted — must not wipe it,
+    /// while a mount we just performed (a non-empty one) wins.
+    #[test]
+    fn a_scan_never_forgets_where_a_pool_is_mounted() {
+        let dir = std::env::temp_dir().join(format!("onyx-registry-mount-{}", std::process::id()));
+        let reg = Registry::open(&dir).expect("open registry");
+
+        // Creation knows the path: a row appears even before any scan has seen
+        // the filesystem, carrying it.
+        reg.set_pool_mountpoint("main-pool", "uuid-1", "/mnt/onyx/main-pool", "btrfs")
+            .unwrap();
+        let rows = reg.list_pools().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].mountpoint, "/mnt/onyx/main-pool");
+
+        // The next `btrfs filesystem show` refreshes name and usage but has no
+        // mountpoint to offer, so the stored one survives.
+        reg.upsert_pool(&pool("main-pool", "uuid-1")).unwrap();
+        assert_eq!(reg.list_pools().unwrap()[0].mountpoint, "/mnt/onyx/main-pool");
+
+        // A later mount (the pool moved, or was re-created elsewhere) replaces
+        // it.
+        reg.set_pool_mountpoint("main-pool", "uuid-1", "/mnt/onyx/data", "btrfs")
+            .unwrap();
+        assert_eq!(reg.list_pools().unwrap()[0].mountpoint, "/mnt/onyx/data");
 
         std::fs::remove_dir_all(&dir).ok();
     }

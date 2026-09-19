@@ -197,6 +197,32 @@ and `mkfs` are not involved, so a forgotten pool can be re-created on the disk o
 again, and a mount outside the storage root is refused rather than released. A record whose
 device is gone has nothing to release and is simply forgotten — that is the stale case.
 
+### 2.6 Pools come back after a restart
+
+A mount does not survive a reboot, a service restart or `docker compose up
+--force-recreate`, but the *pool* does — and the registry is what remembers where it was.
+`onyx-storaged` stores each pool's mountpoint when it mounts it (§2.3, §2.4), so at startup it
+can put the pools back instead of leaving them listed as online while Files shows an empty
+storage root (which reads as a lost pool).
+
+The order matters, and so does what is *not* touched:
+
+- the device table still describes the previous run's mounts when the process starts, so a
+  live `lsblk` scan is taken first: without it a restored record would claim the pool is
+  already mounted and nothing would be re-mounted;
+- only pools Onyx mounted are restored. A pool with no remembered mountpoint — a filesystem
+  the platform has never mounted, i.e. an import candidate or a foreign disk — is never
+  mounted behind the operator's back;
+- a pool whose device is unplugged is skipped and named in the log, and a failed mount is
+  reported and skipped rather than fatal: the data plane still serves what it does have;
+- the re-mount performs no format and no release. It mounts the filesystem the pool's own
+  record already describes, at the path that record names, and only under the storage root.
+
+The same record is what the console's Storage page shows beside the pool, so a row reads like
+`/dev/sdc · btrfs · 144 KB used of 465.76 GB` / `mounted at /mnt/onyx/main-pool` — or `no
+backing device — its filesystem was last mounted at /mnt/onyx/main-pool`, which is the row
+*Remove* (§2.5) exists for.
+
 ## 5. Quotas and capacity
 
 - **Quotas:** `btrfs qgroup` per user and per share; enforced soft (warn) + hard (block)
