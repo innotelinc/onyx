@@ -43,7 +43,10 @@ func (f *fakeShared) RenderAll(_ context.Context, in *onyxv1.RenderAllRequest, _
 type fakePrivd struct {
 	writes     []string // "target=content"
 	reloads    [][]string
+	samba      []string // "op arg… secret:<password>"
+	pdbedit    string   // stdout returned for the SAMBA_USER list op
 	failReload bool
+	failOp     onyxv1.PrivOp // when set, Run for this op exits non-zero
 }
 
 func (f *fakePrivd) Run(_ context.Context, in *onyxv1.PrivRequest, _ ...grpc.CallOption) (*onyxv1.PrivResponse, error) {
@@ -56,6 +59,14 @@ func (f *fakePrivd) Run(_ context.Context, in *onyxv1.PrivRequest, _ ...grpc.Cal
 		if f.failReload {
 			exit = 1
 		}
+	case onyxv1.PrivOp_SAMBA_USER:
+		f.samba = append(f.samba, strings.Join(in.Args, " ")+" secret:"+string(in.Secret))
+		if len(in.Args) > 0 && in.Args[0] == "list" {
+			return &onyxv1.PrivResponse{ExitCode: 0, Stdout: []byte(f.pdbedit)}, nil
+		}
+	}
+	if f.failOp != 0 && in.Op == f.failOp {
+		exit = 1
 	}
 	return &onyxv1.PrivResponse{ExitCode: exit}, nil
 }

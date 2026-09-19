@@ -525,8 +525,11 @@ func (*DeleteShareResponse) Descriptor() ([]byte, []int) {
 }
 
 type SetShareAccessRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Access        *ShareAccess           `protobuf:"bytes,1,opt,name=access,proto3" json:"access,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Access *ShareAccess           `protobuf:"bytes,1,opt,name=access,proto3" json:"access,omitempty"`
+	// Who is making the change, for the audit trail. Empty means "console" — the
+	// gateway knows the operator's identity but the gRPC caller may not.
+	Actor         string `protobuf:"bytes,2,opt,name=actor,proto3" json:"actor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -566,6 +569,13 @@ func (x *SetShareAccessRequest) GetAccess() *ShareAccess {
 		return x.Access
 	}
 	return nil
+}
+
+func (x *SetShareAccessRequest) GetActor() string {
+	if x != nil {
+		return x.Actor
+	}
+	return ""
 }
 
 type SetShareAccessResponse struct {
@@ -1015,9 +1025,10 @@ const file_onyx_v1_shares_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"(\n" +
 	"\x12DeleteShareRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"\x15\n" +
-	"\x13DeleteShareResponse\"E\n" +
+	"\x13DeleteShareResponse\"[\n" +
 	"\x15SetShareAccessRequest\x12,\n" +
-	"\x06access\x18\x01 \x01(\v2\x14.onyx.v1.ShareAccessR\x06access\"F\n" +
+	"\x06access\x18\x01 \x01(\v2\x14.onyx.v1.ShareAccessR\x06access\x12\x14\n" +
+	"\x05actor\x18\x02 \x01(\tR\x05actor\"F\n" +
 	"\x16SetShareAccessResponse\x12,\n" +
 	"\x06access\x18\x01 \x01(\v2\x14.onyx.v1.ShareAccessR\x06access\"J\n" +
 	"\x16ListShareAccessRequest\x12\x14\n" +

@@ -75,6 +75,14 @@ const (
 	// directory. The path must resolve under /mnt/onyx/. rmdir semantics: a
 	// directory that still holds anything is never removed.
 	PrivOp_REMOVE_MOUNTPOINT PrivOp = 11
+	// `smbpasswd` / `pdbedit` — one Samba account for one Onyx user, so an
+	// smb.conf `valid users` line names an account Samba has actually heard of
+	// (docs/design/05#6 SMB row). args = [action, username], where action is
+	// "add" (`smbpasswd -a -s`, taking the password from the request's `secret`
+	// field on stdin), "remove" (`smbpasswd -x`), "disable" (`smbpasswd -d`) or
+	// "list" (`pdbedit -L`). The password is never on the command line: argv is
+	// world-readable in /proc.
+	PrivOp_SAMBA_USER PrivOp = 12
 )
 
 // Enum value maps for PrivOp.
@@ -92,6 +100,7 @@ var (
 		9:  "FORMAT_FILESYSTEM",
 		10: "CREATE_BTRFS_POOL",
 		11: "REMOVE_MOUNTPOINT",
+		12: "SAMBA_USER",
 	}
 	PrivOp_value = map[string]int32{
 		"PRIV_OP_UNSPECIFIED":        0,
@@ -106,6 +115,7 @@ var (
 		"FORMAT_FILESYSTEM":          9,
 		"CREATE_BTRFS_POOL":          10,
 		"REMOVE_MOUNTPOINT":          11,
+		"SAMBA_USER":                 12,
 	}
 )
 
@@ -140,7 +150,11 @@ type PrivRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Op    PrivOp                 `protobuf:"varint,1,opt,name=op,proto3,enum=onyx.v1.PrivOp" json:"op,omitempty"`
 	// Positional arguments; validated per-op before execution.
-	Args          []string `protobuf:"bytes,2,rep,name=args,proto3" json:"args,omitempty"`
+	Args []string `protobuf:"bytes,2,rep,name=args,proto3" json:"args,omitempty"`
+	// Secret input for the ops that consume one (SAMBA_USER "add"). Never
+	// logged and never placed on the child's command line: it is written to the
+	// process's stdin.
+	Secret        []byte `protobuf:"bytes,3,opt,name=secret,proto3" json:"secret,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -185,6 +199,13 @@ func (x *PrivRequest) GetOp() PrivOp {
 func (x *PrivRequest) GetArgs() []string {
 	if x != nil {
 		return x.Args
+	}
+	return nil
+}
+
+func (x *PrivRequest) GetSecret() []byte {
+	if x != nil {
+		return x.Secret
 	}
 	return nil
 }
@@ -254,14 +275,15 @@ var File_onyx_v1_privd_proto protoreflect.FileDescriptor
 
 const file_onyx_v1_privd_proto_rawDesc = "" +
 	"\n" +
-	"\x13onyx/v1/privd.proto\x12\aonyx.v1\"B\n" +
+	"\x13onyx/v1/privd.proto\x12\aonyx.v1\"Z\n" +
 	"\vPrivRequest\x12\x1f\n" +
 	"\x02op\x18\x01 \x01(\x0e2\x0f.onyx.v1.PrivOpR\x02op\x12\x12\n" +
-	"\x04args\x18\x02 \x03(\tR\x04args\"[\n" +
+	"\x04args\x18\x02 \x03(\tR\x04args\x12\x16\n" +
+	"\x06secret\x18\x03 \x01(\fR\x06secret\"[\n" +
 	"\fPrivResponse\x12\x1b\n" +
 	"\texit_code\x18\x01 \x01(\x05R\bexitCode\x12\x16\n" +
 	"\x06stdout\x18\x02 \x01(\fR\x06stdout\x12\x16\n" +
-	"\x06stderr\x18\x03 \x01(\fR\x06stderr*\x99\x02\n" +
+	"\x06stderr\x18\x03 \x01(\fR\x06stderr*\xa9\x02\n" +
 	"\x06PrivOp\x12\x17\n" +
 	"\x13PRIV_OP_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19BTRFS_FILESYSTEM_SHOW_RAW\x10\x01\x12\x1e\n" +
@@ -275,7 +297,9 @@ const file_onyx_v1_privd_proto_rawDesc = "" +
 	"\x11FORMAT_FILESYSTEM\x10\t\x12\x15\n" +
 	"\x11CREATE_BTRFS_POOL\x10\n" +
 	"\x12\x15\n" +
-	"\x11REMOVE_MOUNTPOINT\x10\v2;\n" +
+	"\x11REMOVE_MOUNTPOINT\x10\v\x12\x0e\n" +
+	"\n" +
+	"SAMBA_USER\x10\f2;\n" +
 	"\x05Privd\x122\n" +
 	"\x03Run\x12\x14.onyx.v1.PrivRequest\x1a\x15.onyx.v1.PrivResponseB8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
 

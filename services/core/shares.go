@@ -21,8 +21,10 @@ var shareNameRe = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
 
 // validUsernameRe keeps a grantee name renderable into every share backend: a
 // name with whitespace or a quote in it could break out of a `valid users`
-// line or a davd.conf list, so it is refused at the door instead.
-var validUsernameRe = regexp.MustCompile(`^[A-Za-z0-9._@-]{1,64}$`)
+// line or a davd.conf list, and a leading '-' would be read as a flag by the
+// account tool the name reaches (smbpasswd), so such a name is refused at the
+// door instead.
+var validUsernameRe = regexp.MustCompile(`^[A-Za-z0-9._@][A-Za-z0-9._@-]{0,63}$`)
 
 // protoName maps a protocol enum to its DB key; returns ("", false) for
 // unknown values so we never persist junk.
@@ -166,6 +168,13 @@ func (s *server) SetShareAccess(ctx context.Context, req *onyxv1.SetShareAccessR
 		); err != nil {
 			return nil, status.Errorf(codes.Internal, "record share access: %v", err)
 		}
+	}
+
+	// The change goes in the trail whether or not the render below succeeds: a
+	// grant the console shows and the backends do not serve is exactly what the
+	// trail has to be able to explain.
+	if err := s.recordAccessEvent(ctx, accessEventKind(a.Mode), a.Share, a.Username, a.Mode, accessEventActor(req.GetActor()), ""); err != nil {
+		slogWarn("record access change", "share", a.Share, "user", a.Username, "error", err)
 	}
 
 	// The grant is only real once the daemons serve it, so re-render now
@@ -321,7 +330,10 @@ func (s *server) DeleteShare(ctx context.Context, req *onyxv1.DeleteShareRequest
 		return nil, status.Errorf(codes.NotFound, "share %q does not exist", req.Name)
 	}
 	// The grants go with the share: a row naming a share that no longer exists
-	// would re-appear as an access rule if the name were ever reused.
+	// would re-appear as an access rule if the name were ever reused. The access
+	// trail is deliberately not touched — who was granted what, and who was
+	// refused, stays readable after the share is gone, because erasing the
+	// evidence is what an audit trail exists to prevent.
 	if _, err := s.db.Exec(`DELETE FROM share_access WHERE share = ?`, req.Name); err != nil {
 		return nil, status.Errorf(codes.Internal, "delete share access: %v", err)
 	}

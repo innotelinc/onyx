@@ -161,6 +161,9 @@ func TestShareAccessRoundTripAndValidation(t *testing.T) {
 	if err := set("media", "bad user", "read"); err == nil {
 		t.Error("a username with whitespace must be refused")
 	}
+	if err := set("media", "-o", "read"); err == nil {
+		t.Error("a username starting with a dash must be refused: it would be read as a flag by smbpasswd")
+	}
 
 	// An empty mode removes the grant rather than storing a third state.
 	if err := set("media", "bob", ""); err != nil {

@@ -19,17 +19,20 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Core_SystemStatus_FullMethodName  = "/onyx.v1.Core/SystemStatus"
-	Core_ListPools_FullMethodName     = "/onyx.v1.Core/ListPools"
-	Core_GetPool_FullMethodName       = "/onyx.v1.Core/GetPool"
-	Core_CreatePool_FullMethodName    = "/onyx.v1.Core/CreatePool"
-	Core_DeletePool_FullMethodName    = "/onyx.v1.Core/DeletePool"
-	Core_ListDevices_FullMethodName   = "/onyx.v1.Core/ListDevices"
-	Core_GetDevice_FullMethodName     = "/onyx.v1.Core/GetDevice"
-	Core_MountDevice_FullMethodName   = "/onyx.v1.Core/MountDevice"
-	Core_UnmountDevice_FullMethodName = "/onyx.v1.Core/UnmountDevice"
-	Core_ListEvents_FullMethodName    = "/onyx.v1.Core/ListEvents"
-	Core_WatchDevices_FullMethodName  = "/onyx.v1.Core/WatchDevices"
+	Core_SystemStatus_FullMethodName       = "/onyx.v1.Core/SystemStatus"
+	Core_ListPools_FullMethodName          = "/onyx.v1.Core/ListPools"
+	Core_GetPool_FullMethodName            = "/onyx.v1.Core/GetPool"
+	Core_CreatePool_FullMethodName         = "/onyx.v1.Core/CreatePool"
+	Core_DeletePool_FullMethodName         = "/onyx.v1.Core/DeletePool"
+	Core_ListDevices_FullMethodName        = "/onyx.v1.Core/ListDevices"
+	Core_GetDevice_FullMethodName          = "/onyx.v1.Core/GetDevice"
+	Core_MountDevice_FullMethodName        = "/onyx.v1.Core/MountDevice"
+	Core_UnmountDevice_FullMethodName      = "/onyx.v1.Core/UnmountDevice"
+	Core_ListEvents_FullMethodName         = "/onyx.v1.Core/ListEvents"
+	Core_WatchDevices_FullMethodName       = "/onyx.v1.Core/WatchDevices"
+	Core_ProvisionSambaUser_FullMethodName = "/onyx.v1.Core/ProvisionSambaUser"
+	Core_RecordAccessDenial_FullMethodName = "/onyx.v1.Core/RecordAccessDenial"
+	Core_ListAccessEvents_FullMethodName   = "/onyx.v1.Core/ListAccessEvents"
 )
 
 // CoreClient is the client API for Core service.
@@ -67,6 +70,18 @@ type CoreClient interface {
 	// WatchDevices tails the live hotplug + health event stream, forwarded
 	// from onyx-storaged (the gateway exposes it as SSE).
 	WatchDevices(ctx context.Context, in *WatchDevicesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DeviceEvent], error)
+	// ProvisionSambaUser creates, re-passwords, disables or removes the Samba
+	// account behind an Onyx user, through onyx-privd. A granted share renders
+	// the user's name into smb.conf's `valid users`, and Samba only accepts an
+	// account that exists, so this is what makes an SMB grant usable.
+	ProvisionSambaUser(ctx context.Context, in *ProvisionSambaUserRequest, opts ...grpc.CallOption) (*ProvisionSambaUserResponse, error)
+	// RecordAccessDenial appends one refusal to the access audit trail. onyx-davd
+	// calls it when it turns a request away, so a denial is recorded beside the
+	// grant that caused it instead of only in a daemon log (docs/design/08#2).
+	RecordAccessDenial(ctx context.Context, in *RecordAccessDenialRequest, opts ...grpc.CallOption) (*RecordAccessDenialResponse, error)
+	// ListAccessEvents pages the access audit trail — grant changes and denials,
+	// newest first. onyx-core owns it because policy is decided here.
+	ListAccessEvents(ctx context.Context, in *ListAccessEventsRequest, opts ...grpc.CallOption) (*ListAccessEventsResponse, error)
 }
 
 type coreClient struct {
@@ -196,6 +211,36 @@ func (c *coreClient) WatchDevices(ctx context.Context, in *WatchDevicesRequest, 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Core_WatchDevicesClient = grpc.ServerStreamingClient[DeviceEvent]
 
+func (c *coreClient) ProvisionSambaUser(ctx context.Context, in *ProvisionSambaUserRequest, opts ...grpc.CallOption) (*ProvisionSambaUserResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProvisionSambaUserResponse)
+	err := c.cc.Invoke(ctx, Core_ProvisionSambaUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coreClient) RecordAccessDenial(ctx context.Context, in *RecordAccessDenialRequest, opts ...grpc.CallOption) (*RecordAccessDenialResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RecordAccessDenialResponse)
+	err := c.cc.Invoke(ctx, Core_RecordAccessDenial_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coreClient) ListAccessEvents(ctx context.Context, in *ListAccessEventsRequest, opts ...grpc.CallOption) (*ListAccessEventsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAccessEventsResponse)
+	err := c.cc.Invoke(ctx, Core_ListAccessEvents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CoreServer is the server API for Core service.
 // All implementations must embed UnimplementedCoreServer
 // for forward compatibility.
@@ -231,6 +276,18 @@ type CoreServer interface {
 	// WatchDevices tails the live hotplug + health event stream, forwarded
 	// from onyx-storaged (the gateway exposes it as SSE).
 	WatchDevices(*WatchDevicesRequest, grpc.ServerStreamingServer[DeviceEvent]) error
+	// ProvisionSambaUser creates, re-passwords, disables or removes the Samba
+	// account behind an Onyx user, through onyx-privd. A granted share renders
+	// the user's name into smb.conf's `valid users`, and Samba only accepts an
+	// account that exists, so this is what makes an SMB grant usable.
+	ProvisionSambaUser(context.Context, *ProvisionSambaUserRequest) (*ProvisionSambaUserResponse, error)
+	// RecordAccessDenial appends one refusal to the access audit trail. onyx-davd
+	// calls it when it turns a request away, so a denial is recorded beside the
+	// grant that caused it instead of only in a daemon log (docs/design/08#2).
+	RecordAccessDenial(context.Context, *RecordAccessDenialRequest) (*RecordAccessDenialResponse, error)
+	// ListAccessEvents pages the access audit trail — grant changes and denials,
+	// newest first. onyx-core owns it because policy is decided here.
+	ListAccessEvents(context.Context, *ListAccessEventsRequest) (*ListAccessEventsResponse, error)
 	mustEmbedUnimplementedCoreServer()
 }
 
@@ -273,6 +330,15 @@ func (UnimplementedCoreServer) ListEvents(context.Context, *ListEventsRequest) (
 }
 func (UnimplementedCoreServer) WatchDevices(*WatchDevicesRequest, grpc.ServerStreamingServer[DeviceEvent]) error {
 	return status.Error(codes.Unimplemented, "method WatchDevices not implemented")
+}
+func (UnimplementedCoreServer) ProvisionSambaUser(context.Context, *ProvisionSambaUserRequest) (*ProvisionSambaUserResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProvisionSambaUser not implemented")
+}
+func (UnimplementedCoreServer) RecordAccessDenial(context.Context, *RecordAccessDenialRequest) (*RecordAccessDenialResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RecordAccessDenial not implemented")
+}
+func (UnimplementedCoreServer) ListAccessEvents(context.Context, *ListAccessEventsRequest) (*ListAccessEventsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAccessEvents not implemented")
 }
 func (UnimplementedCoreServer) mustEmbedUnimplementedCoreServer() {}
 func (UnimplementedCoreServer) testEmbeddedByValue()              {}
@@ -486,6 +552,60 @@ func _Core_WatchDevices_Handler(srv interface{}, stream grpc.ServerStream) error
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Core_WatchDevicesServer = grpc.ServerStreamingServer[DeviceEvent]
 
+func _Core_ProvisionSambaUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProvisionSambaUserRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).ProvisionSambaUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_ProvisionSambaUser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).ProvisionSambaUser(ctx, req.(*ProvisionSambaUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Core_RecordAccessDenial_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RecordAccessDenialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).RecordAccessDenial(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_RecordAccessDenial_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).RecordAccessDenial(ctx, req.(*RecordAccessDenialRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Core_ListAccessEvents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAccessEventsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).ListAccessEvents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_ListAccessEvents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).ListAccessEvents(ctx, req.(*ListAccessEventsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Core_ServiceDesc is the grpc.ServiceDesc for Core service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -532,6 +652,18 @@ var Core_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListEvents",
 			Handler:    _Core_ListEvents_Handler,
+		},
+		{
+			MethodName: "ProvisionSambaUser",
+			Handler:    _Core_ProvisionSambaUser_Handler,
+		},
+		{
+			MethodName: "RecordAccessDenial",
+			Handler:    _Core_RecordAccessDenial_Handler,
+		},
+		{
+			MethodName: "ListAccessEvents",
+			Handler:    _Core_ListAccessEvents_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

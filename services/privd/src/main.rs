@@ -16,6 +16,7 @@
 
 use std::io::Write;
 use std::os::unix::fs::FileTypeExt;
+use tokio::io::AsyncWriteExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
@@ -69,6 +70,7 @@ fn main() -> ExitCode {
         &args.dev_root,
     )
     .with_holder_tools(&args.swapoff_bin, &args.dmsetup_bin, &args.mdadm_bin, &args.losetup_bin)
+    .with_samba_tools(&args.smbpasswd_bin, &args.pdbedit_bin)
     .with_pool_mode(args.pool_mode);
     match runtime.block_on(run(&args.socket_path, allowlist)) {
         Ok(()) => ExitCode::SUCCESS,
@@ -98,6 +100,10 @@ struct Args {
     dmsetup_bin: String,
     mdadm_bin: String,
     losetup_bin: String,
+    /// Samba account tools (docs/design/05#6 SMB row): smbpasswd changes one
+    /// account, pdbedit lists them.
+    smbpasswd_bin: String,
+    pdbedit_bin: String,
     /// Permissions applied to the root of a freshly mounted pool. Defaults to
     /// 0777: a pool is a *shared* volume whose writers are the unprivileged
     /// protocol daemons (davd/SFTP/FTP/rsync), containerised apps and the
@@ -130,6 +136,8 @@ impl Args {
         let mut dmsetup_bin = "dmsetup".to_string();
         let mut mdadm_bin = "mdadm".to_string();
         let mut losetup_bin = "losetup".to_string();
+        let mut smbpasswd_bin = "smbpasswd".to_string();
+        let mut pdbedit_bin = "pdbedit".to_string();
         let mut pool_mode = 0o777;
         let mut config_dir = PathBuf::from("/etc/onyx/conf.d");
         let mut allowed_root = PathBuf::from("/mnt/onyx");
@@ -158,6 +166,10 @@ impl Args {
                 "--dmsetup-bin" => dmsetup_bin = it.next().expect("--dmsetup-bin requires a value"),
                 "--mdadm-bin" => mdadm_bin = it.next().expect("--mdadm-bin requires a value"),
                 "--losetup-bin" => losetup_bin = it.next().expect("--losetup-bin requires a value"),
+                "--smbpasswd-bin" => {
+                    smbpasswd_bin = it.next().expect("--smbpasswd-bin requires a value")
+                }
+                "--pdbedit-bin" => pdbedit_bin = it.next().expect("--pdbedit-bin requires a value"),
                 "--pool-mode" => {
                     let raw = it.next().expect("--pool-mode requires a value");
                     match parse_mode(&raw) {
@@ -202,6 +214,8 @@ impl Args {
             dmsetup_bin,
             mdadm_bin,
             losetup_bin,
+            smbpasswd_bin,
+            pdbedit_bin,
             pool_mode,
             config_dir,
             allowed_root,
@@ -289,6 +303,35 @@ enum AllowedCommand {
     /// systemctl reload smbd; nfs = exportfs -ra; sftp = sshd -t then systemctl
     /// reload onyx-sftp; ftp/webdav/rsync = systemctl reload of their daemon.
     ReloadDaemons { targets: Vec<String> },
+    /// One Samba account operation for one Onyx user: `smbpasswd -a -s` (the
+    /// password arrives on stdin), `smbpasswd -x`, `smbpasswd -d`, or
+    /// `pdbedit -L` to list the accounts that exist.
+    SambaUser {
+        action: String,
+        username: String,
+        secret: Option<Vec<u8>>,
+    },
+}
+
+/// Maximum length of an SMB account password. smbpasswd has no length limit of
+/// its own; this only stops a caller from streaming something huge at root.
+const MAX_SAMBA_PASSWORD_BYTES: usize = 256;
+
+/// A Samba account name is the Onyx username (the same string the grant renders
+/// into `valid users`), so it is validated to the same conservative set: no
+/// whitespace or shell metacharacters can reach smbpasswd's argv.
+fn is_samba_username(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    // A leading '-' would be read as a flag by smbpasswd (the name is an argv
+    // element), so it is not a name here.
+    if !(first.is_ascii_alphanumeric() || matches!(first, '.' | '_' | '@')) {
+        return false;
+    }
+    name.len() <= 64
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '@' | '-'))
 }
 
 /// Maximum size of one generated daemon config. Configs are tiny; this only
@@ -373,6 +416,10 @@ struct Allowlist {
     dmsetup_bin: String,
     mdadm_bin: String,
     losetup_bin: String,
+    /// Samba account tools: `smbpasswd` changes one account (its password
+    /// arrives on stdin), `pdbedit -L` lists the accounts that exist.
+    smbpasswd_bin: String,
+    pdbedit_bin: String,
     /// Mode applied to the root of a freshly mounted pool (docs/design/05 §2).
     pool_mode: u32,
     config_dir: PathBuf,
@@ -428,6 +475,8 @@ impl Allowlist {
             dmsetup_bin: "dmsetup".to_string(),
             mdadm_bin: "mdadm".to_string(),
             losetup_bin: "losetup".to_string(),
+            smbpasswd_bin: "smbpasswd".to_string(),
+            pdbedit_bin: "pdbedit".to_string(),
             pool_mode: 0o777,
             config_dir: config_dir.to_path_buf(),
             allowed_root: allowed_root.to_path_buf(),
@@ -445,6 +494,14 @@ impl Allowlist {
         self.dmsetup_bin = dmsetup.to_string();
         self.mdadm_bin = mdadm.to_string();
         self.losetup_bin = losetup.to_string();
+        self
+    }
+
+    /// Point the Samba account tools at explicit binaries. Tests use this to
+    /// drive fake ones; production passes the `--*-bin` flags through.
+    fn with_samba_tools(mut self, smbpasswd: &str, pdbedit: &str) -> Self {
+        self.smbpasswd_bin = smbpasswd.to_string();
+        self.pdbedit_bin = pdbedit.to_string();
         self
     }
 
@@ -543,6 +600,72 @@ impl Allowlist {
                 }
                 let mountpoint = validate_mount_path(&req.args[0], &self.allowed_root)?;
                 Ok(AllowedCommand::RemoveMountpoint { mountpoint })
+            }
+            PrivOp::SambaUser => {
+                if req.args.is_empty() {
+                    return Err(Status::invalid_argument(
+                        "SAMBA_USER requires <action> [username]",
+                    ));
+                }
+                let action = req.args[0].to_ascii_lowercase();
+                if !matches!(action.as_str(), "add" | "remove" | "disable" | "list") {
+                    return Err(Status::invalid_argument(format!(
+                        "samba action must be add, remove, disable or list, got {:?}",
+                        req.args[0]
+                    )));
+                }
+                // Listing every account is the one action that names nobody.
+                let username = match action.as_str() {
+                    "list" if req.args.len() == 1 => String::new(),
+                    "list" => {
+                        return Err(Status::invalid_argument(
+                            "SAMBA_USER list takes no username",
+                        ))
+                    }
+                    _ if req.args.len() != 2 => {
+                        return Err(Status::invalid_argument(
+                            "SAMBA_USER requires <action> <username>",
+                        ))
+                    }
+                    _ => req.args[1].clone(),
+                };
+                if !username.is_empty() && !is_samba_username(&username) {
+                    return Err(Status::invalid_argument(format!(
+                        "invalid samba username {:?}",
+                        username
+                    )));
+                }
+                // Only "add" carries a password, and it is refused rather than
+                // fudged: a newline would end smbpasswd's password line early
+                // (the rest of the secret would be read as the confirmation),
+                // and an empty one would create an account that looks
+                // provisioned but cannot sign in.
+                let secret = if action == "add" {
+                    if req.secret.is_empty() {
+                        return Err(Status::invalid_argument(
+                            "SAMBA_USER add requires a password",
+                        ));
+                    }
+                    if req.secret.len() > MAX_SAMBA_PASSWORD_BYTES {
+                        return Err(Status::invalid_argument(format!(
+                            "password exceeds {MAX_SAMBA_PASSWORD_BYTES} bytes"
+                        )));
+                    }
+                    if req.secret.iter().any(|b| *b == b'\n' || *b == b'\r') {
+                        return Err(Status::invalid_argument(
+                            "password must not contain a newline",
+                        ));
+                    }
+                    Some(req.secret.clone())
+                } else {
+                    if !req.secret.is_empty() {
+                        return Err(Status::invalid_argument(
+                            "only SAMBA_USER add takes a password",
+                        ));
+                    }
+                    None
+                };
+                Ok(AllowedCommand::SambaUser { action, username, secret })
             }
             PrivOp::FormatFilesystem => {
                 if req.args.len() != 4 {
@@ -827,6 +950,13 @@ impl Privd for PrivdService {
 /// Run one allowlisted command with `Command` (explicit argv, no shell) and a
 /// hard timeout so a wedged binary can never hang the control plane.
 async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResponse, Status> {
+    // Samba accounts are the one op that carries a secret, so they do not go
+    // through the shared (bin, argv) path below: the password reaches the child
+    // on stdin rather than argv, which /proc publishes to every user on the
+    // host.
+    if let AllowedCommand::SambaUser { action, username, secret } = cmd {
+        return execute_samba_user(allowlist, action, username, secret.as_deref()).await;
+    }
     let (bin, args): (String, Vec<String>) = match cmd {
         AllowedCommand::BtrfsFilesystemShowRaw => (
             allowlist.btrfs_bin.clone(),
@@ -1181,6 +1311,9 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
             }
             return Ok(resp);
         }
+        // Handled before the (bin, argv) build above: it is the one op whose
+        // input is a secret, so it travels on stdin instead.
+        AllowedCommand::SambaUser { .. } => unreachable!("samba account ops are handled above"),
     };
 
     let output = run_argv(&bin, &args).await?;
@@ -1189,6 +1322,85 @@ async fn execute(allowlist: &Allowlist, cmd: &AllowedCommand) -> Result<PrivResp
         stdout: output.stdout,
         stderr: output.stderr,
     })
+}
+
+/// One Samba account operation (docs/design/05#6 SMB row): the account an
+/// smb.conf `valid users` line names has to exist, and its password is the only
+/// thing here that must never be published, so `add` writes it twice to stdin
+/// (smbpasswd asks for a confirmation) and closes the pipe.
+///
+/// Nothing about the password is logged: privd's request log prints the op and
+/// its argv, and the password is neither.
+async fn execute_samba_user(
+    allowlist: &Allowlist,
+    action: &str,
+    username: &str,
+    secret: Option<&[u8]>,
+) -> Result<PrivResponse, Status> {
+    let output = match action {
+        "list" => run_argv(&allowlist.pdbedit_bin, &["-L".into()]).await?,
+        "add" => {
+            let password = secret.unwrap_or_default();
+            let mut stdin = Vec::with_capacity(password.len() * 2 + 2);
+            stdin.extend_from_slice(password);
+            stdin.push(b'\n');
+            stdin.extend_from_slice(password);
+            stdin.push(b'\n');
+            run_argv_stdin(
+                &allowlist.smbpasswd_bin,
+                &["-a".into(), "-s".into(), username.to_string()],
+                &stdin,
+            )
+            .await?
+        }
+        "disable" => {
+            run_argv(&allowlist.smbpasswd_bin, &["-d".into(), username.to_string()]).await?
+        }
+        "remove" => {
+            run_argv(&allowlist.smbpasswd_bin, &["-x".into(), username.to_string()]).await?
+        }
+        _ => unreachable!("validated samba action"),
+    };
+    Ok(PrivResponse {
+        exit_code: output.status.code().unwrap_or(-1) as i32,
+        stdout: output.stdout,
+        stderr: output.stderr,
+    })
+}
+
+/// run_argv with bytes written to the child's stdin. Only the ops whose input
+/// is a secret use this: argv is world-readable, a pipe is not.
+async fn run_argv_stdin(
+    bin: &str,
+    args: &[String],
+    stdin: &[u8],
+) -> Result<std::process::Output, Status> {
+    let mut child = Command::new(bin);
+    child
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = child.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            Status::not_found(format!("{bin} is not installed"))
+        } else {
+            Status::internal(format!("failed to run {bin}: {e} (is it installed?)"))
+        }
+    })?;
+    if let Some(mut pipe) = child.stdin.take() {
+        pipe.write_all(stdin)
+            .await
+            .map_err(|e| Status::internal(format!("write to {bin} stdin: {e}")))?;
+        // Dropping the pipe closes it, which is what tells the child the input
+        // has ended.
+        drop(pipe);
+    }
+    match tokio::time::timeout(CMD_TIMEOUT, child.wait_with_output()).await {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(e)) => Err(Status::internal(format!("failed to run {bin}: {e}"))),
+        Err(_) => Err(Status::deadline_exceeded(format!("{bin} timed out"))),
+    }
 }
 
 /// Unmount one mountpoint, escalating a busy mount: plain `umount` first,
@@ -1568,6 +1780,7 @@ mod tests {
         PrivRequest {
             op: op as i32,
             args: args.into_iter().map(|s| s.to_string()).collect(),
+            secret: Vec::new(),
         }
     }
 
@@ -2086,7 +2299,8 @@ mod tests {
             &PrivRequest {
                 op: PrivOp::WriteDaemonConfig as i32,
                 args: vec!["smb".to_string(), content.to_string()],
-            },
+            secret: Vec::new(),
+        },
         )
         .await
         .unwrap();
@@ -2099,7 +2313,8 @@ mod tests {
             &PrivRequest {
                 op: PrivOp::WriteDaemonConfig as i32,
                 args: vec!["nfs".to_string(), "/mnt/onyx/x  *(ro)\n".to_string()],
-            },
+            secret: Vec::new(),
+        },
         )
         .await
         .unwrap();
@@ -2134,7 +2349,8 @@ mod tests {
                 &PrivRequest {
                     op: PrivOp::WriteDaemonConfig as i32,
                     args: vec![target.to_string(), content.clone()],
-                },
+                secret: Vec::new(),
+            },
             )
             .await
             .unwrap();
@@ -2160,7 +2376,8 @@ mod tests {
             &PrivRequest {
                 op: PrivOp::ReloadDaemons as i32,
                 args: ["smb", "webdav"].iter().map(|s| s.to_string()).collect(),
-            },
+            secret: Vec::new(),
+        },
         )
         .await
         .unwrap();
@@ -2187,7 +2404,8 @@ mod tests {
             &PrivRequest {
                 op: PrivOp::ReloadDaemons as i32,
                 args: ["smb", "webdav"].iter().map(|s| s.to_string()).collect(),
-            },
+            secret: Vec::new(),
+        },
         )
         .await
         .unwrap();
@@ -2200,6 +2418,136 @@ mod tests {
         );
     }
 
+    /// The Samba account ops are the only ones with a secret, so their
+    /// validation is what keeps an unusable account (empty or multi-line
+    /// password) and an injectable username out of smbpasswd's argv.
+    #[test]
+    fn samba_user_validation_rejects_what_it_cannot_execute() {
+        let dir = TempDir::new("sambaval");
+        let a = test_allowlist(dir.path());
+        let req = |args: Vec<&str>, secret: &str| PrivRequest {
+            op: PrivOp::SambaUser as i32,
+            args: args.iter().map(|s| s.to_string()).collect(),
+            secret: secret.as_bytes().to_vec(),
+        };
+
+        // arity, unknown action, and a username that could not be an account.
+        for bad in [
+            req(vec!["add"], "x"),
+            req(vec!["list", "dana"], ""),
+            req(vec!["promote", "dana"], ""),
+            req(vec!["list", "dana smith"], ""),
+            req(vec!["add", "-o"], "password"),
+        ] {
+            let err = a.validate(&bad).expect_err("must be rejected");
+            assert_eq!(err.code(), tonic::Code::InvalidArgument, "{err}");
+        }
+
+        // A password has to be present, single-line and bounded; and only the
+        // action that sets one may carry it.
+        for bad in [
+            req(vec!["add", "dana"], ""),
+            req(vec!["add", "dana"], "two\nlines"),
+            req(vec!["add", "dana"], &"x".repeat(MAX_SAMBA_PASSWORD_BYTES + 1)),
+            req(vec!["remove", "dana"], "unexpected"),
+        ] {
+            let err = a.validate(&bad).expect_err("must be rejected");
+            assert_eq!(err.code(), tonic::Code::InvalidArgument, "{err}");
+        }
+
+        assert!(a.validate(&req(vec!["add", "dana"], "good-password")).is_ok());
+        assert!(a.validate(&req(vec!["list"], "")).is_ok());
+    }
+
+    /// The password reaches smbpasswd on stdin (twice, as it asks for a
+    /// confirmation) and never on the command line — argv is world-readable in
+    /// /proc, and privd logs it.
+    #[tokio::test]
+    async fn samba_user_add_keeps_the_password_off_argv() {
+        let dir = TempDir::new("sambaadd");
+        let stdin_log = dir.path().join("stdin.log");
+        let script = format!(
+            "#!/bin/sh\n{{ printf '%s' \"$0\"; printf '|%s' \"$@\"; printf '\\n'; }} >> \"{}\"\ncat >> \"{}\"\nexit 0\n",
+            dir.path().join("argv.log").display(),
+            stdin_log.display()
+        );
+        let smbpasswd = fake_bin(dir.path(), "smbpasswd", &script);
+        let pdbedit = fake_bin(dir.path(), "pdbedit", "#!/bin/sh\nprintf 'dana:1001:\\n'\nexit 0\n");
+        let a = test_allowlist(dir.path()).with_samba_tools(&smbpasswd, &pdbedit);
+
+        let resp = run_request(
+            &a,
+            &PrivRequest {
+                op: PrivOp::SambaUser as i32,
+                args: vec!["add".into(), "dana".into()],
+                secret: b"s3cret-pass".to_vec(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&resp.stderr));
+
+        let argv = fs::read_to_string(dir.path().join("argv.log")).unwrap();
+        assert!(argv.contains("smbpasswd|-a|-s|dana"), "argv: {argv}");
+        assert!(!argv.contains("s3cret-pass"), "the password reached argv: {argv}");
+        let stdin = fs::read_to_string(&stdin_log).unwrap();
+        assert_eq!(stdin, "s3cret-pass\ns3cret-pass\n", "smbpasswd needs the password twice");
+    }
+
+    /// `list` reports the accounts Samba knows, which is what the console shows
+    /// next to each user, and remove/disable name the account on argv.
+    #[tokio::test]
+    async fn samba_user_list_and_removal_use_the_right_tools() {
+        let dir = TempDir::new("sambalist");
+        let pdbedit = fake_bin(
+            dir.path(),
+            "pdbedit",
+            &format!(
+                "#!/bin/sh\n{{ printf '%s' \"$0\"; printf '|%s' \"$@\"; printf '\\n'; }} >> \"{}\"\nprintf 'dana:1001:\\n'\nexit 0\n",
+                dir.path().join("argv.log").display()
+            ),
+        );
+        let smbpasswd = fake_bin(
+            dir.path(),
+            "smbpasswd",
+            &format!(
+                "#!/bin/sh\n{{ printf '%s' \"$0\"; printf '|%s' \"$@\"; printf '\\n'; }} >> \"{}\"\nexit 0\n",
+                dir.path().join("argv.log").display()
+            ),
+        );
+        let a = test_allowlist(dir.path()).with_samba_tools(&smbpasswd, &pdbedit);
+
+        let listed = run_request(
+            &a,
+            &PrivRequest {
+                op: PrivOp::SambaUser as i32,
+                args: vec!["list".into()],
+                secret: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(String::from_utf8_lossy(&listed.stdout).contains("dana"));
+
+        for (action, flag) in [("remove", "-x"), ("disable", "-d")] {
+            run_request(
+                &a,
+                &PrivRequest {
+                    op: PrivOp::SambaUser as i32,
+                    args: vec![action.into(), "dana".into()],
+                    secret: Vec::new(),
+                },
+            )
+            .await
+            .unwrap();
+            let argv = fs::read_to_string(dir.path().join("argv.log")).unwrap();
+            assert!(
+                argv.contains(&format!("smbpasswd|{flag}|dana")),
+                "{action} argv: {argv}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn reload_daemons_covers_protocol_surface() {
         let dir = TempDir::new("reloadproto");
@@ -2209,7 +2557,8 @@ mod tests {
             &PrivRequest {
                 op: PrivOp::ReloadDaemons as i32,
                 args: ["ftp", "sftp", "webdav", "rsync"].iter().map(|s| s.to_string()).collect(),
-            },
+            secret: Vec::new(),
+        },
         )
         .await
         .unwrap();
@@ -2241,7 +2590,8 @@ mod tests {
             .validate(&PrivRequest {
                 op: PrivOp::WriteDaemonConfig as i32,
                 args: vec!["httpd".to_string(), "x".to_string()],
-            })
+            secret: Vec::new(),
+        })
             .expect_err("bad target rejected");
         assert_eq!(err.code(), tonic::Code::InvalidArgument, "{err}");
         // arity
@@ -2249,7 +2599,8 @@ mod tests {
             .validate(&PrivRequest {
                 op: PrivOp::WriteDaemonConfig as i32,
                 args: vec!["smb".to_string()],
-            })
+            secret: Vec::new(),
+        })
             .expect_err("arity rejected");
         assert_eq!(err.code(), tonic::Code::InvalidArgument, "{err}");
         // oversized content (1 MiB cap)
@@ -2258,7 +2609,8 @@ mod tests {
             .validate(&PrivRequest {
                 op: PrivOp::WriteDaemonConfig as i32,
                 args: vec!["smb".to_string(), big],
-            })
+            secret: Vec::new(),
+        })
             .expect_err("oversized rejected");
         assert_eq!(err.code(), tonic::Code::InvalidArgument, "{err}");
     }
@@ -2272,7 +2624,8 @@ mod tests {
             &PrivRequest {
                 op: PrivOp::ReloadDaemons as i32,
                 args: vec!["smb".to_string(), "nfs".to_string()],
-            },
+            secret: Vec::new(),
+        },
         )
         .await
         .unwrap();
@@ -2307,7 +2660,8 @@ mod tests {
             &PrivRequest {
                 op: PrivOp::ReloadDaemons as i32,
                 args: vec!["smb".to_string()],
-            },
+            secret: Vec::new(),
+        },
         )
         .await
         .unwrap();
@@ -2329,7 +2683,8 @@ mod tests {
                 .validate(&PrivRequest {
                     op: PrivOp::ReloadDaemons as i32,
                     args: args.iter().map(|s| s.to_string()).collect(),
-                })
+                secret: Vec::new(),
+            })
                 .expect_err("must be rejected");
             assert_eq!(err.code(), tonic::Code::InvalidArgument, "{err}");
         }
@@ -2338,7 +2693,8 @@ mod tests {
             .validate(&PrivRequest {
                 op: PrivOp::ReloadDaemons as i32,
                 args: vec!["nfs".to_string(), "nfs".to_string()],
-            })
+            secret: Vec::new(),
+        })
             .unwrap();
         match cmd {
             AllowedCommand::ReloadDaemons { targets } => assert_eq!(targets, vec!["nfs"]),
@@ -2403,7 +2759,8 @@ mod tests {
             let req = PrivRequest {
                 op: PrivOp::MountBlock as i32,
                 args,
-            };
+            secret: Vec::new(),
+        };
             let err = a.validate(&req).expect_err("must be rejected");
             assert_eq!(err.code(), tonic::Code::InvalidArgument, "{err}");
         }
@@ -2419,7 +2776,8 @@ mod tests {
             let req = PrivRequest {
                 op: PrivOp::MountBlock as i32,
                 args,
-            };
+            secret: Vec::new(),
+        };
             let cmd = a.validate(&req).expect("valid options must pass");
             match cmd {
                 AllowedCommand::MountBlock { options, .. } => assert_eq!(options.len(), opts.len()),
@@ -2459,7 +2817,8 @@ mod tests {
             let req = PrivRequest {
                 op: PrivOp::MountBlock as i32,
                 args: vec![c.clone(), mp.to_str().unwrap().to_string()],
-            };
+            secret: Vec::new(),
+        };
             let err = a.validate(&req).expect_err(&format!("{c} must be rejected"));
             assert!(
                 err.code() == tonic::Code::InvalidArgument || err.code() == tonic::Code::PermissionDenied,
@@ -2484,7 +2843,8 @@ mod tests {
             let req = PrivRequest {
                 op: PrivOp::MountBlock as i32,
                 args: vec![dev.to_str().unwrap().to_string(), c.clone()],
-            };
+            secret: Vec::new(),
+        };
             let err = a.validate(&req).expect_err(&format!("{c} must be rejected"));
             assert!(
                 err.code() == tonic::Code::InvalidArgument || err.code() == tonic::Code::PermissionDenied,
@@ -2503,7 +2863,8 @@ mod tests {
         let req = PrivRequest {
             op: PrivOp::MountBlock as i32,
             args: vec![dev.to_str().unwrap().to_string(), f.to_str().unwrap().to_string()],
-        };
+        secret: Vec::new(),
+    };
         let err = a.validate(&req).unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument, "{err}");
     }
@@ -2517,7 +2878,8 @@ mod tests {
             let req = PrivRequest {
                 op: PrivOp::UnmountBlock as i32,
                 args: vec![c.clone()],
-            };
+            secret: Vec::new(),
+        };
             let err = a.validate(&req).expect_err(&format!("{c} must be rejected"));
             assert!(
                 err.code() == tonic::Code::InvalidArgument || err.code() == tonic::Code::PermissionDenied,

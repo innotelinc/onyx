@@ -29,10 +29,12 @@ pub struct ParsedPool {
 pub async fn refresh_pools(
     privd: &mut PrivdClient<Channel>,
     registry: &Arc<Registry>,
-) -> Result<Vec<Pool>, String> {	let resp = privd
+) -> Result<Vec<Pool>, String> {
+	let resp = privd
 		.run(PrivRequest {
 			op: PrivOp::BtrfsFilesystemShowRaw as i32,
 			args: Vec::new(),
+			secret: Vec::new(),
 		})
 		.await
 		.map_err(|e| format!("privd: {e}"))?

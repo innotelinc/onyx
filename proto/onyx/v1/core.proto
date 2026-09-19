@@ -48,6 +48,77 @@ service Core {
   // WatchDevices tails the live hotplug + health event stream, forwarded
   // from onyx-storaged (the gateway exposes it as SSE).
   rpc WatchDevices(WatchDevicesRequest) returns (stream DeviceEvent);
+
+  // ProvisionSambaUser creates, re-passwords, disables or removes the Samba
+  // account behind an Onyx user, through onyx-privd. A granted share renders
+  // the user's name into smb.conf's `valid users`, and Samba only accepts an
+  // account that exists, so this is what makes an SMB grant usable.
+  rpc ProvisionSambaUser(ProvisionSambaUserRequest) returns (ProvisionSambaUserResponse);
+
+  // RecordAccessDenial appends one refusal to the access audit trail. onyx-davd
+  // calls it when it turns a request away, so a denial is recorded beside the
+  // grant that caused it instead of only in a daemon log (docs/design/08#2).
+  rpc RecordAccessDenial(RecordAccessDenialRequest) returns (RecordAccessDenialResponse);
+
+  // ListAccessEvents pages the access audit trail — grant changes and denials,
+  // newest first. onyx-core owns it because policy is decided here.
+  rpc ListAccessEvents(ListAccessEventsRequest) returns (ListAccessEventsResponse);
+}
+
+message ProvisionSambaUserRequest {
+  // Onyx username the account is for (the same name the grant renders).
+  string username = 1;
+  // "add" (create, or change the password of an existing account), "remove"
+  // (delete the account), "disable" (keep it but refuse sign-in) or "list"
+  // (change nothing; just report the accounts that exist).
+  string action = 2;
+  // The account's password. Required by "add"; never logged or echoed.
+  string password = 3;
+}
+
+message ProvisionSambaUserResponse {
+  // True when the account exists and can sign in after this call.
+  bool provisioned = 1;
+  // Every Onyx-style account Samba knows, as the console lists them.
+  repeated string accounts = 2;
+}
+
+message RecordAccessDenialRequest {
+  string share = 1;
+  string username = 2;
+  // The WebDAV method that was refused, for the trail's detail line.
+  string method = 3;
+  string reason = 4;
+}
+
+message RecordAccessDenialResponse {}
+
+// AccessEvent is one line of the access audit trail: a grant being set, changed
+// or cleared, or a request being refused.
+message AccessEvent {
+  int64 id = 1;
+  string ts = 2;
+  // "grant" (set or changed), "revoke" (cleared) or "denied".
+  string kind = 3;
+  string share = 4;
+  string username = 5;
+  // For a grant event, the mode it was set to; empty for a revocation/denial.
+  string mode = 6;
+  // Who caused it: the console's identity for a change, or the caller's for a
+  // denial.
+  string actor = 7;
+  string detail = 8;
+}
+
+message ListAccessEventsRequest {
+  // Optional filter; empty returns every share.
+  string share = 1;
+  // Newest-first cap. Zero or negative means the server's default.
+  int32 limit = 2;
+}
+
+message ListAccessEventsResponse {
+  repeated AccessEvent events = 1;
 }
 
 message SystemStatusRequest {}

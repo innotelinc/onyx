@@ -16,6 +16,7 @@ type server struct {
 	onyxv1.UnimplementedCoreSharesServer
 
 	db             *sql.DB
+	privd          onyxv1.PrivdClient
 	storaged       onyxv1.StoragedClient
 	storagedHealth onyxv1.HealthClient
 	sharedHealth   onyxv1.HealthClient

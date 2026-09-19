@@ -275,6 +275,12 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("POST /api/v1/shares", s.handleCreateShare)
 	mux.HandleFunc("GET /api/v1/shares/{name}", s.handleShare)
 	mux.HandleFunc("DELETE /api/v1/shares/{name}", s.handleDeleteShare)
+	// Per-share grants, edited from the share rather than the user (docs/design/08#2).
+	mux.HandleFunc("GET /api/v1/shares/{name}/access", s.handleShareAccess)
+	mux.HandleFunc("PUT /api/v1/shares/{name}/access", s.handleSetShareAccess)
+	// The accounts Samba will accept, and the audit trail of grants and refusals.
+	mux.HandleFunc("GET /api/v1/samba/accounts", s.handleSambaAccounts)
+	mux.HandleFunc("GET /api/v1/audit/access", s.handleAccessAudit)
 	mux.HandleFunc("GET /api/v1/devices", s.handleDevices)
 	// Device trust fleet view (docs/design/11 §10.3). Registered before the
 	// {name} route so Go 1.22 pattern precedence picks the literal segment.
@@ -329,6 +335,10 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("DELETE /api/v1/users/{id}", s.handleDeleteUser)
 	mux.HandleFunc("GET /api/v1/users/{id}/permissions", s.handleUserPermissions)
 	mux.HandleFunc("PUT /api/v1/users/{id}/permissions", s.handleSetUserPermissions)
+	// The SMB account behind the identity: a granted share names the user in
+	// smb.conf's `valid users`, and Samba admits only an account it has.
+	mux.HandleFunc("POST /api/v1/users/{id}/smb-password", s.handleSetSambaPassword)
+	mux.HandleFunc("DELETE /api/v1/users/{id}/smb-password", s.handleDeleteSambaPassword)
 	mux.HandleFunc("GET /api/v1/pools/{name}/scrub-schedule", s.handleScrubSchedule)
 	mux.HandleFunc("PUT /api/v1/pools/{name}/scrub-schedule", s.handleSetScrubSchedule)
 	mux.HandleFunc("POST /api/v1/pools/{name}/scrub", s.handleRunScrub)
