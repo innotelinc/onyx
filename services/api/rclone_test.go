@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -83,38 +84,68 @@ func TestContainsString(t *testing.T) {
 	}
 }
 
-// A connection is only usable if the secret reaches rclone exactly as the
-// operator typed it: obscuring an S3 secret_access_key made every request fail
-// with SignatureDoesNotMatch, so the argv is pinned here. A fake rclone on PATH
-// records what the handler actually runs — no rclone binary or network needed.
-func TestCreateRemotePassesSecretsThroughRaw(t *testing.T) {
+// fakeRclone puts a stub rclone on PATH that records the argv of every
+// invocation, and returns the path of that log. What the handler *runs* is the
+// contract under test here, so no rclone install or network is involved.
+func fakeRclone(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "rclone.args")
-	fake := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + logPath + "'\n"
-	if err := os.WriteFile(filepath.Join(dir, "rclone"), []byte(fake), 0o755); err != nil {
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + logPath + "'\n"
+	if err := os.WriteFile(filepath.Join(dir, "rclone"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake rclone: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return logPath
+}
 
-	s := &server{}
-	body := `{"name":"onyx-test","type":"s3","params":{"provider":"Other","access_key_id":"AKIAEXAMPLE","secret_access_key":"hunter2","endpoint":"http://minio:9000"}}`
-	rec := post(t, s.handleCreateRemote, "/api/v1/storage/remotes", body)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
+// The value the operator types has to reach rclone exactly as typed. rclone
+// obscures the options a backend marks as passwords (`pass`) and stores the rest
+// verbatim (an S3 `secret_access_key`, a B2 `key`), so obscuring here corrupted
+// the raw fields — an S3 remote then failed every request with
+// SignatureDoesNotMatch — and double-handed a password. Every provider the form
+// offers is pinned, so a pre-obscuring step cannot come back.
+func TestCreateRemotePassesSecretsThroughRaw(t *testing.T) {
+	cases := []struct {
+		provider string
+		params   map[string]string
+	}{
+		{"s3", map[string]string{"provider": "Other", "access_key_id": "AKIAEXAMPLE", "secret_access_key": "s3-secret", "endpoint": "http://minio:9000"}},
+		{"b2", map[string]string{"account": "b2-account", "key": "b2-secret"}},
+		{"azureblob", map[string]string{"account": "azure-account", "key": "azure-secret"}},
+		{"sftp", map[string]string{"host": "sftp.example.com", "user": "operator", "pass": "sftp-secret"}},
+		{"smb", map[string]string{"host": "smb.example.com", "user": "operator", "pass": "smb-secret"}},
+		{"webdav", map[string]string{"url": "https://dav.example.com", "user": "operator", "pass": "webdav-secret"}},
+		{"ftp", map[string]string{"host": "ftp.example.com", "user": "operator", "pass": "ftp-secret"}},
 	}
-
-	logged, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("fake rclone was never invoked: %v", err)
-	}
-	got := string(logged)
-	if !strings.Contains(got, "config create onyx-test s3") {
-		t.Errorf("the remote was not created through rclone:\n%s", got)
-	}
-	if !strings.Contains(got, "secret_access_key hunter2") {
-		t.Errorf("the secret was not passed through raw:\n%s", got)
-	}
-	if strings.Contains(got, "obscure") {
-		t.Errorf("the handler obscured a secret itself:\n%s", got)
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			logPath := fakeRclone(t)
+			name := "remote-" + tc.provider
+			body, err := json.Marshal(createRemoteBody{Name: name, Type: tc.provider, Params: tc.params})
+			if err != nil {
+				t.Fatalf("marshal body: %v", err)
+			}
+			rec := post(t, (&server{}).handleCreateRemote, "/api/v1/storage/remotes", string(body))
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
+			}
+			logged, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatalf("fake rclone was never invoked: %v", err)
+			}
+			got := string(logged)
+			if !strings.Contains(got, "config create "+name+" "+tc.provider) {
+				t.Errorf("the remote was not created through rclone:\n%s", got)
+			}
+			for field, value := range tc.params {
+				if !strings.Contains(got, field+" "+value) {
+					t.Errorf("the %s value was not passed through raw:\n%s", field, got)
+				}
+			}
+			if strings.Contains(got, "obscure") {
+				t.Errorf("the handler obscured a secret itself:\n%s", got)
+			}
+		})
 	}
 }
