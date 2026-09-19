@@ -126,9 +126,17 @@ jobs:
           # only reaches the other containers if the *host* path is a shared
           # mount as well (docs/design/05 §2.4). setup.sh does this on a real
           # install; a runner needs the same steps.
+          #
+          # `-o bind,shared` in one call, not `mount --make-shared`: that acts on
+          # a mount, and /mnt/onyx is a plain directory, so it fails with
+          # "Unknown error 5005" (exit 32) — which is how this job died. Binding
+          # the directory to itself is what gives the kernel a mount to share.
           sudo mkdir -p /mnt/onyx
           sudo chmod 0777 /mnt/onyx
-          sudo mount --make-shared /mnt/onyx
+          sudo mount -o bind,shared /mnt/onyx /mnt/onyx
+          # Prove it here, so a runner that cannot do this fails with the reason
+          # instead of three flows later as an empty Files view.
+          sudo findmnt -no TARGET,PROPAGATION /mnt/onyx | grep -qw shared
           # The rclone catalog is written by the API's container user, which has
           # no counterpart on the runner.
           mkdir -p data/rclone

@@ -283,6 +283,16 @@ else
     *7|*6|*3|*2) : ;;
     *) bad "/mnt/onyx mode is $root_mode — the object store cannot write a tier target (setup.sh sets 0777)" ;;
   esac
+  # Propagation is the other half of the same requirement, and the harder half to
+  # see: with /mnt/onyx private, storaged mounts a pool inside its own namespace
+  # and everything looks healthy from the inside while the API and WebDAV
+  # containers see an empty directory (docs/design/05#2.4). Check it here — a
+  # mount namespace is exactly what this run exists to catch.
+  root_prop="$(findmnt -no PROPAGATION /mnt/onyx 2>/dev/null || echo 'unknown')"
+  case "$root_prop" in
+    *shared) ok "/mnt/onyx is a $root_prop mount — pool mounts reach every container" ;;
+    *) bad "/mnt/onyx propagation is '${root_prop}' — pools would stay invisible to the API/WebDAV containers (fix: mount -o bind,shared /mnt/onyx /mnt/onyx)" ;;
+  esac
 
   api DELETE "/buckets/$BUCKET?force=true" >/dev/null 2>&1 || true
   bucket="$(api POST /buckets "{\"name\":\"$BUCKET\",\"tier\":\"tiered\",\"cloud_target\":\"$TIER_TARGET\",\"evict_after_days\":1}")"

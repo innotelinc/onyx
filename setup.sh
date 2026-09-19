@@ -129,13 +129,25 @@ if [ "$(id -u)" = "0" ]; then
   chmod 0777 "$STORAGE_ROOT" 2>/dev/null || true
   if [ "$(propagation_of "$STORAGE_ROOT")" = "shared" ]; then
     log "storage root ${STORAGE_ROOT} is shared — pool mounts propagate to every container"
-  elif mount --make-shared "$STORAGE_ROOT" 2>/dev/null; then
-    log "made ${STORAGE_ROOT} a shared mount so pool mounts reach the other containers"
-    log "note: make it permanent with an /etc/fstab entry: ${STORAGE_ROOT} none none shared"
+  # Two attempts, in order, and the second is the one that works on a plain
+  # directory: `mount --make-shared` acts on a *mount*, so on a directory that is
+  # not a mount point it fails ("not mount point or bad option", exit 32) — and
+  # /mnt/onyx is a plain directory on every host that has no fstab entry for it.
+  # Binding it to itself first is what gives the kernel a mount to share.
+  elif mount --make-shared "$STORAGE_ROOT" 2>/dev/null \
+    || mount -o bind,shared "$STORAGE_ROOT" "$STORAGE_ROOT" 2>/dev/null; then
+    if [ "$(propagation_of "$STORAGE_ROOT")" = "shared" ]; then
+      log "made ${STORAGE_ROOT} a shared mount so pool mounts reach the other containers"
+      log "note: keep it across reboots with an /etc/fstab entry:"
+      log "      ${STORAGE_ROOT} ${STORAGE_ROOT} none bind,shared 0 0"
+    else
+      echo "warning: mount reported success but ${STORAGE_ROOT} is not shared." >&2
+      echo "         A pool created now stays invisible to the API and WebDAV containers." >&2
+    fi
   else
     echo "warning: could not make ${STORAGE_ROOT} a shared mount." >&2
     echo "         A pool created now stays invisible to the API and WebDAV containers." >&2
-    echo "         Fix it with: sudo mount --make-shared ${STORAGE_ROOT}" >&2
+    echo "         Fix it with: sudo mount -o bind,shared ${STORAGE_ROOT} ${STORAGE_ROOT}" >&2
   fi
 else
   echo "warning: not running as root — skipped the ${STORAGE_ROOT} shared-mount check." >&2
