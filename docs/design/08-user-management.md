@@ -46,6 +46,16 @@ Group { id, name, members[], default_share_permissions? }
   onyx-core (`share_access`), and rendered into the backends that can enforce it (SMB's
   `valid users`/`read list`, WebDAV's `allowed_users`/`readonly_users`), so the panel and the
   daemons read the same row. Deleting a user's mapping clears their grants with it.
+- **SMB accounts are the credential side of a grant.** SMB authenticates with a password of
+  its own, so a user granted a share still cannot connect until an account exists in Samba's
+  passdb: the Users page sets it (`POST/DELETE /users/{id}/smb-password`, `ProvisionSambaUser`
+  in core, `smbpasswd` through onyx-privd with the password on stdin), and the share access
+  panel names any grantee whose SMB account is missing. The password never leaves Samba's own
+  passdb — it is not stored in Onyx, echoed back, or reused as the Authentik password.
+- **Both directions are audited.** `access_events` holds who changed which grant (and who
+  removed it) and every refused request, newest first per share (`GET /audit/access?share=`).
+  A denial is recorded by the daemon that refused it, so the answer to "why can this person
+  not reach this share" is one place rather than a log hunt across the backends.
 - **Quotas:** per-user soft/hard on the home subvolume; per-share quotas at the share
   subvolume. Soft → warning banner + notification; hard → writes blocked with a clear UI
   message. Admins get a quota overview table with usage bars and one-click "grant more".

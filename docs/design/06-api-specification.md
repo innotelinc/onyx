@@ -105,6 +105,7 @@ reconnect.
 | GET/PATCH/DELETE | `/shares/{id}` |
 | POST | `/shares/{id}/protocols/{proto}` (enable/configure SMB/NFS/…) |
 | GET | `/shares/{id}/connections` (connection strings) |
+| GET/PUT | `/shares/{name}/access` (who can reach one share: the grants in core, plus which grantees Samba will accept; PUT takes the share's whole map and writes only the diff) |
 
 ### Files
 | Method | Path | Notes |
@@ -156,6 +157,9 @@ reconnect.
 | GET/PATCH/DELETE | `/users/{id}` (password, quota, groups, 2FA reset) |
 | GET/POST | `/groups`, `/roles` |
 | GET/PUT | `/users/{id}/permissions` (per-share grants; recorded in core, enforced by the share backends) |
+| POST/DELETE | `/users/{id}/smb-password` (create/re-password or remove the user's Samba account; the password rides the request body and is never echoed) |
+| GET | `/samba/accounts` (the names Samba's passdb contains, with `available:false` when the deployment has no Samba) |
+| GET | `/audit/access?share=&limit=` (the grant changes and the refusals, newest first; `denied` events are written by onyx-davd) |
 | GET/POST/DELETE | `/api-keys` (scoped, expiring) |
 | GET/POST | `/auth/login`, `/auth/logout`, `/auth/refresh` |
 | GET/POST/DELETE | `/auth/webauthn`, `/auth/totp` |

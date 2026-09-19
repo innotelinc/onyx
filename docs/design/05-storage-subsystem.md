@@ -354,6 +354,23 @@ NFS, FTP, SFTP and rsync authenticate per share rather than per user, so there t
 cannot narrow anything and the share's own read-only setting is what applies — the panel says
 so rather than implying a restriction the protocol cannot make.
 
+The grant has a second half SMB needs: `valid users` names a person, and Samba treats a name
+with no account in its own passdb as nobody, so a recorded grant alone would still be refused
+at the door. `ProvisionSambaUser` (add / disable / remove / list) is that half, run through
+onyx-privd, which is the only process allowed to touch the passdb: `smbpasswd` is fed the
+password on **stdin** (a command line is world-readable in `/proc`), and `pdbedit -L` answers
+the list the console shows. Core refuses a password shorter than 8 characters or containing a
+line break — the shapes that would produce an account that looks provisioned but cannot be
+used, or that smbpasswd would misread. The console ties the two halves together: the Users
+page sets the password, and the access panel names any grantee SMB would turn away.
+
+Both halves are recorded. `access_events` in onyx-core holds the grant changes (`grant`/
+`revoke`, with the actor, so a change made through the CLI is attributed rather than blank)
+and the refusals (`denied`, written by onyx-davd with the method and reason as it turns a
+request away — a queue, so the audit never sits on the request path and a refusal is still a
+refusal when core is down). `GET /audit/access?share=` reads it newest first, which is what
+"why can this person not reach this share" needs, and the share access panel links to it.
+
 ## 9. Performance tuning (defaults, expert-overridable)
 
 - Compression: `zstd:3` on `@data` (best speed/size for mixed media); `zstd:1` on `@apps`.
