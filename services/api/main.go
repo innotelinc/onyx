@@ -165,7 +165,7 @@ func main() {
 		appd:    onyxv1.NewAppdClient(appdConn),
 		ai:      onyxv1.NewAiClient(aiConn),
 		objects: onyxv1.NewObjectStoreClient(objstoreConn),
-		users:   users, scrub: scrub, filesRoot: *filesRoot,
+		users:   users, scrub: scrub, filesRoot: *filesRoot, authentik: authentikFromEnv(),
 		deviceTrust: loadDeviceTrustConfig(), version: version,
 	}
 	srv.registerRoutes()
@@ -227,8 +227,11 @@ type server struct {
 	scrub       *scrubStore
 	filesRoot   string
 	deviceTrust *deviceTrustConfig
-	version     string
-	mux         *http.ServeMux
+	// authentik is the identity provider the Users page reads and writes. It is
+	// disabled (and says why) when the deployment has no AUTHENTIK_URL/token.
+	authentik *authentikClient
+	version   string
+	mux       *http.ServeMux
 }
 
 func (s *server) registerRoutes() {
@@ -251,6 +254,9 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("DELETE /api/v1/storage/remotes/{name}", s.handleDeleteRemote)
 	mux.HandleFunc("POST /api/v1/storage/remotes/{name}/check", s.handleCheckRemote)
 	mux.HandleFunc("POST /api/v1/storage/remotes/{name}/token", s.handleSetRemoteToken)
+	mux.HandleFunc("POST /api/v1/storage/remotes/{name}/oauth/start", s.handleOAuthStart)
+	// The provider redirects the operator's browser here, so it answers a page.
+	mux.HandleFunc("GET /api/v1/storage/oauth/callback", s.handleOAuthCallback)
 	mux.HandleFunc("POST /api/v1/storage/clone", s.handleCloneToRemote)
 	mux.HandleFunc("POST /api/v1/files/upload", s.handleFileUpload)
 	mux.HandleFunc("POST /api/v1/files/mkdir", s.handleFileMkdir)

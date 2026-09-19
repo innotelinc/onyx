@@ -313,16 +313,35 @@ backup destination *and* as a clone target:
 | `POST /api/v1/storage/remotes/{name}/check` | reachability probe (`rclone lsd`) |
 | `DELETE /api/v1/storage/remotes/{name}` | forget a target; data at the provider is untouched |
 | `POST /api/v1/storage/clone` | copy a storage folder out to a target (`rclone copy`, additive) |
+| `POST /api/v1/storage/remotes/{name}/oauth/start` | begin a browser sign-in; answers the provider URL and the redirect URI to register |
+| `GET /api/v1/storage/oauth/callback` | the provider's callback: exchanges the code, stores the token, probes the account (answers a page, not JSON) |
+| `POST /api/v1/storage/remotes/{name}/token` | store a token pasted from `rclone authorize <type>` (fallback for backends with no registered app) |
 
 Only the options a backend declares are accepted, and every invocation uses an explicit
 argv — never a shell. Secret values are passed through untouched and hidden at rest by
 `rclone config create` itself, which obscures exactly the options a backend marks as
 passwords: pre-obscuring in the API either double-hides a password or, for a value rclone
 stores verbatim such as an S3 `secret_access_key`, plants an obscured string that is then
-used as the real signing key and makes every request fail with `SignatureDoesNotMatch`. OAuth backends (Google Drive, OneDrive, Dropbox, Box,
-pCloud) are created without credentials and need one browser approval per target:
-`rclone config reconnect <name>:` on the host. CLI equivalents: `onyx storage
-providers|remotes|add|rm|check|clone`.
+used as the real signing key and makes every request fail with `SignatureDoesNotMatch`.
+
+OAuth backends need one browser approval per target, and the console drives it: Google
+Drive, Microsoft OneDrive and SharePoint are signed in from the Shares page (`POST …/oauth/start`
+→ the provider's consent screen → `GET /oauth/callback`), which exchanges the code, stores the
+token rclone expects (`config update … token … --non-interactive` — without the flag rclone
+starts a flow of its own and the request never answers) and probes the account. Two constraints
+come with that: the deployment must know its public URL (`ONYX_PUBLIC_URL`, else the request's
+own host, which behind the ingress is the proxy's internal address) and the redirect URI
+`<public>/api/v1/storage/oauth/callback` must be registered in the provider's OAuth
+application (`DRIVE_/ONEDRIVE_/SHAREPOINT_OAUTH_CLIENT_ID|_SECRET`, or per target). Dropbox,
+Box and pCloud have no such registration here, so they take a token pasted from
+`rclone authorize <type>`. Probes are bounded (`--retries 1 --contimeout 10s --timeout 15s`):
+a rejected token or an unreachable provider has to answer the console, not hang it. CLI
+equivalents: `onyx storage providers|remotes|add|rm|check|clone`.
+
+Share setup carries the same practical bent: presets (media library, team folder, backup
+target, read-only guest drop) set the protocol matrix, each share offers per-OS connection
+steps (Explorer map-drive, Finder connect-to-server, `/etc/fstab` lines) and a per-user
+access panel writing the `read`/`read-write` grant Onyx already stores per share per user.
 
 ## 9. Performance tuning (defaults, expert-overridable)
 

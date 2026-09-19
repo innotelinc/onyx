@@ -186,17 +186,23 @@ func (s *server) handleRcloneRemotes(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"configured": len(names) > 0,
-		"remotes":    names,
-		"details":    types,
-		"providers":  rcloneProviders(),
+		"configured":     len(names) > 0,
+		"remotes":        names,
+		"details":        types,
+		"providers":      rcloneProviders(),
+		"oauth_redirect": oauthRedirectTypes(),
 	})
 }
 
 // handleRcloneProviders serves GET /api/v1/storage/providers — the closed set
 // of backends the cloud-storage form offers.
 func (s *server) handleRcloneProviders(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"providers": rcloneProviders()})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"providers": rcloneProviders(),
+		// Which OAuth backends the console can sign in for itself, as opposed to
+		// the ones that need a token pasted from `rclone authorize` elsewhere.
+		"oauth_redirect": oauthRedirectTypes(),
+	})
 }
 
 type createRemoteBody struct {
