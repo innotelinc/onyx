@@ -1968,12 +1968,20 @@
       var overview = apiJSON('/storage/overview').catch(function () { return {}; });
       return Promise.all([pools, overview]).then(function (parts) {
         var rows = parts[0].pools || [];
-        var online = rows.filter(function (p) { return String(p.state || '').toLowerCase() !== 'offline'; });
+        var ov = parts[1] || {};
+        // A pool whose mount this process can actually reach counts as online
+        // even when the registry snapshot still says offline: the mount is the
+        // reality, and the Storage page's headline already reports it that way,
+        // so the two pages cannot contradict each other.
+        var mounted = {};
+        (ov.entries || []).forEach(function (e) { if (e.visible) mounted[e.name] = true; });
+        var online = rows.filter(function (p) {
+          return mounted[p.name] || String(p.state || '').toLowerCase() !== 'offline';
+        });
         set('stat-pools', String(online.length));
         set('stat-pools-sub', rows.length
           ? 'online of ' + rows.length + ' configured — ' + (rows.length - online.length) + ' offline'
           : 'storage pools online');
-        var ov = parts[1] || {};
         var total = Number(ov.total_bytes || 0), free = Number(ov.free_bytes || 0);
         if (total > 0) {
           set('stat-capacity', formatBytes(total - free) + ' of ' + formatBytes(total));
