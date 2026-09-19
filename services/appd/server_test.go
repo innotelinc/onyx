@@ -26,6 +26,9 @@ type fakeRuntime struct {
 		app, service, verb string
 	}
 	containers []*onyxv1.Container
+	// upFailures are returned by successive Up calls, one per call, so a test can
+	// model the engine refusing a project before accepting it.
+	upFailures []error
 	upErr      error
 	downErr    error
 	verbErr    error
@@ -36,6 +39,13 @@ func (f *fakeRuntime) Up(_ context.Context, appID, manifest string, config map[s
 	f.upCalls++
 	f.lastMani = manifest
 	f.lastUp = config
+	if len(f.upFailures) > 0 {
+		err := f.upFailures[0]
+		f.upFailures = f.upFailures[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
 	if f.upErr != nil {
 		return nil, f.upErr
 	}
@@ -76,6 +86,92 @@ func testServer(t *testing.T, rt Runtime) *server {
 		t.Fatalf("catalog: %v", err)
 	}
 	return newServer(apps, st, rt, "onyx.test", storageRootDefault)
+}// The port an app's manifest publishes is a catalog default, and the host may
+// already use it — another product, another app. appd cannot see the host's
+// port table from inside its own network namespace, so the engine's refusal is
+// the only signal: take it, republish on the next port, and record that port so
+// the console shows a URL that actually listens.
+func TestInstallRetriesWhenThePublishedPortIsTaken(t *testing.T) {
+	rt := &fakeRuntime{
+		containers: []*onyxv1.Container{jellyfinContainer()},
+		upFailures: []error{errors.New(
+			"docker compose up: Bind for 0.0.0.0:8080 failed: port is already allocated")},
+	}
+	s := testServer(t, rt)
+
+	app, err := s.InstallApp(context.Background(), &onyxv1.InstallAppRequest{AppId: "nextcloud"})
+	if err != nil {
+		t.Fatalf("install must survive a busy default port: %v", err)
+	}
+	if rt.upCalls != 2 {
+		t.Errorf("up calls = %d, want the failed attempt plus a retry", rt.upCalls)
+	}
+	if got := app.GetConfig()["http_port"]; got != "8081" {
+		t.Errorf("recorded http_port = %q, want the free port 8081", got)
+	}
+	if !strings.Contains(rt.lastMani, `"8081:80"`) {
+		t.Errorf("the manifest was not re-rendered on the new port:\n%s", rt.lastMani)
+	}
+}
+
+// Only a port conflict is worth moving for: any other engine failure is the
+// operator's answer, and nothing may be recorded.
+func TestInstallDoesNotRetryOtherEngineFailures(t *testing.T) {
+	rt := &fakeRuntime{upFailures: []error{errors.New("write /var/lib/docker: no space left on device")}}
+	s := testServer(t, rt)
+
+	_, err := s.InstallApp(context.Background(), &onyxv1.InstallAppRequest{AppId: "jellyfin"})
+	if err == nil {
+		t.Fatal("want the engine's failure")
+	}
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("code = %v, want FailedPrecondition", status.Code(err))
+	}
+	if rt.upCalls != 1 {
+		t.Errorf("up calls = %d, want no retry", rt.upCalls)
+	}
+	apps, listErr := s.ListApps(context.Background(), &onyxv1.ListAppsRequest{})
+	if listErr != nil {
+		t.Fatalf("list: %v", listErr)
+	}
+	if got := appByID(t, apps.GetApps(), "jellyfin").GetStatus(); got != "not_installed" {
+		t.Errorf("status = %q, want nothing recorded", got)
+	}
+}
+
+func TestHostPortConflictIsRecognizedInEveryEngineWording(t *testing.T) {
+	for _, msg := range []string{
+		"Bind for 127.0.0.1:8080 failed: port is already allocated",
+		"failed to bind host port: address already in use",
+	} {
+		if !isHostPortConflict(errors.New(msg)) {
+			t.Errorf("%q should be recognized as a port conflict", msg)
+		}
+	}
+	for _, msg := range []string{"no space left on device", "permission denied", ""} {
+		if isHostPortConflict(errors.New(msg)) {
+			t.Errorf("%q must not be treated as a port conflict", msg)
+		}
+	}
+	if isHostPortConflict(nil) {
+		t.Error("nil is not a conflict")
+	}
+}
+
+func TestShiftHTTPPort(t *testing.T) {
+	if got, ok := shiftHTTPPort("8080", 1); !ok || got != "8081" {
+		t.Errorf("shiftHTTPPort(8080, 1) = %q, %v; want 8081, true", got, ok)
+	}
+	// Nothing to move: no configured port, a non-numeric one, or the end of the
+	// range — the install is reported as it is instead of being retried forever.
+	for _, current := range []string{"", "http", "0"} {
+		if got, ok := shiftHTTPPort(current, 1); ok {
+			t.Errorf("shiftHTTPPort(%q, 1) = %q, true; want no shift", current, got)
+		}
+	}
+	if got, ok := shiftHTTPPort("65535", 1); ok {
+		t.Errorf("shiftHTTPPort(65535, 1) = %q, true; want past the range", got)
+	}
 }
 
 func jellyfinContainer() *onyxv1.Container {

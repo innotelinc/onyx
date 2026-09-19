@@ -288,11 +288,16 @@ else
   # and everything looks healthy from the inside while the API and WebDAV
   # containers see an empty directory (docs/design/05#2.4). Check it here — a
   # mount namespace is exactly what this run exists to catch.
+  # `shared` anywhere in the flag list, not only at the end: a container's bind
+  # of a shared host path reports `shared,slave` (the slave flag is how it
+  # follows the host), which is exactly the working case. Matching the suffix
+  # made the check fail on a correct deployment.
   root_prop="$(findmnt -no PROPAGATION /mnt/onyx 2>/dev/null || echo 'unknown')"
-  case "$root_prop" in
-    *shared) ok "/mnt/onyx is a $root_prop mount — pool mounts reach every container" ;;
-    *) bad "/mnt/onyx propagation is '${root_prop}' — pools would stay invisible to the API/WebDAV containers (fix: mount -o bind,shared /mnt/onyx /mnt/onyx)" ;;
-  esac
+  if printf '%s' "$root_prop" | tr ',' '\n' | grep -qx shared; then
+    ok "/mnt/onyx is a $root_prop mount — pool mounts reach every container"
+  else
+    bad "/mnt/onyx propagation is '${root_prop}' — pools would stay invisible to the API/WebDAV containers (fix: mount -o bind,shared /mnt/onyx /mnt/onyx)"
+  fi
 
   api DELETE "/buckets/$BUCKET?force=true" >/dev/null 2>&1 || true
   bucket="$(api POST /buckets "{\"name\":\"$BUCKET\",\"tier\":\"tiered\",\"cloud_target\":\"$TIER_TARGET\",\"evict_after_days\":1}")"
