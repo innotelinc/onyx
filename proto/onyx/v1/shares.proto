@@ -14,6 +14,15 @@ service CoreShares {
   rpc ListShares(ListSharesRequest) returns (ListSharesResponse);
   rpc GetShare(GetShareRequest) returns (Share);
   rpc DeleteShare(DeleteShareRequest) returns (DeleteShareResponse);
+  // SetShareAccess records or removes one user's grant on one share and
+  // re-renders the daemon config, so an access change in the console reaches
+  // the share backends instead of only the page that drew it
+  // (docs/design/08#2-roles-and-permissions).
+  rpc SetShareAccess(SetShareAccessRequest) returns (SetShareAccessResponse);
+  // ListShareAccess reports grants, filtered by share and/or username when
+  // either is set (empty = everything), which is how the Users page answers
+  // "what can this person reach" without a second store to keep in step.
+  rpc ListShareAccess(ListShareAccessRequest) returns (ListShareAccessResponse);
 }
 
 // Shared renders per-daemon configuration from a Share. It never touches
@@ -53,6 +62,23 @@ message Share {
   string comment = 3;
   bool readonly = 4;
   repeated ShareProtocol protocols = 5;
+  // Per-user grants (docs/design/08#2). An empty list is the default: the share
+  // is open to every Onyx user through the protocols it enables. The moment
+  // one grant exists the backends that authenticate a named user (SMB, WebDAV)
+  // serve only the grantee, so the Access panel is a restriction, not a note.
+  repeated ShareAccess access = 6;
+}
+
+// ShareAccess is one user's grant on one share. onyx-core owns it, the console
+// writes it through the gateway, and onyx-shared renders it into the share
+// backends — one record, enforced, rather than a UI hint.
+message ShareAccess {
+  // The share the grant applies to (names are stable ids, Share.name).
+  string share = 1;
+  // The Onyx username the grant names, exactly as it appears in Samba/WebDAV.
+  string username = 2;
+  // "read" or "read-write". Empty means "remove this grant" on a request.
+  string mode = 3;
 }
 
 message CreateShareRequest {
@@ -78,6 +104,26 @@ message DeleteShareRequest {
 }
 
 message DeleteShareResponse {}
+
+message SetShareAccessRequest {
+  ShareAccess access = 1;
+}
+
+message SetShareAccessResponse {
+  // The grant as it now stands, or the removed grant echoed back when the
+  // request asked to clear it (mode empty).
+  ShareAccess access = 1;
+}
+
+message ListShareAccessRequest {
+  // Optional filters; empty matches every share / every user.
+  string share = 1;
+  string username = 2;
+}
+
+message ListShareAccessResponse {
+  repeated ShareAccess access = 1;
+}
 
 message RenderAllRequest {
   repeated Share shares = 1;

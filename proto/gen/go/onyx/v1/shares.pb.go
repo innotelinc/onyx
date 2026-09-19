@@ -91,12 +91,17 @@ func (ShareProtocol) EnumDescriptor() ([]byte, []int) {
 // A logical share. `name` is a stable id (^[a-z0-9_-]{1,64}$); `path` is the
 // dataset directory it maps to (absolute, under /mnt/onyx in production).
 type Share struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
-	Comment       string                 `protobuf:"bytes,3,opt,name=comment,proto3" json:"comment,omitempty"`
-	Readonly      bool                   `protobuf:"varint,4,opt,name=readonly,proto3" json:"readonly,omitempty"`
-	Protocols     []ShareProtocol        `protobuf:"varint,5,rep,packed,name=protocols,proto3,enum=onyx.v1.ShareProtocol" json:"protocols,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Name      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Path      string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	Comment   string                 `protobuf:"bytes,3,opt,name=comment,proto3" json:"comment,omitempty"`
+	Readonly  bool                   `protobuf:"varint,4,opt,name=readonly,proto3" json:"readonly,omitempty"`
+	Protocols []ShareProtocol        `protobuf:"varint,5,rep,packed,name=protocols,proto3,enum=onyx.v1.ShareProtocol" json:"protocols,omitempty"`
+	// Per-user grants (docs/design/08#2). An empty list is the default: the share
+	// is open to every Onyx user through the protocols it enables. The moment
+	// one grant exists the backends that authenticate a named user (SMB, WebDAV)
+	// serve only the grantee, so the Access panel is a restriction, not a note.
+	Access        []*ShareAccess `protobuf:"bytes,6,rep,name=access,proto3" json:"access,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -166,6 +171,79 @@ func (x *Share) GetProtocols() []ShareProtocol {
 	return nil
 }
 
+func (x *Share) GetAccess() []*ShareAccess {
+	if x != nil {
+		return x.Access
+	}
+	return nil
+}
+
+// ShareAccess is one user's grant on one share. onyx-core owns it, the console
+// writes it through the gateway, and onyx-shared renders it into the share
+// backends — one record, enforced, rather than a UI hint.
+type ShareAccess struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The share the grant applies to (names are stable ids, Share.name).
+	Share string `protobuf:"bytes,1,opt,name=share,proto3" json:"share,omitempty"`
+	// The Onyx username the grant names, exactly as it appears in Samba/WebDAV.
+	Username string `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	// "read" or "read-write". Empty means "remove this grant" on a request.
+	Mode          string `protobuf:"bytes,3,opt,name=mode,proto3" json:"mode,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShareAccess) Reset() {
+	*x = ShareAccess{}
+	mi := &file_onyx_v1_shares_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShareAccess) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShareAccess) ProtoMessage() {}
+
+func (x *ShareAccess) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_shares_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShareAccess.ProtoReflect.Descriptor instead.
+func (*ShareAccess) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ShareAccess) GetShare() string {
+	if x != nil {
+		return x.Share
+	}
+	return ""
+}
+
+func (x *ShareAccess) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *ShareAccess) GetMode() string {
+	if x != nil {
+		return x.Mode
+	}
+	return ""
+}
+
 type CreateShareRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -179,7 +257,7 @@ type CreateShareRequest struct {
 
 func (x *CreateShareRequest) Reset() {
 	*x = CreateShareRequest{}
-	mi := &file_onyx_v1_shares_proto_msgTypes[1]
+	mi := &file_onyx_v1_shares_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -191,7 +269,7 @@ func (x *CreateShareRequest) String() string {
 func (*CreateShareRequest) ProtoMessage() {}
 
 func (x *CreateShareRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_shares_proto_msgTypes[1]
+	mi := &file_onyx_v1_shares_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -204,7 +282,7 @@ func (x *CreateShareRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateShareRequest.ProtoReflect.Descriptor instead.
 func (*CreateShareRequest) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{1}
+	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *CreateShareRequest) GetName() string {
@@ -250,7 +328,7 @@ type ListSharesRequest struct {
 
 func (x *ListSharesRequest) Reset() {
 	*x = ListSharesRequest{}
-	mi := &file_onyx_v1_shares_proto_msgTypes[2]
+	mi := &file_onyx_v1_shares_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -262,7 +340,7 @@ func (x *ListSharesRequest) String() string {
 func (*ListSharesRequest) ProtoMessage() {}
 
 func (x *ListSharesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_shares_proto_msgTypes[2]
+	mi := &file_onyx_v1_shares_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -275,7 +353,7 @@ func (x *ListSharesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSharesRequest.ProtoReflect.Descriptor instead.
 func (*ListSharesRequest) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{2}
+	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{3}
 }
 
 type ListSharesResponse struct {
@@ -287,7 +365,7 @@ type ListSharesResponse struct {
 
 func (x *ListSharesResponse) Reset() {
 	*x = ListSharesResponse{}
-	mi := &file_onyx_v1_shares_proto_msgTypes[3]
+	mi := &file_onyx_v1_shares_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -299,7 +377,7 @@ func (x *ListSharesResponse) String() string {
 func (*ListSharesResponse) ProtoMessage() {}
 
 func (x *ListSharesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_shares_proto_msgTypes[3]
+	mi := &file_onyx_v1_shares_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -312,7 +390,7 @@ func (x *ListSharesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSharesResponse.ProtoReflect.Descriptor instead.
 func (*ListSharesResponse) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{3}
+	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ListSharesResponse) GetShares() []*Share {
@@ -331,7 +409,7 @@ type GetShareRequest struct {
 
 func (x *GetShareRequest) Reset() {
 	*x = GetShareRequest{}
-	mi := &file_onyx_v1_shares_proto_msgTypes[4]
+	mi := &file_onyx_v1_shares_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -343,7 +421,7 @@ func (x *GetShareRequest) String() string {
 func (*GetShareRequest) ProtoMessage() {}
 
 func (x *GetShareRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_shares_proto_msgTypes[4]
+	mi := &file_onyx_v1_shares_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -356,7 +434,7 @@ func (x *GetShareRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetShareRequest.ProtoReflect.Descriptor instead.
 func (*GetShareRequest) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{4}
+	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GetShareRequest) GetName() string {
@@ -375,7 +453,7 @@ type DeleteShareRequest struct {
 
 func (x *DeleteShareRequest) Reset() {
 	*x = DeleteShareRequest{}
-	mi := &file_onyx_v1_shares_proto_msgTypes[5]
+	mi := &file_onyx_v1_shares_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -387,7 +465,7 @@ func (x *DeleteShareRequest) String() string {
 func (*DeleteShareRequest) ProtoMessage() {}
 
 func (x *DeleteShareRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_shares_proto_msgTypes[5]
+	mi := &file_onyx_v1_shares_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -400,7 +478,7 @@ func (x *DeleteShareRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteShareRequest.ProtoReflect.Descriptor instead.
 func (*DeleteShareRequest) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{5}
+	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DeleteShareRequest) GetName() string {
@@ -418,7 +496,7 @@ type DeleteShareResponse struct {
 
 func (x *DeleteShareResponse) Reset() {
 	*x = DeleteShareResponse{}
-	mi := &file_onyx_v1_shares_proto_msgTypes[6]
+	mi := &file_onyx_v1_shares_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -430,7 +508,7 @@ func (x *DeleteShareResponse) String() string {
 func (*DeleteShareResponse) ProtoMessage() {}
 
 func (x *DeleteShareResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_shares_proto_msgTypes[6]
+	mi := &file_onyx_v1_shares_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -443,7 +521,194 @@ func (x *DeleteShareResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteShareResponse.ProtoReflect.Descriptor instead.
 func (*DeleteShareResponse) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{6}
+	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{7}
+}
+
+type SetShareAccessRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Access        *ShareAccess           `protobuf:"bytes,1,opt,name=access,proto3" json:"access,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetShareAccessRequest) Reset() {
+	*x = SetShareAccessRequest{}
+	mi := &file_onyx_v1_shares_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetShareAccessRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetShareAccessRequest) ProtoMessage() {}
+
+func (x *SetShareAccessRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_shares_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetShareAccessRequest.ProtoReflect.Descriptor instead.
+func (*SetShareAccessRequest) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *SetShareAccessRequest) GetAccess() *ShareAccess {
+	if x != nil {
+		return x.Access
+	}
+	return nil
+}
+
+type SetShareAccessResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The grant as it now stands, or the removed grant echoed back when the
+	// request asked to clear it (mode empty).
+	Access        *ShareAccess `protobuf:"bytes,1,opt,name=access,proto3" json:"access,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetShareAccessResponse) Reset() {
+	*x = SetShareAccessResponse{}
+	mi := &file_onyx_v1_shares_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetShareAccessResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetShareAccessResponse) ProtoMessage() {}
+
+func (x *SetShareAccessResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_shares_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetShareAccessResponse.ProtoReflect.Descriptor instead.
+func (*SetShareAccessResponse) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *SetShareAccessResponse) GetAccess() *ShareAccess {
+	if x != nil {
+		return x.Access
+	}
+	return nil
+}
+
+type ListShareAccessRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Optional filters; empty matches every share / every user.
+	Share         string `protobuf:"bytes,1,opt,name=share,proto3" json:"share,omitempty"`
+	Username      string `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListShareAccessRequest) Reset() {
+	*x = ListShareAccessRequest{}
+	mi := &file_onyx_v1_shares_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListShareAccessRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListShareAccessRequest) ProtoMessage() {}
+
+func (x *ListShareAccessRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_shares_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListShareAccessRequest.ProtoReflect.Descriptor instead.
+func (*ListShareAccessRequest) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ListShareAccessRequest) GetShare() string {
+	if x != nil {
+		return x.Share
+	}
+	return ""
+}
+
+func (x *ListShareAccessRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+type ListShareAccessResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Access        []*ShareAccess         `protobuf:"bytes,1,rep,name=access,proto3" json:"access,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListShareAccessResponse) Reset() {
+	*x = ListShareAccessResponse{}
+	mi := &file_onyx_v1_shares_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListShareAccessResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListShareAccessResponse) ProtoMessage() {}
+
+func (x *ListShareAccessResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_onyx_v1_shares_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListShareAccessResponse.ProtoReflect.Descriptor instead.
+func (*ListShareAccessResponse) Descriptor() ([]byte, []int) {
+	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ListShareAccessResponse) GetAccess() []*ShareAccess {
+	if x != nil {
+		return x.Access
+	}
+	return nil
 }
 
 type RenderAllRequest struct {
@@ -455,7 +720,7 @@ type RenderAllRequest struct {
 
 func (x *RenderAllRequest) Reset() {
 	*x = RenderAllRequest{}
-	mi := &file_onyx_v1_shares_proto_msgTypes[7]
+	mi := &file_onyx_v1_shares_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -467,7 +732,7 @@ func (x *RenderAllRequest) String() string {
 func (*RenderAllRequest) ProtoMessage() {}
 
 func (x *RenderAllRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_shares_proto_msgTypes[7]
+	mi := &file_onyx_v1_shares_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -480,7 +745,7 @@ func (x *RenderAllRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenderAllRequest.ProtoReflect.Descriptor instead.
 func (*RenderAllRequest) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{7}
+	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *RenderAllRequest) GetShares() []*Share {
@@ -513,7 +778,7 @@ type RenderAllResponse struct {
 
 func (x *RenderAllResponse) Reset() {
 	*x = RenderAllResponse{}
-	mi := &file_onyx_v1_shares_proto_msgTypes[8]
+	mi := &file_onyx_v1_shares_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -525,7 +790,7 @@ func (x *RenderAllResponse) String() string {
 func (*RenderAllResponse) ProtoMessage() {}
 
 func (x *RenderAllResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_shares_proto_msgTypes[8]
+	mi := &file_onyx_v1_shares_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -538,7 +803,7 @@ func (x *RenderAllResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenderAllResponse.ProtoReflect.Descriptor instead.
 func (*RenderAllResponse) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{8}
+	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RenderAllResponse) GetSmbConf() string {
@@ -592,7 +857,7 @@ type RenderConfigRequest struct {
 
 func (x *RenderConfigRequest) Reset() {
 	*x = RenderConfigRequest{}
-	mi := &file_onyx_v1_shares_proto_msgTypes[9]
+	mi := &file_onyx_v1_shares_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -604,7 +869,7 @@ func (x *RenderConfigRequest) String() string {
 func (*RenderConfigRequest) ProtoMessage() {}
 
 func (x *RenderConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_shares_proto_msgTypes[9]
+	mi := &file_onyx_v1_shares_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -617,7 +882,7 @@ func (x *RenderConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenderConfigRequest.ProtoReflect.Descriptor instead.
 func (*RenderConfigRequest) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{9}
+	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *RenderConfigRequest) GetShare() *Share {
@@ -651,7 +916,7 @@ type RenderConfigResponse struct {
 
 func (x *RenderConfigResponse) Reset() {
 	*x = RenderConfigResponse{}
-	mi := &file_onyx_v1_shares_proto_msgTypes[10]
+	mi := &file_onyx_v1_shares_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -663,7 +928,7 @@ func (x *RenderConfigResponse) String() string {
 func (*RenderConfigResponse) ProtoMessage() {}
 
 func (x *RenderConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_onyx_v1_shares_proto_msgTypes[10]
+	mi := &file_onyx_v1_shares_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -676,7 +941,7 @@ func (x *RenderConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenderConfigResponse.ProtoReflect.Descriptor instead.
 func (*RenderConfigResponse) Descriptor() ([]byte, []int) {
-	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{10}
+	return file_onyx_v1_shares_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *RenderConfigResponse) GetSmbConf() string {
@@ -725,13 +990,18 @@ var File_onyx_v1_shares_proto protoreflect.FileDescriptor
 
 const file_onyx_v1_shares_proto_rawDesc = "" +
 	"\n" +
-	"\x14onyx/v1/shares.proto\x12\aonyx.v1\"\x9b\x01\n" +
+	"\x14onyx/v1/shares.proto\x12\aonyx.v1\"\xc9\x01\n" +
 	"\x05Share\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x18\n" +
 	"\acomment\x18\x03 \x01(\tR\acomment\x12\x1a\n" +
 	"\breadonly\x18\x04 \x01(\bR\breadonly\x124\n" +
-	"\tprotocols\x18\x05 \x03(\x0e2\x16.onyx.v1.ShareProtocolR\tprotocols\"\xa8\x01\n" +
+	"\tprotocols\x18\x05 \x03(\x0e2\x16.onyx.v1.ShareProtocolR\tprotocols\x12,\n" +
+	"\x06access\x18\x06 \x03(\v2\x14.onyx.v1.ShareAccessR\x06access\"S\n" +
+	"\vShareAccess\x12\x14\n" +
+	"\x05share\x18\x01 \x01(\tR\x05share\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\x12\x12\n" +
+	"\x04mode\x18\x03 \x01(\tR\x04mode\"\xa8\x01\n" +
 	"\x12CreateShareRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x18\n" +
@@ -745,7 +1015,16 @@ const file_onyx_v1_shares_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"(\n" +
 	"\x12DeleteShareRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"\x15\n" +
-	"\x13DeleteShareResponse\":\n" +
+	"\x13DeleteShareResponse\"E\n" +
+	"\x15SetShareAccessRequest\x12,\n" +
+	"\x06access\x18\x01 \x01(\v2\x14.onyx.v1.ShareAccessR\x06access\"F\n" +
+	"\x16SetShareAccessResponse\x12,\n" +
+	"\x06access\x18\x01 \x01(\v2\x14.onyx.v1.ShareAccessR\x06access\"J\n" +
+	"\x16ListShareAccessRequest\x12\x14\n" +
+	"\x05share\x18\x01 \x01(\tR\x05share\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\"G\n" +
+	"\x17ListShareAccessResponse\x12,\n" +
+	"\x06access\x18\x01 \x03(\v2\x14.onyx.v1.ShareAccessR\x06access\":\n" +
 	"\x10RenderAllRequest\x12&\n" +
 	"\x06shares\x18\x01 \x03(\v2\x0e.onyx.v1.ShareR\x06shares\"\xc7\x01\n" +
 	"\x11RenderAllResponse\x12\x19\n" +
@@ -777,14 +1056,16 @@ const file_onyx_v1_shares_proto_rawDesc = "" +
 	"\x12SHARE_PROTOCOL_FTP\x10\x03\x12\x17\n" +
 	"\x13SHARE_PROTOCOL_SFTP\x10\x04\x12\x19\n" +
 	"\x15SHARE_PROTOCOL_WEBDAV\x10\x05\x12\x18\n" +
-	"\x14SHARE_PROTOCOL_RSYNC\x10\x062\x8f\x02\n" +
+	"\x14SHARE_PROTOCOL_RSYNC\x10\x062\xb8\x03\n" +
 	"\n" +
 	"CoreShares\x12:\n" +
 	"\vCreateShare\x12\x1b.onyx.v1.CreateShareRequest\x1a\x0e.onyx.v1.Share\x12E\n" +
 	"\n" +
 	"ListShares\x12\x1a.onyx.v1.ListSharesRequest\x1a\x1b.onyx.v1.ListSharesResponse\x124\n" +
 	"\bGetShare\x12\x18.onyx.v1.GetShareRequest\x1a\x0e.onyx.v1.Share\x12H\n" +
-	"\vDeleteShare\x12\x1b.onyx.v1.DeleteShareRequest\x1a\x1c.onyx.v1.DeleteShareResponse2\x99\x01\n" +
+	"\vDeleteShare\x12\x1b.onyx.v1.DeleteShareRequest\x1a\x1c.onyx.v1.DeleteShareResponse\x12Q\n" +
+	"\x0eSetShareAccess\x12\x1e.onyx.v1.SetShareAccessRequest\x1a\x1f.onyx.v1.SetShareAccessResponse\x12T\n" +
+	"\x0fListShareAccess\x12\x1f.onyx.v1.ListShareAccessRequest\x1a .onyx.v1.ListShareAccessResponse2\x99\x01\n" +
 	"\x06Shared\x12K\n" +
 	"\fRenderConfig\x12\x1c.onyx.v1.RenderConfigRequest\x1a\x1d.onyx.v1.RenderConfigResponse\x12B\n" +
 	"\tRenderAll\x12\x19.onyx.v1.RenderAllRequest\x1a\x1a.onyx.v1.RenderAllResponseB8Z6github.com/innotelinc/onyx/proto/gen/go/onyx/v1;onyxv1b\x06proto3"
@@ -802,44 +1083,57 @@ func file_onyx_v1_shares_proto_rawDescGZIP() []byte {
 }
 
 var file_onyx_v1_shares_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_onyx_v1_shares_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_onyx_v1_shares_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_onyx_v1_shares_proto_goTypes = []any{
-	(ShareProtocol)(0),           // 0: onyx.v1.ShareProtocol
-	(*Share)(nil),                // 1: onyx.v1.Share
-	(*CreateShareRequest)(nil),   // 2: onyx.v1.CreateShareRequest
-	(*ListSharesRequest)(nil),    // 3: onyx.v1.ListSharesRequest
-	(*ListSharesResponse)(nil),   // 4: onyx.v1.ListSharesResponse
-	(*GetShareRequest)(nil),      // 5: onyx.v1.GetShareRequest
-	(*DeleteShareRequest)(nil),   // 6: onyx.v1.DeleteShareRequest
-	(*DeleteShareResponse)(nil),  // 7: onyx.v1.DeleteShareResponse
-	(*RenderAllRequest)(nil),     // 8: onyx.v1.RenderAllRequest
-	(*RenderAllResponse)(nil),    // 9: onyx.v1.RenderAllResponse
-	(*RenderConfigRequest)(nil),  // 10: onyx.v1.RenderConfigRequest
-	(*RenderConfigResponse)(nil), // 11: onyx.v1.RenderConfigResponse
+	(ShareProtocol)(0),              // 0: onyx.v1.ShareProtocol
+	(*Share)(nil),                   // 1: onyx.v1.Share
+	(*ShareAccess)(nil),             // 2: onyx.v1.ShareAccess
+	(*CreateShareRequest)(nil),      // 3: onyx.v1.CreateShareRequest
+	(*ListSharesRequest)(nil),       // 4: onyx.v1.ListSharesRequest
+	(*ListSharesResponse)(nil),      // 5: onyx.v1.ListSharesResponse
+	(*GetShareRequest)(nil),         // 6: onyx.v1.GetShareRequest
+	(*DeleteShareRequest)(nil),      // 7: onyx.v1.DeleteShareRequest
+	(*DeleteShareResponse)(nil),     // 8: onyx.v1.DeleteShareResponse
+	(*SetShareAccessRequest)(nil),   // 9: onyx.v1.SetShareAccessRequest
+	(*SetShareAccessResponse)(nil),  // 10: onyx.v1.SetShareAccessResponse
+	(*ListShareAccessRequest)(nil),  // 11: onyx.v1.ListShareAccessRequest
+	(*ListShareAccessResponse)(nil), // 12: onyx.v1.ListShareAccessResponse
+	(*RenderAllRequest)(nil),        // 13: onyx.v1.RenderAllRequest
+	(*RenderAllResponse)(nil),       // 14: onyx.v1.RenderAllResponse
+	(*RenderConfigRequest)(nil),     // 15: onyx.v1.RenderConfigRequest
+	(*RenderConfigResponse)(nil),    // 16: onyx.v1.RenderConfigResponse
 }
 var file_onyx_v1_shares_proto_depIdxs = []int32{
 	0,  // 0: onyx.v1.Share.protocols:type_name -> onyx.v1.ShareProtocol
-	0,  // 1: onyx.v1.CreateShareRequest.protocols:type_name -> onyx.v1.ShareProtocol
-	1,  // 2: onyx.v1.ListSharesResponse.shares:type_name -> onyx.v1.Share
-	1,  // 3: onyx.v1.RenderAllRequest.shares:type_name -> onyx.v1.Share
-	1,  // 4: onyx.v1.RenderConfigRequest.share:type_name -> onyx.v1.Share
-	2,  // 5: onyx.v1.CoreShares.CreateShare:input_type -> onyx.v1.CreateShareRequest
-	3,  // 6: onyx.v1.CoreShares.ListShares:input_type -> onyx.v1.ListSharesRequest
-	5,  // 7: onyx.v1.CoreShares.GetShare:input_type -> onyx.v1.GetShareRequest
-	6,  // 8: onyx.v1.CoreShares.DeleteShare:input_type -> onyx.v1.DeleteShareRequest
-	10, // 9: onyx.v1.Shared.RenderConfig:input_type -> onyx.v1.RenderConfigRequest
-	8,  // 10: onyx.v1.Shared.RenderAll:input_type -> onyx.v1.RenderAllRequest
-	1,  // 11: onyx.v1.CoreShares.CreateShare:output_type -> onyx.v1.Share
-	4,  // 12: onyx.v1.CoreShares.ListShares:output_type -> onyx.v1.ListSharesResponse
-	1,  // 13: onyx.v1.CoreShares.GetShare:output_type -> onyx.v1.Share
-	7,  // 14: onyx.v1.CoreShares.DeleteShare:output_type -> onyx.v1.DeleteShareResponse
-	11, // 15: onyx.v1.Shared.RenderConfig:output_type -> onyx.v1.RenderConfigResponse
-	9,  // 16: onyx.v1.Shared.RenderAll:output_type -> onyx.v1.RenderAllResponse
-	11, // [11:17] is the sub-list for method output_type
-	5,  // [5:11] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	2,  // 1: onyx.v1.Share.access:type_name -> onyx.v1.ShareAccess
+	0,  // 2: onyx.v1.CreateShareRequest.protocols:type_name -> onyx.v1.ShareProtocol
+	1,  // 3: onyx.v1.ListSharesResponse.shares:type_name -> onyx.v1.Share
+	2,  // 4: onyx.v1.SetShareAccessRequest.access:type_name -> onyx.v1.ShareAccess
+	2,  // 5: onyx.v1.SetShareAccessResponse.access:type_name -> onyx.v1.ShareAccess
+	2,  // 6: onyx.v1.ListShareAccessResponse.access:type_name -> onyx.v1.ShareAccess
+	1,  // 7: onyx.v1.RenderAllRequest.shares:type_name -> onyx.v1.Share
+	1,  // 8: onyx.v1.RenderConfigRequest.share:type_name -> onyx.v1.Share
+	3,  // 9: onyx.v1.CoreShares.CreateShare:input_type -> onyx.v1.CreateShareRequest
+	4,  // 10: onyx.v1.CoreShares.ListShares:input_type -> onyx.v1.ListSharesRequest
+	6,  // 11: onyx.v1.CoreShares.GetShare:input_type -> onyx.v1.GetShareRequest
+	7,  // 12: onyx.v1.CoreShares.DeleteShare:input_type -> onyx.v1.DeleteShareRequest
+	9,  // 13: onyx.v1.CoreShares.SetShareAccess:input_type -> onyx.v1.SetShareAccessRequest
+	11, // 14: onyx.v1.CoreShares.ListShareAccess:input_type -> onyx.v1.ListShareAccessRequest
+	15, // 15: onyx.v1.Shared.RenderConfig:input_type -> onyx.v1.RenderConfigRequest
+	13, // 16: onyx.v1.Shared.RenderAll:input_type -> onyx.v1.RenderAllRequest
+	1,  // 17: onyx.v1.CoreShares.CreateShare:output_type -> onyx.v1.Share
+	5,  // 18: onyx.v1.CoreShares.ListShares:output_type -> onyx.v1.ListSharesResponse
+	1,  // 19: onyx.v1.CoreShares.GetShare:output_type -> onyx.v1.Share
+	8,  // 20: onyx.v1.CoreShares.DeleteShare:output_type -> onyx.v1.DeleteShareResponse
+	10, // 21: onyx.v1.CoreShares.SetShareAccess:output_type -> onyx.v1.SetShareAccessResponse
+	12, // 22: onyx.v1.CoreShares.ListShareAccess:output_type -> onyx.v1.ListShareAccessResponse
+	16, // 23: onyx.v1.Shared.RenderConfig:output_type -> onyx.v1.RenderConfigResponse
+	14, // 24: onyx.v1.Shared.RenderAll:output_type -> onyx.v1.RenderAllResponse
+	17, // [17:25] is the sub-list for method output_type
+	9,  // [9:17] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_onyx_v1_shares_proto_init() }
@@ -853,7 +1147,7 @@ func file_onyx_v1_shares_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_onyx_v1_shares_proto_rawDesc), len(file_onyx_v1_shares_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   11,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

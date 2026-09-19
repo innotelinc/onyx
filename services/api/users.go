@@ -12,19 +12,24 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	onyxv1 "github.com/innotelinc/onyx/proto/gen/go/onyx/v1"
 )
 
 var validRoles = map[string]bool{"admin": true, "operator": true, "user": true, "viewer": true}
 
 type onyxUser struct {
-	ID          string            `json:"id"`
-	Username    string            `json:"username"`
-	DisplayName string            `json:"display_name"`
-	Email       string            `json:"email,omitempty"`
-	Role        string            `json:"role"`
-	Status      string            `json:"status"`
-	Permissions map[string]string `json:"permissions,omitempty"`
-	CreatedAt   string            `json:"created_at"`
+	ID          string `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email,omitempty"`
+	Role        string `json:"role"`
+	Status      string `json:"status"`
+	// Share grants deliberately do not live here: they are recorded in
+	// onyx-core, which renders them into the share backends, and the
+	// /users/{id}/permissions endpoints read and write that record. Keeping a
+	// second copy in this file would let the page and the daemons disagree.
+	CreatedAt string `json:"created_at"`
 	// Source says where the account came from: an Onyx-only mapping, an
 	// Authentik account, or both. InAuthentik/Active are the identity
 	// provider's own answer, so the console can show a locked account as locked
@@ -102,7 +107,7 @@ func (s *userStore) upsert(username string, mut func(*onyxUser)) (*onyxUser, err
 	s.nextID++
 	u := &onyxUser{
 		ID: fmt.Sprintf("usr_%d", s.nextID), Username: username, Role: "user", Status: "active",
-		Permissions: map[string]string{}, CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	mut(u)
 	if u.Role == "" {
@@ -246,7 +251,7 @@ func (s *server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.users.nextID++
-	u := &onyxUser{ID: fmt.Sprintf("usr_%d", s.users.nextID), Username: strings.TrimSpace(body.Username), DisplayName: body.DisplayName, Email: body.Email, Role: body.Role, Status: body.Status, Permissions: map[string]string{}, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+	u := &onyxUser{ID: fmt.Sprintf("usr_%d", s.users.nextID), Username: strings.TrimSpace(body.Username), DisplayName: body.DisplayName, Email: body.Email, Role: body.Role, Status: body.Status, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
 	if u.Role == "" {
 		u.Role = "user"
 	}
@@ -374,18 +379,53 @@ func (s *server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		writeEnvelope(w, 500, apiError{Code: "internal", Message: err.Error()})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"deleted": true, "authentik": authentik})
+	// The grants go with the mapping. A name left in a share's access list
+	// would be a permission the console no longer shows but the backends still
+	// honour — exactly the drift the Users page exists to prevent.
+	removed, grantErr := s.removeUserGrants(r.Context(), user.Username)
+	out := map[string]any{"deleted": true, "authentik": authentik, "grants_removed": removed}
+	if grantErr != nil {
+		out["grants_error"] = grantErr.Error()
+	}
+	writeJSON(w, 200, out)
 }
 
+// handleUserPermissions answers "what can this person reach" from onyx-core,
+// which is the record the share backends are rendered from (docs/design/08#2),
+// so the panel and the daemons cannot disagree.
 func (s *server) handleUserPermissions(w http.ResponseWriter, r *http.Request) {
 	u, ok := s.getUser(r.PathValue("id"))
 	if !ok {
 		writeEnvelope(w, 404, apiError{Code: "not_found", Message: "user not found"})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"user_id": u.ID, "permissions": u.Permissions})
+	perms, err := s.sharePermissionsFor(r.Context(), u.Username)
+	if err != nil {
+		s.writeGRPCError(w, r, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"user_id": u.ID, "username": u.Username, "permissions": perms})
 }
 
+// sharePermissionsFor reads one user's grants as share -> mode.
+func (s *server) sharePermissionsFor(ctx context.Context, username string) (map[string]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	resp, err := s.coreShares.ListShareAccess(ctx, &onyxv1.ListShareAccessRequest{Username: username})
+	if err != nil {
+		return nil, err
+	}
+	perms := map[string]string{}
+	for _, a := range resp.GetAccess() {
+		perms[a.GetShare()] = a.GetMode()
+	}
+	return perms, nil
+}
+
+// handleSetUserPermissions replaces one user's grants. The body is the complete
+// desired map, so a share left out (or set to "") is a grant to remove; only
+// what actually changed is written, because every write re-renders the daemon
+// config that the share backends enforce.
 func (s *server) handleSetUserPermissions(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Permissions map[string]string `json:"permissions"`
@@ -394,23 +434,80 @@ func (s *server) handleSetUserPermissions(w http.ResponseWriter, r *http.Request
 		writeEnvelope(w, 400, apiError{Code: "invalid_argument", Message: err.Error()})
 		return
 	}
-	s.users.mu.Lock()
-	defer s.users.mu.Unlock()
-	u, ok := s.users.users[r.PathValue("id")]
+	u, ok := s.getUser(r.PathValue("id"))
 	if !ok {
 		writeEnvelope(w, 404, apiError{Code: "not_found", Message: "user not found"})
 		return
 	}
 	for share, mode := range body.Permissions {
-		if mode != "read" && mode != "read-write" {
+		if mode != "" && mode != "read" && mode != "read-write" {
 			writeEnvelope(w, 400, apiError{Code: "invalid_argument", Message: "permission must be read or read-write for " + share})
 			return
 		}
 	}
-	u.Permissions = body.Permissions
-	if err := s.users.persistLocked(); err != nil {
-		writeEnvelope(w, 500, apiError{Code: "internal", Message: err.Error()})
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	current, err := s.sharePermissionsFor(ctx, u.Username)
+	if err != nil {
+		s.writeGRPCError(w, r, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"user_id": u.ID, "permissions": u.Permissions})
+	for _, share := range unionShares(current, body.Permissions) {
+		want := body.Permissions[share]
+		if current[share] == want {
+			continue
+		}
+		if _, err := s.coreShares.SetShareAccess(ctx, &onyxv1.SetShareAccessRequest{
+			Access: &onyxv1.ShareAccess{Share: share, Username: u.Username, Mode: want},
+		}); err != nil {
+			s.writeGRPCError(w, r, err)
+			return
+		}
+	}
+	perms, err := s.sharePermissionsFor(ctx, u.Username)
+	if err != nil {
+		s.writeGRPCError(w, r, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"user_id": u.ID, "username": u.Username, "permissions": perms})
+}
+
+// removeUserGrants clears every grant a user held, used when the mapping is
+// deleted so no share keeps serving a name the console no longer lists.
+func (s *server) removeUserGrants(ctx context.Context, username string) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	resp, err := s.coreShares.ListShareAccess(ctx, &onyxv1.ListShareAccessRequest{Username: username})
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, a := range resp.GetAccess() {
+		if _, err := s.coreShares.SetShareAccess(ctx, &onyxv1.SetShareAccessRequest{
+			Access: &onyxv1.ShareAccess{Share: a.GetShare(), Username: username},
+		}); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
+}
+
+// unionShares lists every share either side mentions, sorted, so a permission
+// save walks the shares deterministically.
+func unionShares(a, b map[string]string) []string {
+	set := map[string]bool{}
+	for k := range a {
+		set[k] = true
+	}
+	for k := range b {
+		set[k] = true
+	}
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

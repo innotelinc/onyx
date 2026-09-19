@@ -19,10 +19,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	CoreShares_CreateShare_FullMethodName = "/onyx.v1.CoreShares/CreateShare"
-	CoreShares_ListShares_FullMethodName  = "/onyx.v1.CoreShares/ListShares"
-	CoreShares_GetShare_FullMethodName    = "/onyx.v1.CoreShares/GetShare"
-	CoreShares_DeleteShare_FullMethodName = "/onyx.v1.CoreShares/DeleteShare"
+	CoreShares_CreateShare_FullMethodName     = "/onyx.v1.CoreShares/CreateShare"
+	CoreShares_ListShares_FullMethodName      = "/onyx.v1.CoreShares/ListShares"
+	CoreShares_GetShare_FullMethodName        = "/onyx.v1.CoreShares/GetShare"
+	CoreShares_DeleteShare_FullMethodName     = "/onyx.v1.CoreShares/DeleteShare"
+	CoreShares_SetShareAccess_FullMethodName  = "/onyx.v1.CoreShares/SetShareAccess"
+	CoreShares_ListShareAccess_FullMethodName = "/onyx.v1.CoreShares/ListShareAccess"
 )
 
 // CoreSharesClient is the client API for CoreShares service.
@@ -39,6 +41,15 @@ type CoreSharesClient interface {
 	ListShares(ctx context.Context, in *ListSharesRequest, opts ...grpc.CallOption) (*ListSharesResponse, error)
 	GetShare(ctx context.Context, in *GetShareRequest, opts ...grpc.CallOption) (*Share, error)
 	DeleteShare(ctx context.Context, in *DeleteShareRequest, opts ...grpc.CallOption) (*DeleteShareResponse, error)
+	// SetShareAccess records or removes one user's grant on one share and
+	// re-renders the daemon config, so an access change in the console reaches
+	// the share backends instead of only the page that drew it
+	// (docs/design/08#2-roles-and-permissions).
+	SetShareAccess(ctx context.Context, in *SetShareAccessRequest, opts ...grpc.CallOption) (*SetShareAccessResponse, error)
+	// ListShareAccess reports grants, filtered by share and/or username when
+	// either is set (empty = everything), which is how the Users page answers
+	// "what can this person reach" without a second store to keep in step.
+	ListShareAccess(ctx context.Context, in *ListShareAccessRequest, opts ...grpc.CallOption) (*ListShareAccessResponse, error)
 }
 
 type coreSharesClient struct {
@@ -89,6 +100,26 @@ func (c *coreSharesClient) DeleteShare(ctx context.Context, in *DeleteShareReque
 	return out, nil
 }
 
+func (c *coreSharesClient) SetShareAccess(ctx context.Context, in *SetShareAccessRequest, opts ...grpc.CallOption) (*SetShareAccessResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetShareAccessResponse)
+	err := c.cc.Invoke(ctx, CoreShares_SetShareAccess_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *coreSharesClient) ListShareAccess(ctx context.Context, in *ListShareAccessRequest, opts ...grpc.CallOption) (*ListShareAccessResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListShareAccessResponse)
+	err := c.cc.Invoke(ctx, CoreShares_ListShareAccess_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CoreSharesServer is the server API for CoreShares service.
 // All implementations must embed UnimplementedCoreSharesServer
 // for forward compatibility.
@@ -103,6 +134,15 @@ type CoreSharesServer interface {
 	ListShares(context.Context, *ListSharesRequest) (*ListSharesResponse, error)
 	GetShare(context.Context, *GetShareRequest) (*Share, error)
 	DeleteShare(context.Context, *DeleteShareRequest) (*DeleteShareResponse, error)
+	// SetShareAccess records or removes one user's grant on one share and
+	// re-renders the daemon config, so an access change in the console reaches
+	// the share backends instead of only the page that drew it
+	// (docs/design/08#2-roles-and-permissions).
+	SetShareAccess(context.Context, *SetShareAccessRequest) (*SetShareAccessResponse, error)
+	// ListShareAccess reports grants, filtered by share and/or username when
+	// either is set (empty = everything), which is how the Users page answers
+	// "what can this person reach" without a second store to keep in step.
+	ListShareAccess(context.Context, *ListShareAccessRequest) (*ListShareAccessResponse, error)
 	mustEmbedUnimplementedCoreSharesServer()
 }
 
@@ -124,6 +164,12 @@ func (UnimplementedCoreSharesServer) GetShare(context.Context, *GetShareRequest)
 }
 func (UnimplementedCoreSharesServer) DeleteShare(context.Context, *DeleteShareRequest) (*DeleteShareResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteShare not implemented")
+}
+func (UnimplementedCoreSharesServer) SetShareAccess(context.Context, *SetShareAccessRequest) (*SetShareAccessResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetShareAccess not implemented")
+}
+func (UnimplementedCoreSharesServer) ListShareAccess(context.Context, *ListShareAccessRequest) (*ListShareAccessResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListShareAccess not implemented")
 }
 func (UnimplementedCoreSharesServer) mustEmbedUnimplementedCoreSharesServer() {}
 func (UnimplementedCoreSharesServer) testEmbeddedByValue()                    {}
@@ -218,6 +264,42 @@ func _CoreShares_DeleteShare_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CoreShares_SetShareAccess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetShareAccessRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreSharesServer).SetShareAccess(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CoreShares_SetShareAccess_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreSharesServer).SetShareAccess(ctx, req.(*SetShareAccessRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CoreShares_ListShareAccess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListShareAccessRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreSharesServer).ListShareAccess(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CoreShares_ListShareAccess_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreSharesServer).ListShareAccess(ctx, req.(*ListShareAccessRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CoreShares_ServiceDesc is the grpc.ServiceDesc for CoreShares service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -240,6 +322,14 @@ var CoreShares_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteShare",
 			Handler:    _CoreShares_DeleteShare_Handler,
+		},
+		{
+			MethodName: "SetShareAccess",
+			Handler:    _CoreShares_SetShareAccess_Handler,
+		},
+		{
+			MethodName: "ListShareAccess",
+			Handler:    _CoreShares_ListShareAccess_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

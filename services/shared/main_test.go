@@ -224,3 +224,83 @@ func TestRenderAllProtocolSurfaceDeterministic(t *testing.T) {
 		t.Errorf("RenderAll protocol surface not deterministic")
 	}
 }
+
+// A share with no grants keeps the group-wide default; the first grant narrows
+// it, and a `read` grant is a read-only rule even on a read-write share. This
+// is the difference between the Access panel being a restriction and a note.
+func TestRenderGrantsNarrowSmbAndWebdav(t *testing.T) {
+	s := &server{}
+	granted := func() *onyxv1.Share {
+		return &onyxv1.Share{
+			Name: "media", Path: "/mnt/onyx/media",
+			Protocols: []onyxv1.ShareProtocol{onyxv1.ShareProtocol_SHARE_PROTOCOL_SMB, onyxv1.ShareProtocol_SHARE_PROTOCOL_WEBDAV},
+			Access: []*onyxv1.ShareAccess{
+				{Share: "media", Username: "bob", Mode: "read"},
+				{Share: "media", Username: "alice", Mode: "read-write"},
+			},
+		}
+	}
+
+	resp, err := s.RenderAll(context.Background(), &onyxv1.RenderAllRequest{Shares: []*onyxv1.Share{granted()}})
+	if err != nil {
+		t.Fatalf("RenderAll: %v", err)
+	}
+	// Sorted, so the render is deterministic even when the grants arrive unsorted.
+	if !strings.Contains(resp.SmbConf, "\tvalid users = alice bob\n") {
+		t.Errorf("smb.conf must admit exactly the grantees:\n%s", resp.SmbConf)
+	}
+	if strings.Contains(resp.SmbConf, "@onyx-users") {
+		t.Errorf("a granted share must not fall back to the group:\n%s", resp.SmbConf)
+	}
+	if !strings.Contains(resp.SmbConf, "\tread list = bob\n") {
+		t.Errorf("smb.conf must keep bob read-only:\n%s", resp.SmbConf)
+	}
+	for _, want := range []string{`allowed_users = ["alice","bob"]`, `readonly_users = ["bob"]`} {
+		if !strings.Contains(resp.WebdavConf, want) {
+			t.Errorf("davd.conf missing %q:\n%s", want, resp.WebdavConf)
+		}
+	}
+
+	// No grants: the group default comes back, and no per-user read list is
+	// emitted (nobody could write anyway on a read-only share).
+	plain := &onyxv1.Share{Name: "media", Path: "/mnt/onyx/media", Readonly: true,
+		Protocols: []onyxv1.ShareProtocol{onyxv1.ShareProtocol_SHARE_PROTOCOL_SMB, onyxv1.ShareProtocol_SHARE_PROTOCOL_WEBDAV}}
+	resp, err = s.RenderAll(context.Background(), &onyxv1.RenderAllRequest{Shares: []*onyxv1.Share{plain}})
+	if err != nil {
+		t.Fatalf("RenderAll: %v", err)
+	}
+	if !strings.Contains(resp.SmbConf, "valid users = @onyx-users") {
+		t.Errorf("ungranted share must keep the group default:\n%s", resp.SmbConf)
+	}
+	if strings.Contains(resp.SmbConf, "read list") {
+		t.Errorf("read-only share needs no read list:\n%s", resp.SmbConf)
+	}
+	for _, want := range []string{"allowed_users = []", "readonly_users = []"} {
+		if !strings.Contains(resp.WebdavConf, want) {
+			t.Errorf("davd.conf missing %q:\n%s", want, resp.WebdavConf)
+		}
+	}
+}
+
+// Grants must not change the bytes rendered for unrelated protocols: NFS, FTP,
+// SFTP and rsync authenticate per share, so a grant is not silently dropped
+// into a config they would ignore.
+func TestRenderGrantsLeaveOtherProtocolsAlone(t *testing.T) {
+	s := &server{}
+	share := &onyxv1.Share{
+		Name: "docs", Path: "/mnt/onyx/docs",
+		Protocols: []onyxv1.ShareProtocol{onyxv1.ShareProtocol_SHARE_PROTOCOL_NFS, onyxv1.ShareProtocol_SHARE_PROTOCOL_SFTP, onyxv1.ShareProtocol_SHARE_PROTOCOL_RSYNC},
+	}
+	before, err := s.RenderAll(context.Background(), &onyxv1.RenderAllRequest{Shares: []*onyxv1.Share{share}})
+	if err != nil {
+		t.Fatalf("RenderAll: %v", err)
+	}
+	share.Access = []*onyxv1.ShareAccess{{Share: "docs", Username: "alice", Mode: "read-write"}}
+	after, err := s.RenderAll(context.Background(), &onyxv1.RenderAllRequest{Shares: []*onyxv1.Share{share}})
+	if err != nil {
+		t.Fatalf("RenderAll: %v", err)
+	}
+	if before.NfsExports != after.NfsExports || before.SftpConf != after.SftpConf || before.RsyncConf != after.RsyncConf {
+		t.Errorf("grants changed a protocol that cannot enforce them")
+	}
+}

@@ -78,7 +78,9 @@ func testServerWithAuthentik(t *testing.T, fake *fakeAuthentik) *server {
 	if err != nil {
 		t.Fatalf("newUserStore: %v", err)
 	}
-	return &server{users: store, authentik: authentikFromEnv()}
+	// The share grants live in onyx-core, so the server needs a share client
+	// even in an identity test: deleting a mapping clears its grants.
+	return &server{users: store, authentik: authentikFromEnv(), coreShares: newFakeCoreShares()}
 }
 
 func TestUsersMergesAuthentikAccountsWithOnyxRoles(t *testing.T) {
