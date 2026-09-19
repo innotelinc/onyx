@@ -56,6 +56,29 @@ provider; local accounts remain as a fallback for offline operation).
   authentication mode, so enrolled devices confirm sign-in with a platform
   authenticator (docs/design/11 §10).
 
+### 2.1 User sync with the Onyx console
+
+Identity lives in Authentik; Onyx stores only the role and the per-share grants.
+The Users page presents one row per person by joining the two, so the two stores
+cannot drift apart:
+
+- `GET /api/v1/users` reads Authentik's accounts (`AUTHENTIK_URL` +
+  `AUTHENTIK_TOKEN`, falling back to `AUTHENTIK_BOOTSTRAP_TOKEN`) and merges them
+  with the local mappings. An Authentik account with no mapping gets one on first
+  sight (role `user`, status from `is_active`) — that is the automatic mapping, and
+  it is persisted, so the next read is stable rather than a second wave of writes.
+  Each row reports `source` (`onyx` / `authentik` / `authentik+onyx`),
+  `in_authentik` and the provider's own `active`.
+- `POST /api/v1/users` creates the account in Authentik **first** and stores the
+  mapping only afterwards: a mapping for somebody who cannot sign in would be a
+  lie the console tells. No password is ever set through the API — Authentik's
+  recovery flow and passkeys are the only way one is minted.
+- `DELETE /api/v1/users/{id}` removes the Onyx mapping and **disables** the
+  Authentik account, so its history and group memberships survive;
+  `?purge=true` is the deliberate erase-everywhere path.
+- When `AUTHENTIK_URL`/token are unset the page says so instead of quietly
+  showing a local-only list (`authentik.reason` in the response).
+
 ## 3. Edge: Nginx Proxy Manager
 
 NPM is the only ingress. Everything else binds loopback inside the compose
