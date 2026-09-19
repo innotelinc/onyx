@@ -209,8 +209,14 @@ device is gone has nothing to release and is simply forgotten — that is the st
   mountpoint, falling back to the data plane's own totals when the pool is not reachable),
   never from whatever filesystem the storage root happens to sit on — on a normal install that
   is the host's system disk, and reporting it as "Storage" is how a 220 GB root disk gets
-  shown as a 20 TB pool. `GET /storage/overview` is the source; `/files/trash` carries the
-  same totals for compatibility.
+  shown as a 20 TB pool. The storage root therefore counts as storage only when the data
+  plane reports a pool (or device) *mounted at the root itself*, which is the single-pool
+  install's layout and not a normal one; in the containerized deployment the root is a bind
+  mount of the host path and in the systemd install it is a directory on the system disk, so
+  both are ignored — a mount point in the local namespace is not evidence of a pool. With
+  every pool offline the totals read zero and the card says no pool is mounted, instead of
+  the host disk's numbers standing in. `GET /storage/overview` is the source; `/files/trash`
+  carries the same totals for compatibility.
 
 ## 6. Sharing protocols (`onyx-shared`)
 
