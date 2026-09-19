@@ -277,6 +277,14 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!(error = %e, "initial pool scan failed (will retry on next list)");
     }
 
+    // A restart takes every mount with it, and the device rows in the registry
+    // still *describe* the mounts of the previous run — so take a live scan
+    // before deciding, then put the pools back where they were. Without this a
+    // pool is listed as online while Files shows an empty storage root, which
+    // reads as a lost pool.
+    let _ = manager.tick_serialized(&HashSet::new(), &sysfs_root).await;
+    restore_pool_mounts(&manager).await;
+
     // Kernel-uevent monitor: block add/remove/change wakes the watcher
     // instantly (no polling on real hardware). Some containers block netlink
     // — then the periodic scan below is the only trigger.
@@ -316,6 +324,51 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         .serve_with_incoming(incoming)
         .await?;
     Ok(())
+}
+
+/// Put back the pools the registry knows where to mount (see
+/// `devices::pools_to_restore`). Called once at startup: the registry outlives
+/// the mounts it describes, so this is what makes a pool survive a restart.
+/// Best effort — a pool whose device is gone, or whose mount fails, is reported
+/// and skipped, never fatal (the service has to serve what it does have).
+async fn restore_pool_mounts(manager: &DeviceManager) {
+    let pools = match manager.registry.list_pools() {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(error = %e, "could not read pools to restore their mounts");
+            return;
+        }
+    };
+    if pools.is_empty() {
+        return;
+    }
+    let devices = match manager.registry.list_devices() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!(error = %e, "could not read devices to restore pool mounts");
+            return;
+        }
+    };
+    let due = devices::pools_to_restore(&pools, &devices);
+    if due.is_empty() {
+        return;
+    }
+    tracing::info!(pools = due.len(), "restoring pool mounts from the registry");
+    for restore in due {
+        match manager.remount_pool(restore.device, &restore.mountpoint).await {
+            Ok(()) => tracing::info!(
+                pool = %restore.pool.name,
+                mountpoint = %restore.mountpoint,
+                "pool re-mounted"
+            ),
+            Err(e) => tracing::warn!(
+                pool = %restore.pool.name,
+                mountpoint = %restore.mountpoint,
+                error = %e,
+                "could not restore the pool's mount"
+            ),
+        }
+    }
 }
 
 /// The hotplug watcher. Primary trigger: kernel uevents (add/remove/change of
@@ -518,6 +571,7 @@ impl Storaged for RegistryBackend {
             total_bytes: device.size_bytes,
             used_bytes: 0,
             state: "online".into(),
+            mountpoint: device.mountpoint,
         });
         Ok(Response::new(pool))
     }

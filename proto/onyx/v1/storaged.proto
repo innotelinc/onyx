@@ -77,6 +77,11 @@ message Pool {
   uint64 used_bytes = 5;
   // online | degraded | offline.
   string state = 6;
+  // Where the pool is (or was last) mounted, remembered so a restart can
+  // restore the mount instead of leaving the pool listed but unreachable, and
+  // so the console can say which path a record refers to. Empty for a pool
+  // that has never been mounted.
+  string mountpoint = 7;
 }
 
 // A block device (disk or partition) the data plane has detected

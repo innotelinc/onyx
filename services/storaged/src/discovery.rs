@@ -78,6 +78,10 @@ fn to_pool(p: &ParsedPool) -> Pool {
         total_bytes: p.total_bytes,
         used_bytes: p.used_bytes,
         state: "online".into(),
+        // Discovery has no idea where the pool is mounted, and must not invent
+        // one: the registry keeps whatever mount we last performed (see
+        // Registry::upsert_pool), which is what a restart restores.
+        mountpoint: String::new(),
     }
 }
 

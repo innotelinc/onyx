@@ -81,6 +81,50 @@ pub fn dev_node_present(dev_root: &Path, kname: &str) -> bool {
     dev_node_error(dev_root, kname).is_none()
 }
 
+/// A pool the registry knows where to mount but that is not mounted right now —
+/// the state a restart, a container recreate or a re-attached disk leaves
+/// behind.
+pub struct PoolRestore<'a> {
+    pub pool: &'a Pool,
+    pub device: &'a Device,
+    pub mountpoint: String,
+}
+
+/// Pools to put back where they were, as (pool, backing device, mountpoint).
+///
+/// The registry remembers the mountpoint (see `Registry::set_pool_mountpoint`),
+/// so a restart can restore the mount instead of leaving the pool listed as
+/// online while Files shows an empty storage root — the difference between "the
+/// pool survived the restart" and "the pool is gone".
+///
+/// Only pools Onyx itself mounted are restored: a filesystem the platform never
+/// mounted (an import candidate, a foreign disk) has no remembered path and is
+/// therefore never mounted behind the operator's back. A pool whose device is
+/// gone, or whose path is already occupied, is skipped rather than retried.
+pub fn pools_to_restore<'a>(pools: &'a [Pool], devices: &'a [Device]) -> Vec<PoolRestore<'a>> {
+    let mut out = Vec::new();
+    for pool in pools {
+        if pool.mountpoint.is_empty() {
+            continue;
+        }
+        // Something is mounted at the path the kernel reported: nothing to do.
+        if devices
+            .iter()
+            .any(|d| !d.mountpoint.is_empty() && d.mountpoint == pool.mountpoint)
+        {
+            continue;
+        }
+        let Some(device) = device_for_pool(pool, devices) else {
+            continue;
+        };
+        if device.state == "detached" || device.path.is_empty() {
+            continue;
+        }
+        out.push(PoolRestore { pool, device, mountpoint: pool.mountpoint.clone() });
+    }
+    out
+}
+
 /// The device backing a pool: matched on filesystem uuid first (the stable
 /// identity), then on label, then on display name.
 ///
@@ -748,12 +792,23 @@ impl DeviceManager {
             if auto_mount {
                 self.mount_and_record_at(&formatted, mount_name).await?;
             }
-            // Btrfs discovery refreshes its own pool record. Register ext4
-            // pools here as well so they remain visible after creation and
-            // restart; Btrfs-only features simply do not apply to them.
-            if fs_type == "ext4" {
-                if let Ok(scan) = self.lsblk().await {
-                    if let Some(info) = parse_lsblk(&scan).into_iter().find(|info| info.kname == formatted.kname) {
+            // Record the pool itself, with the path it was mounted at. Btrfs
+            // discovery refreshes its record on the next scan (keeping this
+            // mountpoint); an ext4 pool has no scanner, so its totals come from
+            // this scan. Either way the mountpoint is what lets a restart (or a
+            // container recreate) put the pool back under the storage root
+            // instead of leaving it listed yet unreachable.
+            let mounted_at = if auto_mount {
+                self.mount_root.join(mount_name).display().to_string()
+            } else {
+                String::new()
+            };
+            if let Ok(scan) = self.lsblk().await {
+                if let Some(info) = parse_lsblk(&scan).into_iter().find(|info| info.kname == formatted.kname) {
+                    self.registry
+                        .set_pool_mountpoint(pool_name, &info.uuid, &mounted_at, fs_type)
+                        .map_err(|e| format!("registry: {e}"))?;
+                    if fs_type == "ext4" {
                         self.registry.upsert_pool(&Pool {
                             name: pool_name.to_string(),
                             uuid: info.uuid,
@@ -761,6 +816,7 @@ impl DeviceManager {
                             total_bytes: info.size_bytes,
                             used_bytes: 0,
                             state: "online".to_string(),
+                            mountpoint: String::new(),
                         }).map_err(|e| format!("registry: {e}"))?;
                     }
                 }
@@ -976,6 +1032,31 @@ impl DeviceManager {
             &format!("pool removed, unmounted {}", dev.mountpoint),
         );
         Ok(true)
+    }
+
+    /// Mount a known pool again at the path the registry remembers
+    /// (`pools_to_restore`). It performs only a mount the pool's own record
+    /// already describes — never a format, never a guess — and refuses a device
+    /// with no node here or a path that is not a pool mount under the storage
+    /// root.
+    pub async fn remount_pool(&self, dev: &Device, mountpoint: &str) -> Result<(), String> {
+        if let Some(reason) = dev_node_error(&self.dev_root, &dev.kname) {
+            return Err(reason);
+        }
+        // Pools mount directly under the storage root, so the remembered path
+        // must be exactly that: `mount_root/<name>`. Anything else is a record
+        // we do not understand, and mounting *somewhere* would be worse than
+        // not mounting.
+        let path = Path::new(mountpoint);
+        match (path.parent(), path.file_name().and_then(|n| n.to_str())) {
+            (Some(parent), Some(name)) if parent == self.mount_root.as_path() => {
+                self.mount_and_record_at(dev, name).await
+            }
+            _ => Err(format!(
+                "{mountpoint} is not a pool mount under {}",
+                self.mount_root.display()
+            )),
+        }
     }
 
     /// A device disappeared from /sys: unmount ours (best effort) and mark it
@@ -1216,6 +1297,7 @@ mod tests {
             total_bytes: 1,
             used_bytes: 0,
             state: "online".into(),
+            mountpoint: "/mnt/onyx/main-pool".into(),
         };
         // The uuid wins even though another disk now carries the label.
         assert_eq!(device_for_pool(&pool, &devices).map(|d| d.kname.as_str()), Some("sdc"));
@@ -1468,6 +1550,59 @@ mod tests {
             .release_pool_mount(&dev)
             .await
             .expect("nothing to release is not a failure"));
+    }
+
+    /// After a restart the registry still describes the previous run's mounts;
+    /// a live scan is what reveals they are gone. Then exactly the pools Onyx
+    /// knows where to mount come back — an unremembered (foreign/imported)
+    /// filesystem is never mounted behind the operator's back, and a pool whose
+    /// disk is unplugged is left alone.
+    #[test]
+    fn pools_to_restore_picks_only_the_pools_onyx_can_put_back() {
+        let known = Pool {
+            name: "main-pool".into(),
+            uuid: "uuid-1".into(),
+            fs_type: "btrfs".into(),
+            total_bytes: 1,
+            used_bytes: 0,
+            state: "offline".into(),
+            mountpoint: "/mnt/onyx/main-pool".into(),
+        };
+        // Never mounted by Onyx: no remembered path, so nothing to restore.
+        let mut never_mounted = known.clone();
+        never_mounted.name = "imported".into();
+        never_mounted.uuid = "uuid-2".into();
+        never_mounted.mountpoint = String::new();
+        // Its disk was unplugged.
+        let mut unplugged = known.clone();
+        unplugged.name = "cold".into();
+        unplugged.uuid = "uuid-3".into();
+        unplugged.mountpoint = "/mnt/onyx/cold".into();
+        // Already mounted (the kernel's view, before the restart's scan).
+        let mut present = known.clone();
+        present.name = "archive".into();
+        present.uuid = "uuid-4".into();
+        present.mountpoint = "/mnt/onyx/archive".into();
+
+        let mut live = test_device("sdc", "disk", "");
+        live.uuid = "uuid-1".into();
+        let mut gone = test_device("sdd", "disk", "");
+        gone.uuid = "uuid-3".into();
+        gone.state = "detached".into();
+        let mut mounted = test_device("sde", "disk", "/mnt/onyx/archive");
+        mounted.uuid = "uuid-4".into();
+
+        let pools = vec![known.clone(), never_mounted, unplugged, present];
+        let devices = vec![live, gone, mounted];
+        let due = pools_to_restore(&pools, &devices);
+
+        assert_eq!(due.len(), 1, "only the restorable pool may come back: {:?}", due.iter().map(|r| r.pool.name.clone()).collect::<Vec<_>>());
+        assert_eq!(due[0].pool.name, "main-pool");
+        assert_eq!(due[0].device.kname, "sdc");
+        assert_eq!(due[0].mountpoint, "/mnt/onyx/main-pool");
+
+        // An empty registry (a fresh install) restores nothing at all.
+        assert!(pools_to_restore(&[], &devices).is_empty());
     }
 
     fn pool_delete_manager(reg: Arc<Registry>) -> DeviceManager {

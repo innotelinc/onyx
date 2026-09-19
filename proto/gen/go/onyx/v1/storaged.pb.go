@@ -345,7 +345,12 @@ type Pool struct {
 	TotalBytes uint64 `protobuf:"varint,4,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
 	UsedBytes  uint64 `protobuf:"varint,5,opt,name=used_bytes,json=usedBytes,proto3" json:"used_bytes,omitempty"`
 	// online | degraded | offline.
-	State         string `protobuf:"bytes,6,opt,name=state,proto3" json:"state,omitempty"`
+	State string `protobuf:"bytes,6,opt,name=state,proto3" json:"state,omitempty"`
+	// Where the pool is (or was last) mounted, remembered so a restart can
+	// restore the mount instead of leaving the pool listed but unreachable, and
+	// so the console can say which path a record refers to. Empty for a pool
+	// that has never been mounted.
+	Mountpoint    string `protobuf:"bytes,7,opt,name=mountpoint,proto3" json:"mountpoint,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -418,6 +423,13 @@ func (x *Pool) GetUsedBytes() uint64 {
 func (x *Pool) GetState() string {
 	if x != nil {
 		return x.State
+	}
+	return ""
+}
+
+func (x *Pool) GetMountpoint() string {
+	if x != nil {
+		return x.Mountpoint
 	}
 	return ""
 }
@@ -1080,7 +1092,7 @@ const file_onyx_v1_storaged_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"U\n" +
 	"\x12DeletePoolResponse\x12!\n" +
 	"\x04pool\x18\x01 \x01(\v2\r.onyx.v1.PoolR\x04pool\x12\x1c\n" +
-	"\tunmounted\x18\x02 \x01(\bR\tunmounted\"\x9d\x01\n" +
+	"\tunmounted\x18\x02 \x01(\bR\tunmounted\"\xbd\x01\n" +
 	"\x04Pool\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04uuid\x18\x02 \x01(\tR\x04uuid\x12\x17\n" +
@@ -1089,7 +1101,10 @@ const file_onyx_v1_storaged_proto_rawDesc = "" +
 	"totalBytes\x12\x1d\n" +
 	"\n" +
 	"used_bytes\x18\x05 \x01(\x04R\tusedBytes\x12\x14\n" +
-	"\x05state\x18\x06 \x01(\tR\x05state\"\xa7\x03\n" +
+	"\x05state\x18\x06 \x01(\tR\x05state\x12\x1e\n" +
+	"\n" +
+	"mountpoint\x18\a \x01(\tR\n" +
+	"mountpoint\"\xa7\x03\n" +
 	"\x06Device\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05kname\x18\x02 \x01(\tR\x05kname\x12\x12\n" +
