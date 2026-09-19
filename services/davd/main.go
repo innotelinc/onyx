@@ -78,11 +78,17 @@ func main() {
 	active.swap(newHandler(cfg), cfg.Shares)
 	boundListen := cfg.Listen
 
-	// Watch for a config that has not been rendered yet, so the first share
-	// that enables WebDAV is served without restarting the daemon.
-	if _, statErr := os.Stat(*configPath); statErr != nil {
-		go watchForConfig(*configPath, *listen, active, boundListen, configWatchInterval)
-	}
+	// Watch the rendered config: the first share that enables WebDAV is served
+	// without a restart, and a later change (a share, or a grant) is applied
+	// even where nothing can signal this process. onyx-privd reloads it through
+	// systemd on an appliance, but a container has no systemd, and the file
+	// onyx-core wrote is right there. SIGHUP stays supported for an explicit
+	// reload.
+	//
+	// The baseline is what was just loaded, captured here rather than inside the
+	// watcher: a revision written between the load and the watcher's first tick
+	// would otherwise be mistaken for the file it started with.
+	go watchConfig(*configPath, *listen, active, boundListen, fingerprint(*configPath), configWatchInterval)
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Listen,
@@ -134,23 +140,42 @@ func main() {
 	}
 }
 
-// configWatchInterval is how often a daemon that started with no rendered
-// config looks for one. It is slow on purpose: this only happens on a machine
-// with no WebDAV shares, and the file is written once when the first one is
-// created.
-const configWatchInterval = 5 * time.Second
+// configWatchInterval is how often the rendered config is checked for a change.
+// The file is tiny and changes only when a share or a grant does, so one stat
+// every few seconds costs nothing and is far more portable than an inotify
+// dependency — and it is what makes a container deployment apply a change it
+// cannot be signalled about.
+const configWatchInterval = 3 * time.Second
 
-// watchForConfig serves the rendered config as soon as it appears. It returns
-// once the file has been loaded (or when the process stops), so the common case
-// — a deployment that already has shares — costs no polling at all.
-func watchForConfig(path, listenOverride string, active *reloadable, boundListen string, interval time.Duration) {
+// watchConfig re-reads the rendered config whenever its contents change, and
+// serves it as soon as it first appears (the baseline is empty in that case). A
+// revision that fails to load leaves the previous share table serving: reload
+// never swaps in a bad config, and the fingerprint still advances so a broken
+// render is logged once, not once per tick.
+func watchConfig(path, listenOverride string, active *reloadable, boundListen, baseline string, interval time.Duration) {
+	last := baseline
 	for range time.Tick(interval) {
-		if _, err := os.Stat(path); err != nil {
+		current := fingerprint(path)
+		// Empty means the file is not there (not rendered yet, or the instant
+		// between onyx-privd's tmp file and the rename that publishes it), which
+		// is not a revision to load.
+		if current == "" || current == last {
 			continue
 		}
+		last = current
 		reload(active, path, listenOverride, boundListen)
-		return
 	}
+}
+
+// fingerprint identifies one revision of a file by size and mtime. onyx-privd
+// writes atomically (tmp -> fsync -> rename), so a new revision always has a
+// fresh mtime; reading the content every tick to hash it would be wasted work.
+func fingerprint(path string) string {
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%d-%d", info.Size(), info.ModTime().UnixNano())
 }
 
 // reload re-reads the config on SIGHUP (the path onyx-privd uses for a WebDAV

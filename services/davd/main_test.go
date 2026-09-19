@@ -57,18 +57,15 @@ func TestDefaultConfigIsValidAndServesNothing(t *testing.T) {
 
 // The watcher is what makes the first WebDAV share appear without an operator
 // restarting the daemon.
-func TestWatchForConfigServesAConfigThatAppears(t *testing.T) {
+func TestWatchConfigServesAConfigThatAppears(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "davd.conf")
 
 	active := &reloadable{}
 	active.swap(newHandler(defaultConfig()), nil)
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		watchForConfig(path, "", active, "127.0.0.1:8081", 5*time.Millisecond)
-	}()
+	// The daemon had no config to load, so the baseline is empty: whatever
+	// appears next is a revision.
+	go watchConfig(path, "", active, "127.0.0.1:8081", "", 5*time.Millisecond)
 
 	shareDir := filepath.Join(dir, "media")
 	if err := os.MkdirAll(shareDir, 0o750); err != nil {
@@ -79,16 +76,17 @@ func TestWatchForConfigServesAConfigThatAppears(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("watcher never picked the config up")
-	}
-
-	active.mu.RLock()
-	shares := append([]share(nil), active.shares...)
-	active.mu.RUnlock()
-	if len(shares) != 1 || shares[0].Name != "media" {
-		t.Fatalf("expected the rendered share table to be serving, got %+v", shares)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		active.mu.RLock()
+		shares := append([]share(nil), active.shares...)
+		active.mu.RUnlock()
+		if len(shares) == 1 && shares[0].Name == "media" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("watcher never picked the config up, shares = %+v", shares)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
