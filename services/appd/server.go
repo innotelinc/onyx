@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -12,6 +13,10 @@ import (
 
 	onyxv1 "github.com/innotelinc/onyx/proto/gen/go/onyx/v1"
 )
+
+// maxPortAttempts bounds how far an install walks away from the port its
+// manifest wants when the host already uses it.
+const maxPortAttempts = 12
 
 // server implements Health and Appd (proto/onyx/v1/appd.proto). Apps come from
 // the curated catalog, installations and containers are persisted in SQLite,
@@ -94,10 +99,29 @@ func (s *server) InstallApp(ctx context.Context, req *onyxv1.InstallAppRequest) 
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	manifest := renderManifest(app.Manifest, cfg, s.host)
-	containers, err := s.runtime.Up(ctx, app.ID, manifest, cfg)
-	if err != nil {
-		slog.Error("app install failed", "app", app.ID, "error", err)
-		return nil, status.Errorf(codes.FailedPrecondition, "install %s: %v", app.ID, err)
+	// The port a manifest publishes is a catalog default, and the machine it
+	// lands on may already use it — another product, another app, or the
+	// operator's own service. appd cannot see the host's port table from inside
+	// its own network namespace; only the engine can, and it says so by refusing
+	// to program the mapping. So take the engine's answer: republish on the next
+	// port and record it, rather than failing an install over a number (and
+	// leaving the console to show a URL that never listens).
+	var containers []*onyxv1.Container
+	for attempt := 0; ; attempt++ {
+		var upErr error
+		containers, upErr = s.runtime.Up(ctx, app.ID, manifest, cfg)
+		if upErr == nil {
+			break
+		}
+		port, ok := shiftHTTPPort(cfg["http_port"], attempt+1)
+		if !ok || attempt+1 >= maxPortAttempts || !isHostPortConflict(upErr) {
+			slog.Error("app install failed", "app", app.ID, "error", upErr)
+			return nil, status.Errorf(codes.FailedPrecondition, "install %s: %v", app.ID, upErr)
+		}
+		cfg["http_port"] = port
+		manifest = renderManifest(app.Manifest, cfg, s.host)
+		slog.Info("app install: the published port is taken, retrying on the next one",
+			"app", app.ID, "port", port)
 	}
 	if err := s.store.markInstalled(app.ID, app.Version, cfg); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
@@ -288,6 +312,41 @@ func renderManifest(manifest string, cfg map[string]string, host string) string 
 		manifest = strings.ReplaceAll(manifest, "{{"+key+"}}", value)
 	}
 	return manifest
+}
+
+// isHostPortConflict reports whether the engine refused the project because a
+// published host port already belongs to something else. That is the one
+// install failure worth retrying on a different port; every other engine error
+// is reported as it is.
+func isHostPortConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"port is already allocated",
+		"address already in use",
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// shiftHTTPPort returns the app's published port moved `step` above the
+// requested one, or ok=false when there is nothing to move (no port configured,
+// a non-numeric one, or past the end of the range).
+func shiftHTTPPort(current string, step int) (string, bool) {
+	n, err := strconv.Atoi(strings.TrimSpace(current))
+	if err != nil || n < 1 || n > 65535 {
+		return "", false
+	}
+	next := n + step
+	if next < 1 || next > 65535 {
+		return "", false
+	}
+	return strconv.Itoa(next), true
 }
 
 // validateAppID is used by tests and by any future store integration.
