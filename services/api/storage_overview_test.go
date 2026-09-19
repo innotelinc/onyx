@@ -25,6 +25,15 @@ func pool(name, uuid, fs string, total, used uint64) *onyxv1.Pool {
 	return &onyxv1.Pool{Name: name, Uuid: uuid, FsType: fs, TotalBytes: total, UsedBytes: used, State: "online"}
 }
 
+// poolRemembering is a pool whose device row is gone but which still carries
+// the mountpoint it was mounted at — the stale-registry shape.
+func poolRemembering(name, mountpoint string) *onyxv1.Pool {
+	p := pool(name, "uuid-1", "btrfs", 500, 100)
+	p.State = "offline"
+	p.Mountpoint = mountpoint
+	return p
+}
+
 func dev(kname, label, uuid, mountpoint, state string) *onyxv1.Device {
 	return &onyxv1.Device{Kname: kname, Name: label, Path: "/dev/" + kname, Type: "disk", Label: label, Uuid: uuid, Mountpoint: mountpoint, State: state, SizeBytes: 1000}
 }
@@ -217,6 +226,42 @@ func TestStorageOverviewOrdersVisibleFirst(t *testing.T) {
 	}
 	if len(got.Warnings) != 1 || !strings.Contains(got.Warnings[0], "archive") {
 		t.Errorf("warnings = %v, want one about archive", got.Warnings)
+	}
+}
+
+// The live-found case: a pool record with no device row, and a real mount at
+// the path it remembers. Listing it twice (once from the pool registry, once as
+// an unclaimed mount under the root) is the bug this pins; the capacity must
+// come from the mount, not from the stale registry totals.
+func TestStorageOverviewStalePoolWithLiveMountIsListedOnce(t *testing.T) {
+	root := t.TempDir()
+	mount := filepath.Join(root, "main-pool")
+	if err := os.Mkdir(mount, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pools := []*onyxv1.Pool{poolRemembering("main-pool", mount)}
+	// The device registry no longer lists the disk (it was unplugged, or the
+	// record was forgotten), so the pool has to stand on its remembered path.
+	capacity := fakeCapacity(map[string][2]int64{mount: {8000, 6000}})
+
+	got := buildStorageOverview(root, pools, nil, capacity)
+	if len(got.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1 (the pool and the mount are the same storage): %+v", len(got.Entries), got.Entries)
+	}
+	e := got.Entries[0]
+	if e.Mountpoint != mount || !e.Visible || e.TotalBytes != 8000 {
+		t.Errorf("entry = %+v, want the live mount's capacity at %s", e, mount)
+	}
+	if e.State != "online" {
+		t.Errorf("state = %q, want online: the filesystem is demonstrably there", e.State)
+	}
+	if got.Primary == nil || got.Primary.Name != "main-pool" || got.TotalBytes != 8000 {
+		t.Errorf("primary = %+v, totals = %d, want main-pool at 8000", got.Primary, got.TotalBytes)
+	}
+	// A remembered path is not evidence of a live mount, so it must not raise
+	// the mount-namespace warning either.
+	if len(got.Warnings) != 0 {
+		t.Errorf("warnings = %v, want none", got.Warnings)
 	}
 }
 

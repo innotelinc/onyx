@@ -158,11 +158,24 @@ func buildStorageOverview(root string, pools []*onyxv1.Pool, devices []*onyxv1.D
 			Source:     "pool",
 		}
 		entry.FreeBytes = max64(entry.TotalBytes-entry.UsedBytes, 0)
+		deviceMount := ""
 		if dev != nil {
-			entry.Mountpoint = dev.GetMountpoint()
+			deviceMount = dev.GetMountpoint()
 			entry.State = orString(entry.State, dev.GetState())
 		}
-		entry.Mounted = entry.Mountpoint != "" || dev.GetState() == "mounted"
+		// A pool remembers where it was mounted even when its device row is gone
+		// (the stale-registry case the Remove action exists for). Falling back to
+		// that is what keeps one pool from being reported twice — once as the
+		// pool, once as an unclaimed mount under the root — and it is how the
+		// path gets claimed below, so the mount is listed once rather than twice.
+		entry.Mountpoint = deviceMount
+		if entry.Mountpoint == "" {
+			entry.Mountpoint = pool.GetMountpoint()
+		}
+		// Mounted means the data plane says a device is mounted there. A merely
+		// remembered path is not evidence of a live mount, so it does not raise
+		// the mount-namespace warning below.
+		entry.Mounted = deviceMount != "" || dev.GetState() == "mounted"
 		// A live filesystem is more accurate than a registry snapshot (btrfs
 		// usage and ext4 used-bytes are both approximations there), so the
 		// statfs numbers win whenever this process can reach the mount. When it
@@ -171,6 +184,9 @@ func buildStorageOverview(root string, pools []*onyxv1.Pool, devices []*onyxv1.D
 			entry.Visible = true
 			claimed[entry.Mountpoint] = true
 			entry.TotalBytes, entry.FreeBytes, entry.UsedBytes = total, free, total-free
+			// A filesystem this process can stat is not offline, whatever the
+			// last registry scan concluded before the device record went away.
+			entry.State = "online"
 		}
 		out.Entries = append(out.Entries, entry)
 	}
