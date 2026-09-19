@@ -313,6 +313,15 @@ func (c *Client) CreatePool(ctx context.Context, req *CreatePoolRequest) (*Pool,
 	return &p, nil
 }
 
+// DeletePool forgets a pool record by name (DELETE /api/v1/pools/{name}).
+// The pool's mount is released and its registry row dropped; the filesystem on
+// the device is never erased, so the pool can be created again or imported
+// later. A stale record — a pool whose disk was re-formatted, relabelled or
+// pulled — is what this clears.
+func (c *Client) DeletePool(ctx context.Context, name string) error {
+	return c.doJSON(ctx, http.MethodDelete, "/api/v1/pools/"+url.PathEscape(name), nil, nil)
+}
+
 // RemoteProvider describes one cloud/remote backend the API can configure
 // (GET /api/v1/storage/providers). Field names are rclone's own option names.
 type RemoteProvider struct {

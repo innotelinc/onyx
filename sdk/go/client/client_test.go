@@ -2,8 +2,53 @@ package client
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
+
+// DeletePool is how a stale record is cleared, so the request it issues is the
+// contract: the e2e harness and the console both rely on DELETE
+// /api/v1/pools/<name> existing and on the name reaching the API verbatim.
+func TestDeletePoolIssuesDeleteOnThePoolPath(t *testing.T) {
+	var gotMethod, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"pool":      map[string]any{"name": "main-pool", "uuid": "uuid-1", "state": "offline"},
+			"unmounted": false,
+		})
+	}))
+	defer srv.Close()
+
+	if err := New(srv.URL).DeletePool(t.Context(), "main-pool"); err != nil {
+		t.Fatalf("DeletePool: %v", err)
+	}
+	if gotMethod != http.MethodDelete || gotPath != "/api/v1/pools/main-pool" {
+		t.Errorf("issued %s %s, want DELETE /api/v1/pools/main-pool", gotMethod, gotPath)
+	}
+}
+
+// A pool that is not there is reported as the API's not_found, not as success:
+// a console that silently "removed" an unknown pool would hide a stale list.
+func TestDeletePoolSurfacesNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"code": "not_found", "message": "pool 'gone' not found"},
+		})
+	}))
+	defer srv.Close()
+
+	err := New(srv.URL).DeletePool(t.Context(), "gone")
+	if err == nil {
+		t.Fatal("expected an error for a missing pool")
+	}
+	apiErr, ok := err.(*APIError)
+	if !ok || apiErr.Code != "not_found" {
+		t.Fatalf("error = %#v, want a not_found API error", err)
+	}
+}
 
 // The API serializes protobuf messages with protojson, which emits 64-bit
 // fields as JSON *strings*. A client that only accepted numbers would fail to
