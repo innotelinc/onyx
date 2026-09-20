@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -81,6 +82,43 @@ type storageOverview struct {
 // capacityFn is mountCapacity, injected so the join can be tested without real
 // mounts.
 type capacityFn func(path string) (int64, int64, bool)
+
+// reconcilePoolState corrects one pool's state from the mount this process can
+// actually reach, so `GET /pools` agrees with `GET /storage/overview` and the
+// dashboard instead of contradicting them.
+//
+// The registry's `state` is a snapshot of the last scan: `btrfs filesystem
+// show` marks a btrfs pool offline the moment it stops listing it, which happens
+// whenever the scanner cannot see the device (a pool mounted by the host before
+// Onyx started, a container without the block node, a scan that raced a
+// remount). The mount is the reality the user sees in Files, so a pool whose
+// mountpoint this process can stat is online whatever the snapshot concluded.
+// An unreachable pool keeps the registry's verdict — a missing mount is exactly
+// when "offline" is the truth.
+func reconcilePoolState(pool *onyxv1.Pool, devices []*onyxv1.Device, capacity capacityFn) {
+	if pool == nil || strings.EqualFold(pool.GetState(), "online") {
+		return
+	}
+	mount := ""
+	if dev := deviceForPool(pool, devices); dev != nil {
+		mount = dev.GetMountpoint()
+	}
+	if mount == "" {
+		// The stale-registry case the Remove action exists for: the device row is
+		// gone but the pool remembers where it was mounted.
+		mount = pool.GetMountpoint()
+	}
+	if _, _, visible := capacity(mount); visible {
+		pool.State = "online"
+	}
+}
+
+// reconcilePools applies reconcilePoolState across a pool list in place.
+func reconcilePools(pools []*onyxv1.Pool, devices []*onyxv1.Device, capacity capacityFn) {
+	for _, pool := range pools {
+		reconcilePoolState(pool, devices, capacity)
+	}
+}
 
 // dataPlaneMountsRoot reports whether the data plane says the storage root *is*
 // a filesystem of its own: a pool (through its backing device) or a device
