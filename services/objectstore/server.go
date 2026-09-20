@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -260,6 +261,12 @@ func (s *server) GetObject(ctx context.Context, req *onyxv1.GetObjectRequest) (*
 	s.mu.Unlock()
 	if err != nil {
 		return nil, err
+	}
+	// The bucket's own directory is not the only path that can land here: a key
+	// that names a prefix does too, and reading it would fail with EISDIR and
+	// answer 500 for a key that does not exist. See errNotAnObject.
+	if _, statErr := statObjectFile(path); errors.Is(statErr, errNotAnObject) {
+		return nil, status.Error(codes.NotFound, "object not found")
 	}
 	data, readErr := os.ReadFile(path)
 	if readErr == nil {
@@ -571,6 +578,33 @@ func (s *server) remoteExists(name string) bool {
 		}
 	}
 	return false
+}
+
+// errNotAnObject reports that a key resolves to something other than a regular
+// file — which for this store means a directory, i.e. a key *prefix*.
+//
+// Objects are files under `<state-dir>/objects/<bucket>/`, so the key `postgres`
+// is a directory exactly when objects were written under `postgres/…`, and S3
+// has no object of that shape. Answering for one is not cosmetic: a key that is
+// a prefix looks like a directory to a human and like a *file* to anything that
+// only stats it, so a client probing with HEAD concluded the prefix was a single
+// object and then could not list or age out what lived beneath it. Real S3
+// answers 404 to such a key, and so does this store.
+var errNotAnObject = errors.New("key resolves to a prefix, not an object")
+
+// statObjectFile stats an object's path and refuses anything that is not a
+// regular file. Every read of an object goes through it so HEAD and GET cannot
+// disagree about whether a prefix exists: a HEAD answered from os.Stat alone
+// would say 200 for a directory while the GET that followed failed to read it.
+func statObjectFile(path string) (os.FileInfo, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.IsDir() {
+		return nil, errNotAnObject
+	}
+	return info, nil
 }
 
 // objectPathLocked validates the bucket/key pair and returns the on-disk

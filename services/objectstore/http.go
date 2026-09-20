@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"io"
 	"io/fs"
 	"net/http"
@@ -328,9 +329,19 @@ func (s *server) s3Object(w http.ResponseWriter, r *http.Request, bucket, key st
 		path, err := s.objectPathLocked(bucket, key)
 		var info os.FileInfo
 		if err == nil {
-			info, err = os.Stat(path)
+			info, err = statObjectFile(path)
 		}
 		s.mu.Unlock()
+		// A key that names a directory is a prefix, not an object, and no cloud
+		// fetch can produce one — so it is answered here, before the tier logic
+		// below treats it as an evicted object. rclone probes with HEAD to tell a
+		// file from a directory, so a 200 here made every client believe a prefix
+		// was a single object it could not list into or age out (see
+		// TestPrefixKeyIsNotAnObject).
+		if errors.Is(err, errNotAnObject) {
+			headStatus(w, http.StatusNotFound)
+			return
+		}
 		// A cloud-tiered bucket whose object was evicted has no local file, and
 		// answering 404 here while GET succeeds would make every client that
 		// probes with HEAD believe the object is gone. Fetching it costs the same
@@ -341,10 +352,10 @@ func (s *server) s3Object(w http.ResponseWriter, r *http.Request, bucket, key st
 				headStatus(w, http.StatusNotFound)
 				return
 			}
-			info, err = os.Stat(path)
+			info, err = statObjectFile(path)
 		}
 		if err != nil {
-			if os.IsNotExist(err) || strings.Contains(err.Error(), "not found") {
+			if os.IsNotExist(err) || errors.Is(err, errNotAnObject) || strings.Contains(err.Error(), "not found") {
 				headStatus(w, http.StatusNotFound)
 				return
 			}
