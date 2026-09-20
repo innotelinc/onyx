@@ -391,6 +391,13 @@ func (s *server) handlePools(w http.ResponseWriter, r *http.Request) {
 		s.writeGRPCError(w, r, err)
 		return
 	}
+	// Correct the registry's snapshot with the mount this process can reach, so
+	// the Storage page's pool list cannot show a working pool as offline while
+	// Files and the dashboard show it serving. A device lookup failure just
+	// leaves the registry's verdict in place.
+	if devices, err := s.core.ListDevices(ctx, &onyxv1.ListDevicesRequest{}); err == nil {
+		reconcilePools(resp.GetPools(), devices.GetDevices(), mountCapacity)
+	}
 	writeJSON(w, http.StatusOK, protoMessage(resp))
 }
 
@@ -525,6 +532,9 @@ func (s *server) handlePool(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.writeGRPCError(w, r, err)
 		return
+	}
+	if devices, err := s.core.ListDevices(ctx, &onyxv1.ListDevicesRequest{}); err == nil {
+		reconcilePoolState(resp, devices.GetDevices(), mountCapacity)
 	}
 	writeJSON(w, http.StatusOK, protoMessage(resp))
 }

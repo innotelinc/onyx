@@ -190,6 +190,16 @@ reported as several pools, all but one of them unusable. Two rules keep that lis
   `onyx pool remove <name>`, and the E2E cleanup all use it, which is what clears the rows
   left by earlier runs and by disks that were pulled.
 
+An offline record is a snapshot, not a verdict. The registry's `state` is what the last scan
+concluded — `btrfs filesystem show` marks a pool offline the moment it stops listing it, which
+happens whenever the scanner cannot see the device (a pool mounted before Onyx started, a
+container without the block node, a scan that raced a remount). `GET /pools` therefore
+reconciles each pool against the mount the API process can actually reach: a pool whose
+mountpoint stats as a mountpoint reads `online` whatever the snapshot said, and an unreachable
+one keeps the registry's `offline` — a missing mount is exactly when offline is true. This is
+the same join `/storage/overview` performs, so the Storage page's pool list, the Files card and
+the dashboard cannot report the same pool three different ways.
+
 Forgetting releases the pool's mount first (a record dropped while the filesystem is still
 mounted would leave a live mount nothing accounts for, i.e. a Files directory no view can
 explain) and then drops the row. It is a registry operation, never a filesystem one: `wipefs`

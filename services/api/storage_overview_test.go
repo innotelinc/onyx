@@ -265,6 +265,57 @@ func TestStorageOverviewStalePoolWithLiveMountIsListedOnce(t *testing.T) {
 	}
 }
 
+// `GET /pools` and `GET /storage/overview` must agree: a pool whose mount this
+// process can reach reads as online from both, or the Storage page shows a
+// working pool as offline next to a Files page that is serving it.
+func TestReconcilePoolStateFromLiveMount(t *testing.T) {
+	root := t.TempDir()
+	mount := filepath.Join(root, "main-pool")
+	if err := os.Mkdir(mount, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// The registry scan could not see the device, so the snapshot says offline;
+	// the mount is right there.
+	stale := poolRemembering("main-pool", mount)
+	// A pool whose device row survives but is unmounted must stay offline.
+	gone := pool("pulled", "uuid-2", "btrfs", 100, 10)
+	gone.State = "offline"
+	gone.Mountpoint = filepath.Join(root, "pulled")
+	// An already-online pool is untouched even with no reachable mount.
+	live := pool("other", "uuid-3", "ext4", 100, 10)
+
+	capacity := fakeCapacity(map[string][2]int64{mount: {8000, 6000}})
+	reconcilePools([]*onyxv1.Pool{stale, gone, live}, nil, capacity)
+
+	if stale.State != "online" {
+		t.Errorf("stale pool state = %q, want online: the mount is reachable", stale.State)
+	}
+	if gone.State != "offline" {
+		t.Errorf("unmounted pool state = %q, want the registry's offline", gone.State)
+	}
+	if live.State != "online" {
+		t.Errorf("already-online pool state = %q, want online", live.State)
+	}
+}
+
+// A pool backed by a device the registry still lists, mounted somewhere this
+// process can stat, is online off the device's mountpoint (not just the pool's
+// remembered path).
+func TestReconcilePoolStateUsesDeviceMountpoint(t *testing.T) {
+	root := t.TempDir()
+	mount := filepath.Join(root, "main-pool")
+	p := pool("main-pool", "uuid-1", "btrfs", 1000, 400)
+	p.State = "offline"
+	devices := []*onyxv1.Device{dev("sdc", "main-pool", "uuid-1", mount, "mounted")}
+	capacity := fakeCapacity(map[string][2]int64{mount: {8000, 6000}})
+
+	reconcilePools([]*onyxv1.Pool{p}, devices, capacity)
+	if p.State != "online" {
+		t.Errorf("state = %q, want online from the device mountpoint", p.State)
+	}
+}
+
 func TestDeviceForPoolMatching(t *testing.T) {
 	devices := []*onyxv1.Device{
 		dev("sdb", "other", "uuid-other", "", "attached"),
