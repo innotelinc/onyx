@@ -2104,14 +2104,12 @@
       return Promise.all([pools, overview]).then(function (parts) {
         var rows = parts[0].pools || [];
         var ov = parts[1] || {};
-        // A pool whose mount this process can actually reach counts as online
-        // even when the registry snapshot still says offline: the mount is the
-        // reality, and the Storage page's headline already reports it that way,
-        // so the two pages cannot contradict each other.
-        var mounted = {};
-        (ov.entries || []).forEach(function (e) { if (e.visible) mounted[e.name] = true; });
+        // /pools already reports a mounted pool as online: the API reconciles the
+        // registry snapshot against the live mount before it answers. Counting
+        // that served state directly — rather than re-joining the overview here —
+        // is what keeps this card, the Storage page and Files from drifting.
         var online = rows.filter(function (p) {
-          return mounted[p.name] || String(p.state || '').toLowerCase() !== 'offline';
+          return String(p.state || '').toLowerCase() !== 'offline';
         });
         set('stat-pools', String(online.length));
         set('stat-pools-sub', rows.length
