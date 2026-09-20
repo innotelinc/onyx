@@ -52,6 +52,15 @@ POOL_NAME="${POOL_NAME:-e2e-pool}"
 BUCKET="${BUCKET:-e2e-tiered}"
 TIER_TARGET="${TIER_TARGET:-/mnt/onyx/e2e-tier-cold}"
 KEEP="${KEEP:-0}"
+# The daemons the flows below reach directly — a named list rather than "every
+# service the status reports", because the API answers /system/version as soon
+# as it is up, which is *before* its data plane is. Flow 1 therefore raced
+# storaged and failed with "dial unix /run/onyx/onyx-storaged.sock: no such file
+# or directory" on a stack that was merely still starting, and the e2e job was
+# red on main for weeks for it. Waiting on the whole status instead would hang
+# wherever a daemon is configured and deliberately not running (CI starts eight
+# services, not the set), so the wait is on what this script exercises.
+WAIT_SERVICES="${STACK_WAIT_SERVICES:-onyx-storaged onyx-appd}"
 
 pass=0
 fail=0
@@ -181,12 +190,49 @@ cleanup() {
 trap cleanup EXIT
 
 say "stack reachable"
-if status="$(api GET /system/version)"; then
-  echo "  $(printf '%s' "$status" | head -c 160)"
-else
+# Names the services in WAIT_SERVICES that are not serving yet, and nothing when
+# they all are. A service the status does not mention at all counts as not
+# serving: the flows below need it, so "absent" is a stack that is not ready.
+not_serving() {
+  local body; body="$(api GET /system/status)" || return 1
+  python3 -c '
+import json, sys
+try:
+    status = json.loads(sys.argv[1])
+except ValueError:
+    sys.exit(1)
+seen = {s.get("name"): (s.get("status") or "").upper()
+        for s in status.get("services") or []}
+sys.stdout.write(", ".join(
+    name for name in sys.argv[2:] if seen.get(name, "ABSENT") != "SERVING"))
+' "$body" $WAIT_SERVICES
+}
+answered=0
+ready=0
+waiting=""
+for _ in $(seq 1 "${STACK_WAIT_TRIES:-60}"); do
+  if version="$(api GET /system/version)"; then
+    answered=1
+    pending="$(not_serving)" || pending="?"
+    if [ -z "$pending" ]; then
+      ready=1
+      break
+    fi
+    waiting="$pending"
+  fi
+  sleep 3
+done
+if [ "$answered" != 1 ]; then
   bad "no answer from $API — is the stack up?"
   exit 1
 fi
+if [ "$ready" != 1 ]; then
+  bad "the API answered, but these services are not serving: ${waiting:-its data plane}"
+  echo "       (every flow below reaches one of them directly, so this is a stack that is"
+  echo "        still starting or a daemon that never came up — not a flow failure)"
+  exit 1
+fi
+echo "  $(printf '%s' "$version" | head -c 160)"
 
 # --- 1. pool ------------------------------------------------------------------
 say "1. create a pool"
