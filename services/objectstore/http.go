@@ -301,8 +301,28 @@ func writeUserMetadata(w http.ResponseWriter, meta map[string]string) {
 	}
 }
 
+// setLastModified writes an object's timestamp the way S3 does, in the HTTP date
+// format.
+//
+// HEAD and GET both have to carry it, from the same source, because a client
+// that copies an object reads the date off the GET: an absent header is not a
+// missing hint to such a client, it is an empty string it tries to parse, and
+// the transfer fails. `mc` (minio-go) reports it as "Last-Modified time format is
+// invalid, failed with unable to parse". The file's own mtime is what HEAD has
+// always used, so GET uses it too and the two responses cannot disagree.
+func setLastModified(w http.ResponseWriter, info os.FileInfo) {
+	if info == nil {
+		return
+	}
+	w.Header().Set("Last-Modified", info.ModTime().UTC().Format(http.TimeFormat))
+}
+
 func (s *server) s3Object(w http.ResponseWriter, r *http.Request, bucket, key string) {
 	switch r.Method {
+	// Both object responses below set Last-Modified through setLastModified.
+	// HEAD stat'ed the object already; GET has just read it, so it stats the same
+	// path — which exists in every case that returned data, including a cloud
+	// refetch, since a refetch caches the object before answering.
 	case http.MethodHead:
 		s.mu.Lock()
 		path, err := s.objectPathLocked(bucket, key)
@@ -336,7 +356,7 @@ func (s *server) s3Object(w http.ResponseWriter, r *http.Request, bucket, key st
 			w.Header().Set("ETag", `"`+hex.EncodeToString(sum[:])+`"`)
 			w.Header().Set("Content-Type", http.DetectContentType(data))
 		}
-		w.Header().Set("Last-Modified", info.ModTime().UTC().Format(http.TimeFormat))
+		setLastModified(w, info)
 		writeUserMetadata(w, s.loadUserMeta(bucket, key))
 		w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
 		w.WriteHeader(http.StatusOK)
@@ -383,6 +403,14 @@ func (s *server) s3Object(w http.ResponseWriter, r *http.Request, bucket, key st
 		sum := md5.Sum(data)
 		w.Header().Set("ETag", `"`+hex.EncodeToString(sum[:])+`"`)
 		writeUserMetadata(w, s.loadUserMeta(bucket, key))
+		s.mu.Lock()
+		path, pathErr := s.objectPathLocked(bucket, key)
+		s.mu.Unlock()
+		if pathErr == nil {
+			if info, statErr := os.Stat(path); statErr == nil {
+				setLastModified(w, info)
+			}
+		}
 		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(data)
