@@ -18,6 +18,7 @@ minute and idles under 512 MB RAM.
 [![Release](https://github.com/innotelinc/onyx/actions/workflows/release.yml/badge.svg)](https://github.com/innotelinc/onyx/actions/workflows/release.yml)
 [![Pages](https://github.com/innotelinc/onyx/actions/workflows/pages.yml/badge.svg)](https://github.com/innotelinc/onyx/actions/workflows/pages.yml)
 [![Latest release](https://img.shields.io/github/v/release/innotelinc/onyx?color=18181b)](https://innotelinc.github.io/onyx/releases)
+[![Theme: Unity](https://img.shields.io/badge/theme-Unity-6366f1)](https://github.com/innotelinc/innotel-platform-stack/blob/main/standards/unity/README.md)
 
 </div>
 
