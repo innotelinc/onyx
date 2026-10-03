@@ -89,7 +89,7 @@ services:
     # Memory posture (docs/service-audit.md): Go daemons are small; cap each.
     mem_limit: 512m
     memswap_limit: 512m
-    # LAN ingress for the shared Nginx Proxy Manager (192.168.1.46): api/admin
+    # LAN ingress for the shared Nginx Proxy Manager (192.168.1.71): api/admin
     # surfaces publish on the host so NPM can forward to them. 2081 is free on
     # the shared host (8080 belongs to signara there).
     ports:
