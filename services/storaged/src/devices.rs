@@ -81,6 +81,25 @@ pub fn dev_node_present(dev_root: &Path, kname: &str) -> bool {
     dev_node_error(dev_root, kname).is_none()
 }
 
+/// The registry lookup key for whatever the caller named a device.
+///
+/// Callers name a device three ways and mean the same disk: the stable share
+/// name (`usb-data`), the kernel name (`sdz`), and the node path (`/dev/sdz`,
+/// which is what `lsblk` and `onyx pool create <device>` hand over). The
+/// registry stores only the first two, so the path has to be normalized to its
+/// kernel name before it is looked up — otherwise a path falls through to the
+/// `path` column and every path-shaped request dies with
+/// "device /dev/sdz not found" even though the disk is sitting right there.
+///
+/// Both `/dev/sdz` and a bare `sdz` normalize to `sdz`; a stable name (which
+/// never contains a slash) passes through untouched.
+pub fn device_lookup_key(name_or_kname: &str) -> &str {
+    match name_or_kname.strip_prefix("/dev/") {
+        Some(kname) if !kname.is_empty() => kname,
+        _ => name_or_kname,
+    }
+}
+
 /// A pool the registry knows where to mount but that is not mounted right now —
 /// the state a restart, a container recreate or a re-attached disk leaves
 /// behind.
@@ -627,7 +646,7 @@ impl DeviceManager {
     /// result. Non-fatal: unsupported devices end up "unknown" and the
     /// periodic sweep retries later.
     pub async fn check_health(&self, name_or_kname: &str) {
-        let dev = match self.registry.get_device(name_or_kname) {
+        let dev = match self.registry.get_device(device_lookup_key(name_or_kname)) {
             Ok(Some(d)) => d,
             _ => return,
         };
@@ -673,9 +692,12 @@ impl DeviceManager {
     /// Attach a device by stable name or kernel name. Idempotent: already
     /// mounted devices are returned as-is.
     pub async fn attach(&self, name_or_kname: &str) -> Result<Device, String> {
+        // Resolve once: the caller may have named a node path, and the registry
+        // stores the kernel name (see `device_lookup_key`).
+        let key = device_lookup_key(name_or_kname).to_string();
         let dev = self
             .registry
-            .get_device(name_or_kname)
+            .get_device(&key)
             .map_err(|e| format!("registry: {e}"))?
             .ok_or_else(|| format!("device {name_or_kname} not found"))?;
         if dev.state == "detached" {
@@ -708,7 +730,7 @@ impl DeviceManager {
         result?;
         let updated = self
             .registry
-            .get_device(name_or_kname)
+            .get_device(&key)
             .map_err(|e| format!("registry: {e}"))?
             .ok_or_else(|| format!("device {name_or_kname} vanished"))?;
         Ok(updated)
@@ -734,7 +756,7 @@ impl DeviceManager {
         }
         let dev = self
             .registry
-            .get_device(device_name)
+            .get_device(device_lookup_key(device_name))
             .map_err(|e| format!("registry: {e}"))?
             .ok_or_else(|| format!("device {device_name} not found"))?;
         // Any whole device an operator picks may be pooled — an internal SSD or
@@ -953,9 +975,12 @@ impl DeviceManager {
     /// for as long as it is known: a still-plugged-in drive must not be
     /// re-mounted by the next watcher tick. `attach()` reverses the pin.
     pub async fn detach(&self, name_or_kname: &str) -> Result<Device, String> {
+        // The caller may have named a node path; the registry stores the
+        // kernel name (see `device_lookup_key`).
+        let key = device_lookup_key(name_or_kname).to_string();
         let dev = self
             .registry
-            .get_device(name_or_kname)
+            .get_device(&key)
             .map_err(|e| format!("registry: {e}"))?
             .ok_or_else(|| format!("device {name_or_kname} not found"))?;
         if dev.state == "detached" {
@@ -1001,7 +1026,7 @@ impl DeviceManager {
         self.emit(&dev.kname, &dev.name, "detach", "detached (auto off)");
         let updated = self
             .registry
-            .get_device(name_or_kname)
+            .get_device(&key)
             .map_err(|e| format!("registry: {e}"))?
             .ok_or_else(|| format!("device {name_or_kname} vanished"))?;
         Ok(updated)
@@ -1626,6 +1651,62 @@ mod tests {
             ops: Mutex::new(HashSet::new()),
             scan: AsyncMutex::new(()),
         }
+    }
+
+    /// A node path, a kernel name and a stable share name all have to resolve
+    /// to the same disk: `onyx pool create <device>` (and the E2E harness) hand
+    /// over `/dev/sdz`, the registry stores `sdz`.
+    #[test]
+    fn device_lookup_key_normalizes_node_paths() {
+        assert_eq!(device_lookup_key("/dev/sdz"), "sdz");
+        assert_eq!(device_lookup_key("/dev/loop0"), "loop0");
+        assert_eq!(device_lookup_key("/dev/nvme0n1"), "nvme0n1");
+        // A bare kernel name and a stable name have no /dev prefix and pass
+        // through untouched.
+        assert_eq!(device_lookup_key("sdz"), "sdz");
+        assert_eq!(device_lookup_key("usb-data"), "usb-data");
+        // `/dev/` with nothing after it is not a path; keep it as-is so the
+        // lookup fails with the caller's own string in the message.
+        assert_eq!(device_lookup_key("/dev/"), "/dev/");
+    }
+
+    /// Creating a pool with the node path the CLI and the E2E harness use must
+    /// reach the same device the registry stores under its kernel name. Before
+    /// the path was normalized this failed with "device /dev/sdz not found"
+    /// even though the disk was registered and visible.
+    #[tokio::test]
+    async fn create_pool_accepts_a_device_node_path() {
+        let reg = registry_for_test();
+        let dev = test_device("sdz", "disk", "");
+        reg.upsert_device(&dev).unwrap();
+        // A dev_root without the node makes the *visibility* check (the next
+        // step after the lookup) the one that refuses, which proves the lookup
+        // itself resolved the path to the registered disk.
+        let dir = std::env::temp_dir().join(format!("onyx-devroot-path-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mgr = DeviceManager {
+            registry: reg,
+            privd: Arc::new(AsyncMutex::new(privd_dummy())),
+            mount_root: PathBuf::from("/mnt/onyx"),
+            dev_root: dir.clone(),
+            auto_attach: "removable".into(),
+            detached_ttl_minutes: 10,
+            mount_uid: 1000,
+            mount_gid: 100,
+            fat_umask: 0o002,
+            events: broadcast::channel(1).0,
+            ops: Mutex::new(HashSet::new()),
+            scan: AsyncMutex::new(()),
+        };
+
+        let err = mgr
+            .create_pool("/dev/sdz", "main-pool", "ext4", true, true, "main-pool")
+            .await
+            .expect_err("a node this container cannot see is still refused");
+        assert!(!err.contains("not found"), "the path must resolve to the disk: {err}");
+        assert!(err.contains("does not exist in this container"), "{err}");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     fn registry_for_test() -> Arc<Registry> {

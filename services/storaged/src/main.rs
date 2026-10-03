@@ -672,10 +672,13 @@ impl Storaged for RegistryBackend {
         request: Request<GetDeviceRequest>,
     ) -> Result<Response<Device>, Status> {
         let name = request.into_inner().name;
+        // Accept a node path (`/dev/sdz`) as well as a share or kernel name:
+        // the registry stores the kernel name, so a path has to be normalized
+        // before it is looked up (see `devices::device_lookup_key`).
         let mut dev = self
             .manager
             .registry
-            .get_device(&name)
+            .get_device(devices::device_lookup_key(&name))
             .map_err(|e| Status::internal(format!("registry read failed: {e}")))?
             .ok_or_else(|| Status::not_found(format!("device '{name}' not found")))?;
         dev.node_present = Some(devices::dev_node_present(&self.manager.dev_root, &dev.kname));

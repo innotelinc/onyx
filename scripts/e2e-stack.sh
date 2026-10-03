@@ -89,6 +89,44 @@ json_get() { # json_get <python expr over `d`> [extra argv...]
   python3 -c "import json,sys;d=json.load(sys.stdin);print(eval(sys.argv[1]))" "$@" 2>/dev/null || true
 }
 
+# The name the data plane knows a device by, from the path (or kernel name) the
+# harness holds.
+#
+# Device discovery is asynchronous: the pool flow is keyed on the data plane's
+# registry, and a loop device attached a moment ago (or any disk that appeared
+# since the last watcher tick) is not in it yet. Reading /devices forces a live
+# rescan, so poll it until the device shows up — exactly what the console does
+# before it lets an operator pick a disk. The stable share name wins over the
+# kernel name because that is what a pool is addressed by afterwards.
+resolve_device_name() { # resolve_device_name <device path or kernel name>
+  local dev="$1" body resolved i
+  for i in $(seq 1 20); do
+    body="$(api GET /devices)" || true
+    if [ -n "$body" ]; then
+      resolved="$(python3 -c '
+import json, sys
+try:
+    d = json.loads(sys.argv[1])
+except ValueError:
+    sys.exit(1)
+want = sys.argv[2]
+kname = want.rsplit("/", 1)[-1]
+for dev in d.get("devices") or []:
+    if dev.get("path") == want or dev.get("kname") == kname:
+        print(dev.get("name") or dev.get("kname") or kname)
+        sys.exit(0)
+sys.exit(1)
+' "$body" "$dev" 2>/dev/null)" || true
+      if [ -n "$resolved" ]; then
+        printf '%s' "$resolved"
+        return 0
+      fi
+    fi
+    sleep 0.5
+  done
+  return 1
+}
+
 # The container that owns a given compose service, so rclone runs where the
 # generated config and the pool are visible.
 container_of() {
@@ -258,7 +296,18 @@ else
     bad "$POOL_DEVICE is not a block device here — the data plane cannot format it"
     echo "       (on a nested/incus-like host, device nodes have to be passed through)"
   else
-    created="$(api POST /pools "{\"name\":\"$POOL_NAME\",\"device\":\"$POOL_DEVICE\",\"fs_type\":\"ext4\"}")"
+    # Name the device the way the data plane's registry does. The path works
+    # too (the API accepts it), but resolving first also waits out the rescan
+    # that makes a just-attached loop device visible — otherwise the pool is
+    # asked for a disk the registry has not seen yet.
+    device_ref="$POOL_DEVICE"
+    if resolved="$(resolve_device_name "$POOL_DEVICE")"; then
+      device_ref="$resolved"
+      echo "  $POOL_DEVICE is known to the data plane as $device_ref"
+    else
+      echo "  $POOL_DEVICE is not in the data plane's device list yet; naming it by path"
+    fi
+    created="$(api POST /pools "{\"name\":\"$POOL_NAME\",\"device\":\"$device_ref\",\"fs_type\":\"ext4\"}")"
     if printf '%s' "$created" | grep -q '"error"'; then
       bad "pool creation failed: $created"
     else
