@@ -116,7 +116,7 @@ reconnect.
 | GET | `/files/content?path=` | Download (range requests) |
 | POST | `/files/mkdir`, `/files/rename` | Root-confined mutations; rename refuses replacement |
 | POST | `/files/delete` | Soft-delete into `.trash` under the storage root; no permanent delete |
-| GET | `/files/search?q=` | Global + per-dir search |
+| GET | `/files/search?q=&path=&type=&min_size=&max_size=&modified_since=&limit=` | Recursive search under `path` by name substring **and** attributes (kind, byte size, age); `truncated` says the walk hit its bound rather than finding nothing more |
 
 ### Snapshots
 | Method | Path |
@@ -160,6 +160,7 @@ reconnect.
 | POST/DELETE | `/users/{id}/smb-password` (create/re-password or remove the user's Samba account; the password rides the request body and is never echoed) |
 | GET | `/samba/accounts` (the names Samba's passdb contains, with `available:false` when the deployment has no Samba) |
 | GET | `/audit/access?share=&limit=` (the grant changes and the refusals, newest first; `denied` events are written by onyx-davd) |
+| GET | `/audit?share=&limit=&format=` — the **report** over the same trail: totals by kind, the most-refused shares, the names refused, and the covered window; `format=csv` exports the rows for compliance |
 | GET/POST/DELETE | `/api-keys` (scoped, expiring) |
 | GET/POST | `/auth/login`, `/auth/logout`, `/auth/refresh` |
 | GET/POST/DELETE | `/auth/webauthn`, `/auth/totp` |
@@ -174,7 +175,7 @@ reconnect.
 | GET/POST/DELETE | `/network/forwards` |
 | GET/PUT | `/network/vpn` (WireGuard) |
 | GET/PUT | `/settings` (notifications, telemetry opt-in, language, theme) |
-| GET/POST | `/audit?filter=` (admin) |
+| GET | `/audit` (admin; see the access report above — the append-only checksum-chained log of docs/design/07#9 is the v1.0 form) |
 | POST | `/ai/chat` (SSE stream), `/ai/actions` (dry-run tool calls) |
 
 ## 6. File upload/download

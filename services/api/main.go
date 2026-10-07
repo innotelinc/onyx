@@ -281,6 +281,10 @@ func (s *server) registerRoutes() {
 	// The accounts Samba will accept, and the audit trail of grants and refusals.
 	mux.HandleFunc("GET /api/v1/samba/accounts", s.handleSambaAccounts)
 	mux.HandleFunc("GET /api/v1/audit/access", s.handleAccessAudit)
+	// v0.5 Quartz: the audit *report* (a summary of the trail, with a CSV export)
+	// and advanced search (name + attribute filters across the tree).
+	mux.HandleFunc("GET /api/v1/audit", s.handleAuditReport)
+	mux.HandleFunc("GET /api/v1/files/search", s.handleSearch)
 	mux.HandleFunc("GET /api/v1/devices", s.handleDevices)
 	// Device trust fleet view (docs/design/11 §10.3). Registered before the
 	// {name} route so Go 1.22 pattern precedence picks the literal segment.

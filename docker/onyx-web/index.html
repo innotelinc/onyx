@@ -336,6 +336,7 @@
     var VIEWS = [
       { id: 'dashboard', label: 'Dashboard', icon: ICONS.dashboard, section: 'Home' },
       { id: 'files',     label: 'Files',     icon: ICONS.files,     section: 'Data' },
+      { id: 'search',    label: 'Search',    icon: ICONS.files,     section: 'Data' },
       { id: 'storage',   label: 'Storage',   icon: ICONS.storage,   section: 'Data' },
       { id: 'snapshots', label: 'Snapshots', icon: ICONS.snapshots, section: 'Data', badge: '0' },
       { id: 'backups',   label: 'Backups',   icon: ICONS.backups,   section: 'Data' },
@@ -345,6 +346,7 @@
       { id: 'objects',   label: 'Objects',   icon: ICONS.files,     section: 'Platform' },
       { id: 'shares',    label: 'Shares',    icon: ICONS.shares,    section: 'Platform', badge: '0' },
       { id: 'users',     label: 'Users',     icon: ICONS.users,     section: 'Platform' },
+      { id: 'audit',     label: 'Audit',     icon: ICONS.users,     section: 'Platform' },
       { id: 'settings',  label: 'Settings',  icon: ICONS.settings,  section: 'Platform' }
     ];
 
@@ -1745,6 +1747,104 @@
         '<div class="card" id="scrub-status"><div class="empty"><b>No pool selected</b>Choose a pool to inspect or configure its scrub cadence.</div></div>';
     }
 
+    /* Search (Quartz): name plus attributes across the pool. The Files page
+     * filters one folder; this one walks the tree, so it is the answer to "where
+     * is that file" when the operator is not standing in the right folder. */
+    function viewSearch() {
+      return '<div class="page-head"><div><h1>Search</h1><p>Find a file by name and attributes across the pool — not only the folder you are in.</p></div></div>' +
+        '<div class="card" style="margin-bottom:16px"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));align-items:end">' +
+        '<label>Name contains<input id="search-q" class="search" style="width:100%;max-width:none" placeholder="holiday"></label>' +
+        '<label>In folder (optional)<input id="search-path" class="search" style="width:100%;max-width:none" placeholder="media/movies"></label>' +
+        '<label>Kind<select id="search-type" class="search" style="width:100%;max-width:none"><option value="">Files and folders</option><option value="file">Files</option><option value="directory">Folders</option></select></label>' +
+        '<label>Min size (bytes)<input id="search-min" class="search" type="number" min="0" style="width:100%;max-width:none" placeholder="1048576"></label>' +
+        '<label>Max size (bytes)<input id="search-max" class="search" type="number" min="0" style="width:100%;max-width:none" placeholder="1073741824"></label>' +
+        '<label>Modified within<input id="search-since" class="search" style="width:100%;max-width:none" placeholder="7d"></label>' +
+        '</div><div style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap"><button class="btn primary" id="search-run">Search</button><span class="sub" id="search-note"></span></div></div>' +
+        '<div class="card" id="search-results"><div class="empty"><b>No search yet</b>Enter a name to search the pool.</div></div>';
+    }
+
+    function wireSearch() {
+      var run = document.getElementById('search-run');
+      if (run) run.addEventListener('click', runSearch);
+      var q = document.getElementById('search-q');
+      if (q) q.addEventListener('keydown', function (event) { if (event.key === 'Enter') runSearch(); });
+    }
+
+    function runSearch() {
+      var results = document.getElementById('search-results');
+      var note = document.getElementById('search-note');
+      var q = (document.getElementById('search-q').value || '').trim();
+      if (!q) { if (note) note.textContent = 'A name is required.'; return; }
+      var params = ['q=' + encodeURIComponent(q)];
+      var path = (document.getElementById('search-path').value || '').trim();
+      var kind = document.getElementById('search-type').value;
+      var min = (document.getElementById('search-min').value || '').trim();
+      var max = (document.getElementById('search-max').value || '').trim();
+      var since = (document.getElementById('search-since').value || '').trim();
+      if (path) params.push('path=' + encodeURIComponent(path));
+      if (kind) params.push('type=' + encodeURIComponent(kind));
+      if (min) params.push('min_size=' + encodeURIComponent(min));
+      if (max) params.push('max_size=' + encodeURIComponent(max));
+      if (since) params.push('modified_since=' + encodeURIComponent(since));
+      if (note) note.textContent = 'Searching…';
+      results.innerHTML = '<div class="empty"><b>Searching…</b>Walking the tree from the storage root.</div>';
+      apiJSON('/files/search?' + params.join('&')).then(function (data) {
+        var rows = data.results || [];
+        if (note) note.textContent = rows.length + ' result(s) from ' + (data.scanned || 0) + ' entries' + (data.truncated ? ' — stopped early, narrow the search for a complete answer' : '');
+        results.innerHTML = rows.length ? '<div style="display:grid;gap:10px">' + rows.map(function (entry) {
+          return '<div class="event" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--onyx-border);padding-bottom:10px"><div><b>' + esc(entry.name) + '</b><div class="sub">' + esc(entry.path + ' · ' + (entry.type === 'directory' ? 'folder' : formatBytes(entry.size)) + ' · ' + entry.modified_at) + '</div></div>' +
+            (entry.type === 'directory'
+              ? '<span class="sub">folder</span>'
+              : '<div style="display:flex;gap:8px"><button class="btn" data-view="' + esc(entry.path) + '">View</button><button class="btn" data-save="' + esc(entry.path) + '">Download</button></div>') +
+            '</div>';
+        }).join('') + '</div>' : '<div class="empty"><b>Nothing matched</b>Try a shorter name, or drop a size or age filter.</div>';
+        Array.prototype.forEach.call(results.querySelectorAll('[data-view]'), function (button) {
+          button.addEventListener('click', function () { window.open(API + '/files/content?path=' + encodeURIComponent(button.dataset.view), '_blank', 'noopener'); });
+        });
+        Array.prototype.forEach.call(results.querySelectorAll('[data-save]'), function (button) {
+          button.addEventListener('click', function () { window.open(API + '/files/content?download=1&path=' + encodeURIComponent(button.dataset.save), '_blank', 'noopener'); });
+        });
+      }).catch(function (error) {
+        if (note) note.textContent = '';
+        results.innerHTML = '<div class="empty"><b>Search failed</b>' + esc(error && error.message ? error.message : 'The request was refused.') + '</div>';
+      });
+    }
+
+    /* Audit report (Quartz): the trail summarized — how much, and which share
+     * or name is worst — rather than a raw page of events. */
+    function viewAudit() {
+      return '<div class="page-head"><div><h1>Audit</h1><p>What was granted, revoked and refused in the access trail, and who was refused the most.</p></div>' +
+        '<a class="btn" href="' + API + '/audit?format=csv" target="_blank" rel="noopener">Download CSV</a></div>' +
+        '<div class="grid" id="audit-summary"></div>' +
+        '<div class="card" style="margin-top:16px" id="audit-shares"><div class="empty"><b>Loading audit report…</b>Reading the access trail from onyx-core.</div></div>' +
+        '<div class="card" style="margin-top:16px" id="audit-users"></div>';
+    }
+
+    function loadAudit() {
+      apiJSON('/audit').then(function (data) {
+        var totals = data.totals || {};
+        var summary = document.getElementById('audit-summary');
+        if (summary) summary.innerHTML =
+          '<div class="card"><h3>Granted</h3><div class="stat">' + (totals.grant || 0) + '</div><div class="sub">in the last ' + (data.events || 0) + ' recorded events</div></div>' +
+          '<div class="card"><h3>Revoked</h3><div class="stat">' + (totals.revoke || 0) + '</div><div class="sub">grants removed</div></div>' +
+          '<div class="card"><h3>Refused</h3><div class="stat">' + (totals.denied || 0) + '</div><div class="sub">' + (data.first_ts ? ('between ' + data.first_ts + ' and ' + data.last_ts) : 'no events in the sample') + '</div></div>';
+
+        var shares = document.getElementById('audit-shares');
+        if (shares) shares.innerHTML = '<h3>Shares by refusal</h3>' + ((data.shares || []).filter(function (row) { return row.denied > 0; }).length
+          ? '<div style="display:grid;gap:10px">' + data.shares.map(function (row) {
+              return '<div class="event" style="justify-content:space-between"><span><b>' + esc(row.share) + '</b><div class="sub">' + (row.grant || 0) + ' granted · ' + (row.revoke || 0) + ' revoked</div></span><span class="badge">' + (row.denied || 0) + ' refused</span></div>';
+            }).join('') + '</div>'
+          : '<div class="empty"><b>No refusals recorded</b>Every request in this sample was allowed.</div>');
+
+        var users = document.getElementById('audit-users');
+        if (users) users.innerHTML = '<h3>Names refused</h3>' + ((data.denied_users || []).length
+          ? '<div style="display:grid;gap:10px">' + data.denied_users.map(function (row) {
+              return '<div class="event" style="justify-content:space-between"><b>' + esc(row.username) + '</b><span class="badge">' + (row.denied || 0) + ' refused</span></div>';
+            }).join('') + '</div>'
+          : '<div class="empty"><b>Nobody was refused</b>No denied events in this sample.</div>');
+      }).catch(showError);
+    }
+
     function render(route) {
       var v = VIEWS.filter(function (x) { return x.id === route; })[0] || VIEWS[0];
       renderNav(v.id);
@@ -1762,9 +1862,13 @@
       else if (v.id === 'objects') body = viewObjects();
       else if (v.id === 'shares') body = viewShares();
       else if (v.id === 'users') body = viewUsers();
+      else if (v.id === 'search') body = viewSearch();
+      else if (v.id === 'audit') body = viewAudit();
       else if (v.id === 'settings') body = viewSettings();
       else body = viewSimple('Settings', 'Theme, density and system preferences.', 'Preferences persist per user.');
       document.getElementById('content').innerHTML = body;
+      if (v.id === 'search') wireSearch();
+      if (v.id === 'audit') loadAudit();
       if (v.id === 'dashboard') {
         loadStatus();
         var dashRefresh = document.getElementById('dashboard-refresh');
