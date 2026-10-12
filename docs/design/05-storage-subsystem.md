@@ -310,7 +310,7 @@ listening process at all.
 
 ### 8.1 Cloud and remote targets (setup)
 
-The Shares page registers a cloud account or remote server once and stores it in the single
+Settings and the Shares page register a cloud account or remote server once and store it in the single
 shared rclone catalog (`/etc/rclone/rclone.conf` — bind-mounted read-write into `onyx-api`
 and read-only into `onyx-backupd`), so a target configured there is immediately usable as a
 backup destination *and* as a clone target:
@@ -326,23 +326,54 @@ backup destination *and* as a clone target:
 | `POST /api/v1/storage/remotes/{name}/oauth/start` | begin a browser sign-in; answers the provider URL and the redirect URI to register |
 | `GET /api/v1/storage/oauth/callback` | the provider's callback: exchanges the code, stores the token, probes the account (answers a page, not JSON) |
 | `POST /api/v1/storage/remotes/{name}/token` | store a token pasted from `rclone authorize <type>` (fallback for backends with no registered app) |
+| `POST /api/v1/storage/remotes/{name}/configure` | answer a pending provider question (Apple 2FA, Microsoft drive/library selection) using its opaque setup ID |
+| `POST /api/v1/storage/remotes/{name}/reconnect` | restart iCloud authentication with the stored account |
 
 Only the options a backend declares are accepted, and every invocation uses an explicit
-argv — never a shell. Secret values are passed through untouched and hidden at rest by
+argv — never a shell. Secret values are passed through untouched and obscured where appropriate by
 `rclone config create` itself, which obscures exactly the options a backend marks as
 passwords: pre-obscuring in the API either double-hides a password or, for a value rclone
 stores verbatim such as an S3 `secret_access_key`, plants an obscured string that is then
 used as the real signing key and makes every request fail with `SignatureDoesNotMatch`.
+Obscuring is not encryption. The catalog also contains OAuth tokens and Google private
+keys, so `scripts/prepare-rclone-config.sh` makes its directory `0700` and its file `0600`,
+owned by the shared container account (uid 100/gid 101). API responses expose only names,
+types and pending questions. Uploaded Google JSON is stored in the shared catalog as
+`service_account_credentials`; a separate key-file mount is optional.
+
+| Provider | Account setup |
+|----------|---------------|
+| Google Drive | Browser sign-in or a token from `rclone authorize drive` |
+| Google Cloud Storage | Upload/paste a service-account JSON key, or provide an existing API-accessible `service_account_file` path; grant bucket access in Google Cloud |
+| Microsoft OneDrive | Browser sign-in or `rclone authorize onedrive`, then select Personal/Business and the drive |
+| Microsoft SharePoint | The same `onedrive` rclone backend; select the site and document library after sign-in |
+| Apple iCloud Drive | Regular Apple Account password and trusted-device verification code; rclone 1.69+ (container images pin 1.70.3) |
+
+iCloud's rclone backend is beta. Apple web access must be enabled and Advanced Data
+Protection disabled. App-specific passwords are unsupported; its trust session lasts
+about 30 days, after which use Reconnect. Setup IDs expire after 15 minutes and are
+kept in memory; after an API restart reconnect to obtain a new prompt. The console
+never reports an unfinished drive-selection or 2FA flow as connected.
+
+Registered clouds are clone and backup destinations and cloud/tiered object-store
+targets. Registration does not mount them as local USB filesystems. USB sticks and
+external USB HDDs use Storage → Devices → Attach (existing filesystem, no format)
+and appear under `/mnt/onyx` in Files. USB-SATA bridges that report `RM=0` are detected
+by their USB bus, including partitions which lack a sysfs `device` link. NTFS is
+handled by `ntfs-3g` in the privilege-helper image; exFAT requires host kernel support.
+Host device access, Linux filesystem drivers and shared mount propagation remain
+necessary for physical attachment. Formatting a new pool is a separate destructive action.
 
 OAuth backends need one browser approval per target, and the console drives it: Google
-Drive, Microsoft OneDrive and SharePoint are signed in from the Shares page (`POST …/oauth/start`
+Drive, Microsoft OneDrive and SharePoint are signed in from Settings or Shares (`POST …/oauth/start`
 → the provider's consent screen → `GET /oauth/callback`), which exchanges the code, stores the
 token rclone expects (`config update … token … --non-interactive` — without the flag rclone
 starts a flow of its own and the request never answers) and probes the account. Two constraints
 come with that: the deployment must know its public URL (`ONYX_PUBLIC_URL`, else the request's
 own host, which behind the ingress is the proxy's internal address) and the redirect URI
 `<public>/api/v1/storage/oauth/callback` must be registered in the provider's OAuth
-application (`DRIVE_/ONEDRIVE_/SHAREPOINT_OAUTH_CLIENT_ID|_SECRET`, or per target). Dropbox,
+application (`DRIVE_/ONEDRIVE_/SHAREPOINT_OAUTH_CLIENT_ID|_SECRET`, or per target). The
+client ID/secret are saved with the token so rclone refreshes through the same app. Dropbox,
 Box and pCloud have no such registration here, so they take a token pasted from
 `rclone authorize <type>`. Probes are bounded (`--retries 1 --contimeout 10s --timeout 15s`):
 a rejected token or an unreachable provider has to answer the console, not hang it. CLI

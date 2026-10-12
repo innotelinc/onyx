@@ -31,6 +31,8 @@
 #                                                # first-boot wizard (onyx-firstboot)
 #
 # Flags:
+#   --profile MODE  nas (default): storage, shares, snapshots and backups;
+#                   platform: also apps, VMs, AI and object storage
 #   --prefix PATH   install prefix (default /usr/local)
 #   --destdir DIR   stage all file writes under DIR (packaging/tests)
 #   --install-deps  apt-get install optional packages (samba, nfs-kernel-server,
@@ -48,11 +50,15 @@ DESTDIR="${DESTDIR:-}"
 INSTALL_DEPS=0
 UNINSTALL=0
 DRY_RUN=0
+PROFILE=nas
+ENABLE_FIRSTBOOT=0
+ENABLE_POOL=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) PREFIX="$2"; shift 2 ;;
     --destdir) DESTDIR="$2"; shift 2 ;;
     --install-deps) INSTALL_DEPS=1; shift ;;
+    --profile) PROFILE="$2"; shift 2 ;;
     --enable-pool) ENABLE_POOL=1; shift ;;
     --enable-firstboot) ENABLE_FIRSTBOOT=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
@@ -61,6 +67,7 @@ while [ $# -gt 0 ]; do
     *) echo "onyx-install: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+case "$PROFILE" in nas|platform) ;; *) echo 'onyx-install: --profile must be nas or platform' >&2; exit 2 ;; esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$ROOT/bin"
@@ -74,6 +81,9 @@ SYSTEM_USERS=(onyx-core onyx-api onyx-shared onyx-storaged onyx-snapd onyx-backu
 # with --enable-firstboot (it prompts on the console). bootcheck/updated are
 # A/B-appliance units and stay disabled on script-installed hosts.
 DAEMONS=(onyx-privd onyx-storaged onyx-shared onyx-core onyx-api onyx-snapd onyx-backupd onyx-vmm onyx-appd onyx-ai onyx-objectstore onyx-davd)
+if [ "$PROFILE" = nas ] && [ "$UNINSTALL" = 0 ]; then
+  DAEMONS=(onyx-privd onyx-storaged onyx-shared onyx-core onyx-api onyx-snapd onyx-backupd onyx-davd)
+fi
 # Units with no Onyx binary of their own: onyx-sftp is the dedicated sshd
 # instance from the distribution's openssh-server (docs/design/05#6 SFTP row).
 EXTRA_UNITS=(onyx-sftp)
@@ -82,8 +92,6 @@ EXTRA_UNITS=(onyx-sftp)
 UNIT_DROPINS=(vsftpd rsyncd)
 UNITS=("${DAEMONS[@]}" "${EXTRA_UNITS[@]}")
 BINARIES=("${DAEMONS[@]}" onyx)
-ENABLE_FIRSTBOOT=0
-ENABLE_POOL=0
 
 say() { printf '\033[1;34m== %s ==\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m!! %s\033[0m\n' "$*" >&2; }
@@ -113,6 +121,8 @@ if [ "$UNINSTALL" = 1 ]; then
   run rm -f "$DESTDIR$UNITDIR/onyx-pool.service" "$DESTDIR$UNITDIR/onyx-firstboot.service"
   run rm -rf "$DESTDIR$LIB"
   run rm -f "$DESTDIR$BINCLI/onyx"
+  run rm -f "$DESTDIR$PREFIX/share/onyx/web/index.html" "$DESTDIR$PREFIX/share/onyx/web/config.js"
+  run rmdir "$DESTDIR$PREFIX/share/onyx/web" "$DESTDIR$PREFIX/share/onyx" 2>/dev/null || true
   if [ -z "$DESTDIR" ]; then
     run rmdir /var/lib/onyx/core /var/lib/onyx/onyx-storaged /var/lib/onyx/snapd /var/lib/onyx/backupd /var/lib/onyx/vmm /var/lib/onyx/appd /var/lib/onyx/ai /var/lib/onyx/objectstore /var/lib/onyx /etc/onyx/conf.d /etc/onyx 2>/dev/null || true
     for u in "${SYSTEM_USERS[@]}"; do run userdel "$u" 2>/dev/null || true; done
@@ -162,6 +172,8 @@ if [ -z "$DESTDIR" ]; then
          run install -d -m 2770 -o root -g onyx /mnt/onyx
          run install -d -m 0750 -o root -g onyx /var/lib/onyx
          run install -d -m 0750 -o onyx-core -g onyx /var/lib/onyx/core
+         run install -d -m 0750 -o onyx-api -g onyx /var/lib/onyx/api
+         run install -d -m 0750 -o onyx-api -g onyx /etc/rclone
          run install -d -m 0750 -o onyx-storaged -g onyx /var/lib/onyx/onyx-storaged
          run install -d -m 0750 -o onyx-snapd -g onyx /var/lib/onyx/snapd
          run install -d -m 0750 -o onyx-backupd -g onyx /var/lib/onyx/backupd
@@ -185,6 +197,16 @@ for b in "${DAEMONS[@]}"; do
   run install -m 0755 "$BIN/$b" "$DESTDIR$LIB/$b"
 done
 run install -m 0755 "$BIN/onyx" "$DESTDIR$BINCLI/onyx"
+# Reuse the verified repository-local rclone when onboarding prepared it.
+# Otherwise --install-deps supplies the distro package; iCloud needs >=1.69.
+if [ -x "$ROOT/.tools/bin/rclone" ]; then
+  run install -m 0755 "$ROOT/.tools/bin/rclone" "$DESTDIR$BINCLI/rclone"
+fi
+run install -d -m 0755 "$DESTDIR$PREFIX/share/onyx/web"
+run install -m 0644 "$ROOT/docker/onyx-web/index.html" "$DESTDIR$PREFIX/share/onyx/web/index.html"
+run install -m 0644 "$ROOT/docker/onyx-web/config.js" "$DESTDIR$PREFIX/share/onyx/web/config.js"
+write_web_config() { printf 'window.ONYX_MODE = "%s";\n' "$PROFILE" > "$DESTDIR$PREFIX/share/onyx/web/config.js"; }
+run write_web_config
 for h in "$ROOT/deploy/libexec/onyx-"*; do
   run install -m 0755 "$h" "$DESTDIR$LIB/$(basename "$h")"
 done
@@ -209,11 +231,12 @@ if [ "$INSTALL_DEPS" = 1 ] && [ -z "$DESTDIR" ]; then
   # rsync = rsyncd modules (docs/design/05#6). util-linux = wipefs/swapoff/
   # losetup, e2fsprogs = mkfs.ext4, mdadm/dmsetup = stopping the md and dm
   # stacks that hold a disk an operator erases (docs/design/05#2.3).
-  run apt-get install -y samba nfs-kernel-server vsftpd openssh-server rsync smartmontools btrfs-progs util-linux e2fsprogs mdadm dmsetup
+  run apt-get install -y samba nfs-kernel-server vsftpd openssh-server rsync smartmontools btrfs-progs util-linux e2fsprogs mdadm dmsetup rclone ntfs-3g exfatprogs
 fi
 
 # --- 6. enable + start --------------------------------------------------------
 if [ -z "$DESTDIR" ] && [ "$DRY_RUN" = 0 ]; then
+  run systemd-tmpfiles --create "$TMPFILES/onyx.conf"
   say "enabling and starting the onyx stack"
   run systemctl daemon-reload
   run systemctl enable "${UNITS[@]}"
@@ -236,12 +259,14 @@ if [ -z "$DESTDIR" ] && [ "$DRY_RUN" = 0 ]; then
   echo "onyx installed. CLI:"
   echo "  $BINCLI/onyx status"
   echo
+  if [ "$INSTALL_DEPS" = 0 ]; then
   echo "Optional daemon packages were not installed (samba, nfs-kernel-server,"
   echo "vsftpd, openssh-server, rsync, smartmontools, btrfs-progs, util-linux,"
   echo "e2fsprogs, mdadm, dmsetup). Shares save"
   echo "to /etc/onyx/conf.d and reload"
   echo "is attempted through privd; those daemons need to exist for serving."
   echo "Re-run: sudo scripts/onyx-install --install-deps"
+  fi
 elif [ "$DRY_RUN" = 1 ]; then
   say "dry run complete (nothing changed)"
 else

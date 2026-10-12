@@ -4,13 +4,19 @@
 # The compose stack does this for every Go service via the SERVICE build arg.
 ARG SERVICE
 
+# iCloud Drive requires rclone >= 1.69; Alpine 3.20's package predates it.
+FROM rclone/rclone:1.70.3 AS rclone
+
 FROM golang:1.27-bookworm AS build
 ARG SERVICE
 ARG VERSION=0.3.0-dev
 ARG COMMIT=unknown
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+# Optional trusted proxy CA for development environments. BuildKit mounts the
+# certificate only for this step; it is never copied into the shipped image.
+RUN --mount=type=secret,id=build_ca \
+    if [ -f /run/secrets/build_ca ]; then SSL_CERT_FILE=/run/secrets/build_ca go mod download; else go mod download; fi
 COPY proto ./proto
 COPY services ./services
 COPY sdk ./sdk
@@ -37,8 +43,9 @@ RUN case "${SERVICE}" in \
 # root; the rest run as the unprivileged "onyx" user).
 FROM alpine:3.20
 ARG SERVICE
-RUN if [ "${SERVICE}" = "onyx-api" ] || [ "${SERVICE}" = "onyx-backupd" ] || [ "${SERVICE}" = "onyx-objectstore" ]; then apk add --no-cache rclone; fi \
-    && if [ "${SERVICE}" = "onyx-appd" ]; then apk add --no-cache docker-cli docker-cli-compose; fi \
+COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
+COPY --from=rclone /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+RUN if [ "${SERVICE}" = "onyx-appd" ]; then apk add --no-cache docker-cli docker-cli-compose; fi \
     && addgroup -S onyx && adduser -S -G onyx onyx \
     && mkdir -p /run/onyx \
     && for d in api core shared snapd backupd vmm appd ai objectstore; do mkdir -p "/var/lib/onyx/$d"; done \

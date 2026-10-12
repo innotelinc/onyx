@@ -35,6 +35,9 @@ const hook =
   ' loadUsers: loadUsers, viewUsers: viewUsers, userSambaPanel: userSambaPanel,' +
   ' shareAccessPanel: shareAccessPanel, shareAuditPanel: shareAuditPanel,' +
   ' userCleanupWarnings: userCleanupWarnings,' +
+  ' activeViews: activeViews, commands: commands, viewDashboard: viewDashboard, loadStatus: loadStatus,' +
+  ' viewSettings: viewSettings, render: render, loadSettingsRemotes: loadSettingsRemotes,' +
+  ' renderRemoteFields: renderRemoteFields, collectRemoteParams: collectRemoteParams, continueRemoteSetup: continueRemoteSetup,' +
   ' views: VIEWS };\n';
 const instrumented = code.replace(/\}\)\(\);\s*$/, hook + '  })();\n');
 
@@ -43,7 +46,7 @@ function element(id) {
     id: id || '', innerHTML: '', textContent: '', value: '', checked: false,
     disabled: false, style: {}, dataset: {},
     classList: { add() {}, remove() {}, contains() { return false; } },
-    addEventListener() {}, querySelectorAll: () => [], querySelector: () => null,
+    listeners: {}, addEventListener(event, handler) { this.listeners[event] = handler; }, querySelectorAll: () => [], querySelector: () => null,
     appendChild() {}, insertAdjacentHTML() {}, focus() {}, click() {},
   };
 }
@@ -69,9 +72,9 @@ const sandbox = {
     setItem: (k, v) => { store[k] = String(v); },
     removeItem: (k) => { delete store[k]; },
   },
-  fetch: (url) => {
+  fetch: (url, options) => {
     const target = String(url).replace(/^.*\/api\/v1/, '');
-    const body = payloadFor(target);
+    const body = payloadFor(target, options);
     if (body === undefined) {
       return Promise.resolve({ ok: false, json: () => Promise.resolve({ error: { message: 'no stub for ' + target } }) });
     }
@@ -164,6 +167,72 @@ const cases = [
   check('Storage page has a capacity card', storage.includes('id="storage-card"'));
   check('Storage page has a working refresh control', storage.includes('id="storage-refresh"'));
   check('Files page has room for the storage notice', ui.viewFiles().includes('id="file-storage-warning"'));
+
+  const nasViews = ui.activeViews().map((view) => view.id);
+  check('NAS focuses on disks, shares and backups', ['storage', 'files', 'shares', 'backups', 'snapshots'].every((id) => nasViews.includes(id)));
+  check('NAS hides application and VM pages', ['apps', 'vms', 'objects'].every((id) => !nasViews.includes(id)));
+  check('NAS command palette follows the selected profile', !ui.commands().some((command) => command.label === 'Go to Apps'));
+  check('NAS dashboard guides disk attachment and sharing', ui.viewDashboard().includes('Attach an existing disk') && ui.viewDashboard().includes('#/shares'));
+  sandbox.window.ONYX_MODE = 'platform';
+  check('Platform mode retains optional services', ui.activeViews().some((view) => view.id === 'apps') && ui.commands().some((command) => command.label === 'Go to VMs'));
+  sandbox.window.ONYX_MODE = 'nas';
+  const requiredNAS = ['onyx-core', 'onyx-storaged', 'onyx-shared', 'onyx-privd', 'onyx-snapd', 'onyx-backupd'];
+  payloadFor = (target) => target === '/system/status' ? { services: requiredNAS.map((name) => ({ name, status: 'SERVING' })).concat([{ name: 'onyx-vmm', status: 'UNKNOWN' }]) } : {};
+  await ui.loadStatus();
+  check('NAS health excludes optional services', sandbox.window.__onyxServiceHealth.serving === 6 && sandbox.window.__onyxServiceHealth.total === 6);
+  payloadFor = (target) => target === '/system/status' ? { services: requiredNAS.slice(1).map((name) => ({ name, status: 'SERVING' })) } : {};
+  await ui.loadStatus();
+  check('NAS health still detects a missing core service', sandbox.window.__onyxServiceHealth.serving === 5 && sandbox.window.__onyxServiceHealth.total === 6);
+
+  // Settings used to list every backend but submit params: {} for all of
+  // them. Exercise the actual create click, not just the field markup.
+  const cloudProviders = [
+    { type: 'google cloud storage', label: 'Google Cloud Storage', fields: ['service_account_credentials', 'service_account_file', 'project_number'], required: [] },
+    { type: 's3', label: 'S3', fields: ['access_key_id', 'secret_access_key'], required: ['access_key_id', 'secret_access_key'] },
+    { type: 'iclouddrive', label: 'Apple iCloud Drive', fields: ['apple_id', 'password'], required: ['apple_id', 'password'] },
+  ];
+  let createBody;
+  payloadFor = (target, options) => {
+    if (target === '/storage/providers') return { providers: cloudProviders };
+    if (target === '/storage/remotes' && options && options.method === 'POST') {
+      createBody = JSON.parse(options.body); return { name: createBody.name, type: createBody.type };
+    }
+    if (target === '/storage/remotes') return { remotes: [] };
+    return {};
+  };
+  ui.render('settings');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  check('Settings contains provider credential fields', ui.viewSettings().includes('id="settings-remote-fields"'));
+  el('settings-provider').value = 'google cloud storage';
+  el('settings-provider').listeners.change();
+  check('GCS offers a JSON upload in Settings', el('settings-remote-fields').innerHTML.includes('type="file"') && el('settings-remote-fields').innerHTML.includes('service_account_credentials'));
+  const keyJSON = '{"type":"service_account","project_id":"fixture"}';
+  el('settings-remote-fields').querySelectorAll = (selector) => selector === '[data-remote-file]'
+    ? [{ dataset: { remoteFile: 'service_account_credentials' }, files: [{ size: keyJSON.length, text: () => Promise.resolve(keyJSON) }] }]
+    : [{ dataset: { remoteField: 'project_number' }, value: '12345' }];
+  el('settings-remote-name').value = 'gcs-fixture';
+  el('settings-remote-create').listeners.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  check('Settings submits uploaded GCS credentials', createBody && createBody.params.service_account_credentials === keyJSON && createBody.params.project_number === '12345');
+  check('Settings clears credentials after successful save', el('settings-remote-fields').innerHTML === '');
+  el('settings-provider').value = 's3';
+  ui.renderRemoteFields(cloudProviders, 'settings-remote');
+  check('S3 credentials are visible and password-masked', el('settings-remote-fields').innerHTML.includes('Secret Access Key *') && el('settings-remote-fields').innerHTML.includes('type="password"'));
+  el('settings-remote-fields').querySelectorAll = (selector) => selector === '[data-remote-file]' ? [] : [
+    { dataset: { remoteField: 'access_key_id' }, value: 'test-access' },
+    { dataset: { remoteField: 'secret_access_key' }, value: 'test-secret' },
+  ];
+  el('settings-remote-name').value = 's3-fixture';
+  el('settings-remote-create').listeners.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  check('Settings submits S3 credentials', createBody.params.access_key_id === 'test-access' && createBody.params.secret_access_key === 'test-secret');
+  el('settings-provider').value = 'iclouddrive';
+  ui.renderRemoteFields(cloudProviders, 'settings-remote');
+  check('iCloud asks for Apple account and password', el('settings-remote-fields').innerHTML.includes('Apple Id *') && el('settings-remote-fields').innerHTML.includes('Password *'));
+  ui.continueRemoteSetup('icloud-fixture', { id: 'opaque', question: { name: 'config_2fa', help: 'Enter Apple verification code' } }, 'settings-remote-status');
+  check('Apple verification is offered in Settings', el('settings-remote-status').innerHTML.includes('Apple verification code') && el('settings-remote-status').innerHTML.includes('type="password"'));
+  ui.continueRemoteSetup('onedrive-fixture', { id: 'opaque', question: { exclusive: true, help: 'Select drive', examples: [{ Value: 'drive123', Help: 'Personal files' }] } }, 'settings-remote-status');
+  check('OneDrive offers the provider drive choices', el('settings-remote-status').innerHTML.includes('<select') && el('settings-remote-status').innerHTML.includes('value="drive123"'));
 
   // --- Shares: who can reach a share, and whether SMB will actually let them ---
   // A grant is rendered into smb.conf's `valid users`, and Samba treats a name

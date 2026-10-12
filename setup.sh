@@ -46,9 +46,11 @@ Created .env from .env.example.
 EOF
   exit 1
 fi
+mode_override="${ONYX_MODE:-}"
 set -a; # shellcheck disable=SC1091
 source .env
 set +a
+if [ -n "$mode_override" ]; then export ONYX_MODE="$mode_override"; fi
 
 # --- 1. Prerequisites ----------------------------------------------------------
 for tool in docker python3 curl; do
@@ -86,14 +88,7 @@ esac
 # so the bind-mounted directory has to be writable by it — otherwise the API can
 # read the catalog but every setup attempt fails with a permission error.
 RCLONE_DIR="${RCLONE_CONFIG_DIR:-./data/rclone}"
-mkdir -p "$RCLONE_DIR"
-if [ "$(id -u)" = "0" ]; then
-  chown -R 100:101 "$RCLONE_DIR" 2>/dev/null || true
-else
-  chmod 0777 "$RCLONE_DIR" 2>/dev/null || true
-fi
-[ -f "$RCLONE_DIR/rclone.conf" ] || : > "$RCLONE_DIR/rclone.conf"
-chmod 0666 "$RCLONE_DIR/rclone.conf" 2>/dev/null || true
+bash scripts/prepare-rclone-config.sh "$RCLONE_DIR"
 
 # --- 2b. Storage root + mount propagation (docs/design/05#2) ------------------
 # Pools live under /mnt/onyx on the *host*: onyx-privd mounts them there inside
@@ -157,28 +152,35 @@ fi
 # --- 3. Bring the stack up -----------------------------------------------------
 # Compose profiles for local replacements of shared platform services.
 PROFILES=""
+case "${ONYX_MODE:-nas}" in
+  nas) ;;
+  platform) PROFILES="platform" ;;
+  *) echo 'error: ONYX_MODE must be nas or platform' >&2; exit 1 ;;
+esac
 [ "$AUTHENTIK_MODE" = "local" ] && PROFILES="$PROFILES authentik"
 [ "$NPM_MODE" = "local" ] && PROFILES="$PROFILES npm"
 
 if [ -n "$PROFILES" ]; then
   log "starting profiles:$PROFILES"
 fi
+COMPOSE=(docker compose)
+for profile in $PROFILES; do COMPOSE+=(--profile "$profile"); done
 
 if [ "$NPM_MODE" = "cerulean" ]; then
   # The edge is remote (Cerulean-managed): exclude the local NPM and its
   # published 80/443/81 from this host entirely.
   log "NPM_MODE=cerulean — starting the stack without the local NPM ..."
   if [ "$BUILD" = 1 ]; then
-    docker compose --profile${PROFILES:+ $PROFILES} up -d --build
+    "${COMPOSE[@]}" up -d --build
   else
-    docker compose --profile${PROFILES:+ $PROFILES} up -d
+    "${COMPOSE[@]}" up -d
   fi
 elif [ "$BUILD" = 1 ]; then
   log "building + starting the ONYX platform stack (this first build compiles the daemons)..."
-  docker compose --profile${PROFILES:+ $PROFILES} up -d --build
+  "${COMPOSE[@]}" up -d --build
 else
   log "starting the ONYX platform stack (existing images)"
-  docker compose --profile${PROFILES:+ $PROFILES} up -d
+  "${COMPOSE[@]}" up -d
 fi
 
 # --- 4. Wait for ingress + IdP -------------------------------------------------

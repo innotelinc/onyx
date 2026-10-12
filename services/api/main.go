@@ -50,6 +50,7 @@ func main() {
 		objstoreSock = flag.String("objectstore-socket", "", "onyx-objectstore socket (default: <socket-dir>/onyx-objectstore.sock)")
 		stateDir     = flag.String("state-dir", "/var/lib/onyx/api", "API metadata state directory")
 		filesRoot    = flag.String("files-root", "/mnt/onyx", "root directory exposed by the read-only file explorer")
+		webRoot      = flag.String("web-root", "", "directory containing the NAS console (empty disables static serving)")
 	)
 	flag.Parse()
 
@@ -167,6 +168,7 @@ func main() {
 		objects: onyxv1.NewObjectStoreClient(objstoreConn),
 		users:   users, scrub: scrub, filesRoot: *filesRoot, authentik: authentikFromEnv(),
 		deviceTrust: loadDeviceTrustConfig(), version: version,
+		webRoot: *webRoot,
 	}
 	srv.registerRoutes()
 
@@ -226,6 +228,7 @@ type server struct {
 	users       *userStore
 	scrub       *scrubStore
 	filesRoot   string
+	webRoot     string
 	deviceTrust *deviceTrustConfig
 	// authentik is the identity provider the Users page reads and writes. It is
 	// disabled (and says why) when the deployment has no AUTHENTIK_URL/token.
@@ -254,6 +257,8 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("DELETE /api/v1/storage/remotes/{name}", s.handleDeleteRemote)
 	mux.HandleFunc("POST /api/v1/storage/remotes/{name}/check", s.handleCheckRemote)
 	mux.HandleFunc("POST /api/v1/storage/remotes/{name}/token", s.handleSetRemoteToken)
+	mux.HandleFunc("POST /api/v1/storage/remotes/{name}/configure", s.handleRemoteConfiguration)
+	mux.HandleFunc("POST /api/v1/storage/remotes/{name}/reconnect", s.handleReconnectRemote)
 	mux.HandleFunc("POST /api/v1/storage/remotes/{name}/oauth/start", s.handleOAuthStart)
 	// The provider redirects the operator's browser here, so it answers a page.
 	mux.HandleFunc("GET /api/v1/storage/oauth/callback", s.handleOAuthCallback)
@@ -347,6 +352,22 @@ func (s *server) registerRoutes() {
 	mux.HandleFunc("PUT /api/v1/pools/{name}/scrub-schedule", s.handleSetScrubSchedule)
 	mux.HandleFunc("POST /api/v1/pools/{name}/scrub", s.handleRunScrub)
 	s.mux = mux
+	if s.webRoot != "" {
+		mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+			file := ""
+			switch r.URL.Path {
+			case "/", "/index.html":
+				file = "index.html"
+			case "/config.js":
+				file = "config.js"
+			default:
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Cache-Control", "no-cache")
+			http.ServeFile(w, r, filepath.Join(s.webRoot, file))
+		})
+	}
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }

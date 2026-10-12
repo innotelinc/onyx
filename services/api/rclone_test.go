@@ -265,7 +265,7 @@ func TestCreateRemotePassesSecretsThroughRaw(t *testing.T) {
 					t.Errorf("the %s value was not passed through raw:\n%s", field, got)
 				}
 			}
-			if strings.Contains(got, "obscure") {
+			if strings.Contains(got, "\nobscure ") || strings.HasPrefix(got, "obscure ") {
 				t.Errorf("the handler obscured a secret itself:\n%s", got)
 			}
 		})

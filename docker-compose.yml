@@ -100,7 +100,7 @@ services:
       # Read-write: the Shares page's cloud/remote storage setup writes the
       # remote catalog here (rclone config create), and onyx-backupd reads the
       # same file for remote backup targets. setup.sh makes the directory
-      # writable by the container user (uid 100) before the stack starts.
+      # private and writable by the container user (uid 100) before startup.
       - ${RCLONE_CONFIG_DIR:-./data/rclone}:/etc/rclone
       # The file explorer and safe mutations operate on the same host storage
       # root as storaged; without this bind mount /mnt/onyx is absent in the API
@@ -183,6 +183,7 @@ services:
     restart: unless-stopped
 
   onyx-vmm:
+    profiles: ["platform"]
     build:
       context: .
       dockerfile: docker/go-service.Dockerfile
@@ -195,6 +196,7 @@ services:
     restart: unless-stopped
 
   onyx-appd:
+    profiles: ["platform"]
     build:
       context: .
       dockerfile: docker/go-service.Dockerfile
@@ -221,6 +223,7 @@ services:
     restart: unless-stopped
 
   onyx-ai:
+    profiles: ["platform"]
     build:
       context: .
       dockerfile: docker/go-service.Dockerfile
@@ -263,6 +266,7 @@ services:
     restart: unless-stopped
 
   onyx-objectstore:
+    profiles: ["platform"]
     build:
       context: .
       dockerfile: docker/go-service.Dockerfile
@@ -341,6 +345,10 @@ services:
     restart: unless-stopped
 
   onyx-web:
+    depends_on:
+      - onyx-api
+    environment:
+      ONYX_MODE: ${ONYX_MODE:-nas}
     build:
       context: .
       dockerfile: docker/onyx-web/Dockerfile

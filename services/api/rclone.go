@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"path"
 	"strings"
@@ -24,6 +25,7 @@ const rcloneConfigPath = "/etc/rclone/rclone.conf"
 // closed set (no arbitrary rclone options, no shell).
 type rcloneProvider struct {
 	Type     string   `json:"type"`
+	Backend  string   `json:"backend,omitempty"`
 	Label    string   `json:"label"`
 	Fields   []string `json:"fields"`
 	Required []string `json:"required"`
@@ -49,14 +51,14 @@ func rcloneProviders() []rcloneProvider {
 		{Type: "webdav", Label: "WebDAV", Fields: []string{"url", "vendor", "user", "pass"}, Required: []string{"url"}},
 		{Type: "ftp", Label: "FTP", Fields: []string{"host", "user", "port", "pass"}, Required: []string{"host"}},
 		{
-			Type:     "google cloud storage",
-			Label:    "Google Cloud Storage",
-			Fields:   []string{"service_account_file", "project_number"},
-			Required: []string{"service_account_file"},
-			Hint:     "service_account_file is a path inside the onyx-api container; mount the key next to rclone.conf to use it.",
+			Type:   "google cloud storage",
+			Label:  "Google Cloud Storage",
+			Fields: []string{"service_account_credentials", "service_account_file", "project_number"},
+			Hint:   "Upload your Google service-account JSON key, or enter an existing key-file path. Grant the account access to your buckets. This provider stores buckets; choose Google Drive for personal files.",
 		},
 		{Type: "azureblob", Label: "Azure Blob Storage", Fields: []string{"account", "key"}, Required: []string{"account", "key"}},
 		{Type: "mega", Label: "MEGA", Fields: []string{"user", "pass"}, Required: []string{"user", "pass"}},
+		{Type: "iclouddrive", Label: "Apple iCloud Drive", Fields: []string{"apple_id", "password"}, Required: []string{"apple_id", "password"}, Hint: "Sign in with your Apple Account password (not an app-specific password), then enter the verification code from your trusted Apple device. Enable iCloud web access; Advanced Data Protection must be off. Requires rclone 1.69 or newer."},
 		// OAuth backends. client_id/client_secret are optional: left empty,
 		// rclone uses its own registered application. Filling them in is for
 		// organisations that want the consent screen under their own name, and
@@ -76,11 +78,12 @@ func rcloneProviders() []rcloneProvider {
 			Hint:   "OneDrive (personal or Microsoft 365) is approved in a browser. On a machine with a browser run `rclone authorize onedrive`, then paste the token here.",
 		},
 		{
-			Type:   "sharepoint",
-			Label:  "Microsoft SharePoint",
-			Fields: []string{"client_id", "client_secret", "site_url"},
-			OAuth:  true,
-			Hint:   "SharePoint is approved in a browser. On a machine with a browser run `rclone authorize sharepoint`, then paste the token here. Set site_url to the document library.",
+			Type:    "sharepoint",
+			Backend: "onedrive",
+			Label:   "Microsoft SharePoint",
+			Fields:  []string{"client_id", "client_secret"},
+			OAuth:   true,
+			Hint:    "SharePoint uses the Microsoft OneDrive backend. Run `rclone authorize onedrive`, paste the token, then choose the SharePoint site and document library.",
 		},
 		{
 			Type:   "dropbox",
@@ -128,7 +131,11 @@ func providerByType(name string) (rcloneProvider, bool) {
 }
 
 func runRclone(ctx context.Context, args ...string) (string, error) {
-	full := append(append([]string{}, args...), "--config", rcloneConfigPath)
+	configPath := strings.TrimSpace(os.Getenv("ONYX_RCLONE_CONFIG"))
+	if configPath == "" {
+		configPath = rcloneConfigPath
+	}
+	full := append(append([]string{}, args...), "--config", configPath)
 	out, err := exec.CommandContext(ctx, "rclone", full...).CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if err != nil {
@@ -191,6 +198,7 @@ func (s *server) handleRcloneRemotes(w http.ResponseWriter, r *http.Request) {
 		"details":        types,
 		"providers":      rcloneProviders(),
 		"oauth_redirect": oauthRedirectTypes(),
+		"configuration":  pendingRemoteConfigs.all(),
 	})
 }
 
@@ -241,6 +249,7 @@ func validateRemoteName(name string) error {
 // SignatureDoesNotMatch and never authenticated.
 func (s *server) handleCreateRemote(w http.ResponseWriter, r *http.Request) {
 	var body createRemoteBody
+	r.Body = http.MaxBytesReader(w, r.Body, 128*1024)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "invalid JSON body: " + err.Error()})
 		return
@@ -273,9 +282,36 @@ func (s *server) handleCreateRemote(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if provider.Type == "google cloud storage" {
+		credentials := strings.TrimSpace(body.Params["service_account_credentials"])
+		file := strings.TrimSpace(body.Params["service_account_file"])
+		if (credentials == "") == (file == "") {
+			writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "Google Cloud Storage requires either a service-account JSON key or a key-file path"})
+			return
+		}
+		if credentials != "" {
+			var key struct{ Type, ProjectID, ClientEmail, PrivateKey string }
+			var fields map[string]string
+			if json.Unmarshal([]byte(credentials), &fields) != nil {
+				writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "Upload a valid Google service-account JSON key"})
+				return
+			}
+			key.Type, key.ProjectID, key.ClientEmail, key.PrivateKey = fields["type"], fields["project_id"], fields["client_email"], fields["private_key"]
+			if key.Type != "service_account" || key.ProjectID == "" || key.ClientEmail == "" || key.PrivateKey == "" {
+				writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: "The JSON key must contain type service_account, project_id, client_email and private_key"})
+				return
+			}
+			var compact bytes.Buffer
+			_ = json.Compact(&compact, []byte(credentials))
+			body.Params["service_account_credentials"] = compact.String()
+		}
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
-	if _, err := remoteNames(ctx); err != nil {
+	if names, err := remoteNames(ctx); err == nil && containsString(names, body.Name) {
+		writeEnvelope(w, http.StatusConflict, apiError{Code: "already_exists", Message: "An account with that name already exists; choose another name"})
+		return
+	} else if err != nil {
 		// A missing config file is normal; a read-only one is not, and the
 		// operator needs to know which it is.
 		if strings.Contains(err.Error(), "read-only") || strings.Contains(err.Error(), "permission denied") {
@@ -283,13 +319,26 @@ func (s *server) handleCreateRemote(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	args := []string{"config", "create", body.Name, provider.Type, "--non-interactive"}
+	backend := provider.Type
+	if provider.Backend != "" {
+		backend = provider.Backend
+	}
+	args := []string{"config", "create", body.Name, backend, "--non-interactive", "--obscure"}
+	// Tokens are supplied by the separate browser/paste flow, not rclone's
+	// interactive configuration. iCloud keeps its native 2FA setup questions.
+	if provider.OAuth {
+		args = append(args, "config_is_local", "false")
+	}
 	for _, field := range provider.Fields {
 		value := strings.TrimSpace(body.Params[field])
 		if value == "" {
 			continue
 		}
-		if len(value) > 1024 {
+		limit := 1024
+		if field == "service_account_credentials" {
+			limit = 64 * 1024
+		}
+		if len(value) > limit {
 			writeEnvelope(w, http.StatusBadRequest, apiError{Code: "invalid_argument", Message: fmt.Sprintf("%s is too long", field)})
 			return
 		}
@@ -299,11 +348,22 @@ func (s *server) handleCreateRemote(w http.ResponseWriter, r *http.Request) {
 		}
 		args = append(args, field, value)
 	}
-	if output, err := runRclone(ctx, args...); err != nil {
-		writeEnvelope(w, http.StatusBadGateway, apiError{Code: "internal", Message: "rclone config create: " + output})
+	output, err := runRclone(ctx, append(args, networkBounds...)...)
+	if err != nil {
+		// rclone writes the section before authenticating. Do not strand a
+		// failed registration that prevents retrying with corrected credentials.
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+		_, _ = runRclone(cleanupCtx, "config", "delete", body.Name)
+		cleanupCancel()
+		writeEnvelope(w, http.StatusBadGateway, apiError{Code: "internal", Message: "Could not configure this provider. Check its credentials, network access and the installed rclone version."})
 		return
 	}
 	response := map[string]any{"name": body.Name, "type": provider.Type, "oauth": provider.OAuth}
+	if !provider.OAuth {
+		if step := pendingRemoteConfigs.capture(body.Name, output); step != nil {
+			response["configuration"] = step
+		}
+	}
 	if provider.OAuth {
 		response["next_step"] = fmt.Sprintf("Run `rclone config reconnect %s:` on the host to approve access in a browser.", body.Name)
 	}
@@ -322,6 +382,9 @@ func (s *server) handleDeleteRemote(w http.ResponseWriter, r *http.Request) {
 		writeEnvelope(w, http.StatusBadGateway, apiError{Code: "internal", Message: "rclone config delete: " + output})
 		return
 	}
+	pendingRemoteConfigs.Lock()
+	delete(pendingRemoteConfigs.steps, name)
+	pendingRemoteConfigs.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": name})
 }
 
@@ -430,8 +493,14 @@ func (s *server) handleSetRemoteToken(w http.ResponseWriter, r *http.Request) {
 	// retries are cut to one and the timeouts are set.
 	updateCtx, updateCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer updateCancel()
-	if output, err := runRclone(updateCtx, append(args, networkBounds...)...); err != nil {
-		writeEnvelope(w, http.StatusBadGateway, apiError{Code: "internal", Message: "rclone config update token: " + output})
+	args = append(args, "config_refresh_token", "false", "--obscure")
+	updateOutput, updateErr := runRclone(updateCtx, append(args, networkBounds...)...)
+	if updateErr != nil {
+		writeEnvelope(w, http.StatusBadGateway, apiError{Code: "internal", Message: "rclone could not store the token; check the provider and OAuth application"})
+		return
+	}
+	if step := pendingRemoteConfigs.capture(name, updateOutput); step != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"name": name, "stored": true, "configuration": step})
 		return
 	}
 	probeCtx, probeCancel := context.WithTimeout(ctx, 30*time.Second)

@@ -53,7 +53,7 @@ func oauthBackends() map[string]oauthBackend {
 			Type:       "onedrive",
 			AuthURL:    "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
 			TokenURL:   "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-			Scopes:     []string{"offline_access", "Files.ReadWrite.All", "User.Read"},
+			Scopes:     []string{"offline_access", "Files.ReadWrite.All", "Sites.Read.All", "User.Read"},
 			AuthParams: map[string]string{"prompt": "consent"},
 		},
 		"sharepoint": {
@@ -399,8 +399,13 @@ func (s *server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	updateCtx, updateCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 	defer updateCancel()
-	if output, err := runRclone(updateCtx, append([]string{"config", "update", entry.remote, "token", tokenJSON, "--non-interactive"}, networkBounds...)...); err != nil {
-		writeOAuthPage(w, http.StatusBadGateway, false, "rclone could not store the token: "+output)
+	output, updateErr := runRclone(updateCtx, append([]string{"config", "update", entry.remote, "token", tokenJSON, "client_id", entry.clientID, "client_secret", entry.clientSecret, "config_refresh_token", "false", "--non-interactive", "--obscure"}, networkBounds...)...)
+	if updateErr != nil {
+		writeOAuthPage(w, http.StatusBadGateway, false, "rclone could not store the token. Check the provider and OAuth application.")
+		return
+	}
+	if step := pendingRemoteConfigs.capture(entry.remote, output); step != nil {
+		writeOAuthPage(w, http.StatusOK, false, "Signed in. Return to Onyx and press Continue setup beside "+entry.remote+" to choose the drive or document library.")
 		return
 	}
 	probeCtx, probeCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
@@ -421,6 +426,9 @@ func writeOAuthPage(w http.ResponseWriter, status int, ok bool, message string) 
 	if ok {
 		tone = "var(--onyx-success, #2f9e44)"
 		title = "Account connected"
+	} else if status == http.StatusOK {
+		tone = "var(--onyx-warning, #e0a04b)"
+		title = "Account needs attention"
 	}
 	body := "<!doctype html><meta charset=\"utf-8\"><title>" + html.EscapeString(title) + "</title>" +
 		"<body style=\"font:15px/1.5 system-ui,sans-serif;background:#101014;color:#e8e8ea;display:grid;place-items:center;height:100vh;margin:0\">" +

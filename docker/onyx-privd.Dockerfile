@@ -34,6 +34,8 @@ FROM alpine:3.20
 # stopping the md and dm stacks that hold a disk an operator is erasing
 # (docs/design/05 §2.3). `device-mapper` is the Alpine package that actually
 # ships dmsetup — lvm2 depends on its libs but not on the tool.
-RUN apk add --no-cache util-linux btrfs-progs e2fsprogs smartmontools mdadm device-mapper
+# USB drives commonly arrive as NTFS or exFAT. mount.ntfs from ntfs-3g
+# supplies the NTFS driver; exFAT mounting still needs host kernel support.
+RUN apk add --no-cache util-linux btrfs-progs e2fsprogs smartmontools mdadm device-mapper ntfs-3g exfatprogs
 COPY --from=build /out/onyx-privd /usr/local/bin/onyx-privd
 ENTRYPOINT ["/bin/sh", "-c", "umask 000; mkdir -p /run/onyx; chmod 0777 /run/onyx 2>/dev/null; exec /usr/local/bin/onyx-privd \"$@\"", "--"]

@@ -17,7 +17,7 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=/run/onyx /var/lib/onyx/backupd
+ReadWritePaths=/run/onyx /var/lib/onyx/backupd /mnt/onyx
 
 [Install]
 WantedBy=multi-user.target

@@ -3,9 +3,9 @@
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-brightgreen.svg)](LICENSE)
 
 
-# 🗄️ ONYX — Online Storage System
+# 🗄️ ONYX NAS — Network Attached Storage
 
-**The NAS and infrastructure platform that replaces TrueNAS and ZimaOS — storage, virtualization, object storage, backup, and app hosting in one self-hosted stack.**
+**A self-hosted NAS for disks, USB drives, network shares, snapshots and local or cloud backups.**
 
 ONYX is a lightweight, privacy-first NAS *and* infrastructure platform for hardware you
 already own — a mini-PC, a server, an old laptop. Enterprise-grade storage safety
@@ -23,6 +23,39 @@ minute and idles under 512 MB RAM.
 </div>
 
 ---
+
+## NAS development branch
+
+`dev/nas` makes network attached storage the default product and deployment profile.
+Files, disks, network shares, users, snapshots, health and backups are the main
+console. Cloud accounts include Google Drive, Google Cloud Storage, Microsoft
+OneDrive and iCloud. Apps, VMs, AI and object storage remain optional platform
+features.
+
+For a Linux NAS host, use the native installer so Samba, NFS and the storage
+services run together on the host:
+
+```bash
+make bootstrap
+make build
+sudo bash scripts/onyx-install --profile nas --install-deps
+```
+
+The installer also installs the NAS console, served by the API on loopback.
+Access administration through an SSH tunnel or authenticated HTTPS ingress.
+Then attach existing disks, create shared folders and set up backups.
+See [NAS setup and development](docs/nas.md) for deployment, storage and validation.
+
+For development without physical disk attachment:
+
+```bash
+ONYX_AUTO_ATTACH=none scripts/dev.sh start
+bin/onyx status
+```
+
+The console and API share the same address. Docker also defaults to the NAS
+service set; `ONYX_MODE=platform ./setup.sh` enables the optional platform profile.
+Native full-platform installs use `--profile platform`.
 
 ## Why ONYX
 
@@ -210,6 +243,37 @@ bin/onyx status        # CLI → API → core → shared → storaged → privd 
 bin/onyx version       # release, API namespace, and build metadata
 scripts/dev.sh stop
 ```
+
+## Connecting local and cloud storage
+
+Use **Storage → Devices → Attach** for an existing USB stick or external USB hard
+drive; this keeps its filesystem and files. Once mounted, it appears in Files and
+can be used for shares or backups. Creating a pool formats a disk and is a separate
+operation. The host must expose `/dev` to the data plane and support the device's
+filesystem.
+
+In **Settings → Cloud accounts**, choose a provider, name the account, and enter
+its credentials. Google Cloud Storage accepts a JSON service-account key upload;
+Google Drive and Microsoft OneDrive use account authorization. OneDrive also asks
+which drive/library to use. Apple iCloud Drive accepts an Apple Account password
+and verification code (web access enabled, Advanced Data Protection off; its
+rclone backend is beta). Use **Check all** to verify live access. Cloud accounts
+are available as backup, clone and object-store tier targets.
+
+After updating a Docker deployment, prepare the configured `RCLONE_CONFIG_DIR`
+(default `./data/rclone`) and rebuild the affected services on the Onyx host:
+
+```bash
+bash scripts/prepare-rclone-config.sh ./data/rclone
+docker compose up -d --build onyx-api onyx-web onyx-backupd onyx-objectstore onyx-privd onyx-storaged
+```
+
+For native development, put rclone 1.69+ on `PATH` for iCloud, and set
+`ONYX_RCLONE_CONFIG` to a writable catalog path (default `/etc/rclone/rclone.conf`).
+`ONYX_AUTO_ATTACH=none scripts/dev.sh start` disables automatic physical attachment
+when testing in a development sandbox. Behind a trusted HTTPS proxy, Docker builds
+may use `--secret id=build_ca,src=<trusted-CA-bundle>`; TLS verification stays enabled.
+
 
 ## Versioning
 

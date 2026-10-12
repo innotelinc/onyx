@@ -363,11 +363,18 @@ pub fn is_removable(snapshot: &HashMap<String, bool>, kname: &str) -> bool {
 /// removable so provisioning cannot hide an attached USB disk behind a bad
 /// bridge-reported flag.
 pub fn is_usb(sysfs_root: &Path, kname: &str) -> bool {
-    let device = sysfs_root.join(kname).join("device");
-    std::fs::canonicalize(device)
-        .ok()
-        .map(|path| path.to_string_lossy().contains("/usb"))
-        .unwrap_or(false)
+    let on_usb_bus = |name: &str| {
+        std::fs::canonicalize(sysfs_root.join(name).join("device"))
+            .ok()
+            .map(|path| path.components().any(|part| {
+                let part = part.as_os_str().to_string_lossy();
+                part.strip_prefix("usb").map(|suffix| !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit())).unwrap_or(false)
+            }))
+            .unwrap_or(false)
+    };
+    // Partition nodes do not have a device symlink. USB HDD bridges often
+    // report RM=0, so their partitions must inherit the parent's USB bus.
+    on_usb_bus(kname) || parent_disk(kname).map(|parent| on_usb_bus(&parent)).unwrap_or(false)
 }
 
 /// Parse `smartctl -H -A` text output into (status, temperature_celsius).
@@ -1795,5 +1802,29 @@ mod tests {
         assert!(is_removable(&map, "sdb"));
         assert!(!is_removable(&map, "nvme0n1"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn usb_hard_drive_partitions_inherit_the_bus_without_a_removable_flag() {
+        use std::os::unix::fs::symlink;
+        let root = std::env::temp_dir().join(format!("onyx-usb-test-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let sysfs = root.join("class/block");
+        let usb_device = root.join("devices/pci/usb2/2-1/host0/target0");
+        std::fs::create_dir_all(&usb_device).unwrap();
+        std::fs::create_dir_all(sysfs.join("sdb")).unwrap();
+        std::fs::create_dir_all(sysfs.join("sdb1")).unwrap();
+        std::fs::write(sysfs.join("sdb/removable"), "0").unwrap();
+        symlink(&usb_device, sysfs.join("sdb/device")).unwrap();
+        assert!(!is_removable(&sysfs_removable(&sysfs), "sdb1"));
+        assert!(is_usb(&sysfs, "sdb"));
+        assert!(is_usb(&sysfs, "sdb1"));
+        assert!(!is_usb(&sysfs, "sdc1"));
+        // An arbitrary directory whose name starts with usb is not a USB bus.
+        let internal = root.join("devices/usb-backup/ata0");
+        std::fs::create_dir_all(&internal).unwrap();
+        std::fs::create_dir_all(sysfs.join("sdc")).unwrap();
+        symlink(&internal, sysfs.join("sdc/device")).unwrap();
+        assert!(!is_usb(&sysfs, "sdc1"));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

@@ -57,6 +57,9 @@ jobs:
       - name: Build all binaries
         run: make build
 
+      - name: Verify NAS and platform installation packages
+        run: python3 scripts/nas-install-check.py
+
       - name: Verify compose + setup scripts
         run: |
           bash -n setup.sh scripts/provision-authentik.sh scripts/provision-device-trust.sh

@@ -47,6 +47,7 @@ start() {
 
   # onyx-storaged (Rust data plane)
   "$BIN/onyx-storaged" --socket-dir "$SOCK_DIR" --state-dir "$STATE_DIR/onyx-storaged" \
+    --auto-attach "${ONYX_AUTO_ATTACH:-removable}" \
     >"$RUN/onyx-storaged.log" 2>&1 &
   echo $! >"$RUN/onyx-storaged.pid"
 
@@ -98,7 +99,7 @@ start() {
   [ -S "$SOCK_DIR/onyx-core.sock" ] || { echo "failed to start onyx-core" >&2; stop; exit 1; }
 
   # onyx-api (Go HTTP gateway)
-  "$BIN/onyx-api" --listen "$API_LISTEN" --socket-dir "$SOCK_DIR" \
+  "$BIN/onyx-api" --listen "$API_LISTEN" --socket-dir "$SOCK_DIR" --web-root "$ROOT/docker/onyx-web" \
     >"$RUN/onyx-api.log" 2>&1 &
   echo $! >"$RUN/onyx-api.pid"
 

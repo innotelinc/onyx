@@ -12,7 +12,7 @@ Type=simple
 User=onyx-api
 Group=onyx
 SupplementaryGroups=onyx
-ExecStart=/usr/local/lib/onyx/onyx-api --listen 127.0.0.1:8080 --socket-dir /run/onyx
+ExecStart=/usr/local/lib/onyx/onyx-api --listen 127.0.0.1:8080 --socket-dir /run/onyx --state-dir /var/lib/onyx/api --web-root /usr/local/share/onyx/web
 Restart=always
 RestartSec=2
 UMask=0002
@@ -20,7 +20,7 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=/run/onyx
+ReadWritePaths=/run/onyx /var/lib/onyx/api /mnt/onyx /etc/rclone
 
 [Install]
 WantedBy=multi-user.target

@@ -216,6 +216,11 @@ func TestOAuthCallbackStoresTheTokenAndReportsTheProbe(t *testing.T) {
 	if !strings.Contains(got, "--non-interactive") {
 		t.Errorf("the token update was not run non-interactively:\n%s", got)
 	}
+	// rclone must refresh with the same OAuth app that issued the token,
+	// including when that app came from deployment-level configuration.
+	if !strings.Contains(got, "client_id gid client_secret gsecret") {
+		t.Error("the token's OAuth application was not persisted for refresh")
+	}
 	if !strings.Contains(got, "lsd gdrive:") {
 		t.Errorf("the account was never probed after sign-in:\n%s", got)
 	}
@@ -233,5 +238,46 @@ func TestOAuthCallbackRefusesAnExpiredState(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "expired") {
 		t.Errorf("the operator is not told what to do: %s", rec.Body.String())
+	}
+}
+
+func TestOAuthCallbackOffersPendingDriveSelection(t *testing.T) {
+	log := fakeRcloneConfigured(t, "ms-choice:", `{"ms-choice":{"type":"onedrive"}}`)
+	stub := filepath.Join(filepath.Dir(log), "rclone")
+	file, err := os.OpenFile(stub, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = file.WriteString("if [ \"$1\" = config ] && [ \"$2\" = update ]; then echo '{\"State\":\"choose_type_done\",\"Option\":{\"Name\":\"config_type\",\"Help\":\"Select drive type\"}}'; fi\n")
+	closeErr := file.Close()
+	if err != nil || closeErr != nil {
+		t.Fatal("could not finish fake rclone")
+	}
+	state, err := pendingLogins.put(pendingOAuth{remote: "ms-choice", backendType: "onedrive", clientID: "id", clientSecret: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := exchangeOAuthCodeFunc
+	t.Cleanup(func() {
+		exchangeOAuthCodeFunc = original
+		pendingRemoteConfigs.Lock()
+		delete(pendingRemoteConfigs.steps, "ms-choice")
+		pendingRemoteConfigs.Unlock()
+	})
+	exchangeOAuthCodeFunc = func(context.Context, oauthBackend, string, string, string, string) (oauthTokenResponse, error) {
+		return oauthTokenResponse{AccessToken: "fixture"}, nil
+	}
+	req := httptest.NewRequest(http.MethodGet, callbackPath+"?state="+state+"&code=fixture", nil)
+	rec := httptest.NewRecorder()
+	(&server{}).handleOAuthCallback(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Continue setup") || strings.Contains(rec.Body.String(), "Sign-in failed") {
+		t.Fatalf("unfinished selection was misreported: %s", rec.Body.String())
+	}
+	if pendingRemoteConfigs.all()["ms-choice"].ID == "" {
+		t.Fatal("pending drive selection cannot be resumed from the console")
+	}
+	args, _ := os.ReadFile(log)
+	if strings.Contains(string(args), "lsd ms-choice:") {
+		t.Fatal("unconfigured drive was probed")
 	}
 }

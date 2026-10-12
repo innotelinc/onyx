@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
-  <title>ONYX — Online Storage System</title>
+  <title>ONYX NAS</title>
   <meta name="description" content="ONYX — Self-hosted online storage system. Manage pools, files, snapshots and shares.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b0d10'/%3E%3Cpath d='M16 6l9 5v10l-9 5-9-5V11z' fill='none' stroke='%233b9dff' stroke-width='2'/%3E%3C/svg%3E">
   <style>
@@ -288,7 +288,7 @@
         <button class="icon-btn" id="rail-toggle" type="button" title="Toggle activity rail" aria-label="Toggle activity rail">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
         </button>
-        <span class="avatar" title="Signed in via Cerulean" aria-label="Account">O</span>
+        <span class="avatar" title="NAS administration" aria-label="Account">O</span>
       </header>
       <main class="content" id="content"></main>
     </div>
@@ -311,6 +311,7 @@
     </div>
   </div>
 
+  <script src="/config.js"></script>
   <script>
   (function () {
     'use strict';
@@ -341,14 +342,18 @@
       { id: 'snapshots', label: 'Snapshots', icon: ICONS.snapshots, section: 'Data', badge: '0' },
       { id: 'backups',   label: 'Backups',   icon: ICONS.backups,   section: 'Data' },
       { id: 'scrub',     label: 'Scrub',     icon: ICONS.settings,  section: 'Data' },
-      { id: 'apps',      label: 'Apps',      icon: ICONS.apps,      section: 'Platform' },
-      { id: 'vms',       label: 'VMs',       icon: ICONS.storage,   section: 'Platform' },
-      { id: 'objects',   label: 'Objects',   icon: ICONS.files,     section: 'Platform' },
-      { id: 'shares',    label: 'Shares',    icon: ICONS.shares,    section: 'Platform', badge: '0' },
-      { id: 'users',     label: 'Users',     icon: ICONS.users,     section: 'Platform' },
-      { id: 'audit',     label: 'Audit',     icon: ICONS.users,     section: 'Platform' },
-      { id: 'settings',  label: 'Settings',  icon: ICONS.settings,  section: 'Platform' }
+      { id: 'shares',    label: 'Network shares', icon: ICONS.shares, section: 'Sharing', badge: '0' },
+      { id: 'users',     label: 'Users',     icon: ICONS.users,     section: 'Sharing' },
+      { id: 'audit',     label: 'Access audit', icon: ICONS.users, section: 'Sharing' },
+      { id: 'apps',      label: 'Apps',      icon: ICONS.apps,      section: 'Platform', platformOnly: true },
+      { id: 'vms',       label: 'VMs',       icon: ICONS.storage,   section: 'Platform', platformOnly: true },
+      { id: 'objects',   label: 'Objects',   icon: ICONS.files,     section: 'Platform', platformOnly: true },
+      { id: 'settings',  label: 'Settings',  icon: ICONS.settings,  section: 'System' }
     ];
+
+    function activeViews() {
+      return VIEWS.filter(function (view) { return !view.platformOnly || window.ONYX_MODE === 'platform'; });
+    }
 
     var API = window.ONYX_API_BASE || (function () {
       var host = window.location.hostname;
@@ -366,7 +371,7 @@
     function renderNav(active) {
       var html = '';
       var seen = '';
-      VIEWS.forEach(function (v) {
+      activeViews().forEach(function (v) {
         if (v.section !== seen) {
           seen = v.section;
           html += '<div class="section">' + esc(v.section) + '</div>';
@@ -385,7 +390,7 @@
     function reserved(title, note) { return '<div class="card reserved"><h3>' + title + '</h3><div class="stat">' + esc(note) + '</div></div>'; }
 
     function viewDashboard() {
-      return '<div class="page-head"><div><h1>Dashboard</h1><p>Health and capacity at a glance.</p></div>' +
+      return '<div class="page-head"><div><h1>ONYX NAS</h1><p>Your disks, shared folders, and backups in one place.</p></div>' +
         '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="sub" id="dashboard-updated"></span><button class="btn" id="dashboard-refresh">Refresh</button><button class="btn primary" onclick="location.hash=\'#/files\'">Browse files</button></div></div>' +
         '<div class="grid">' +
         '<div class="card"><h3>Pools</h3><div class="stat" id="stat-pools">—</div><div class="sub" id="stat-pools-sub">storage pools online</div></div>' +
@@ -394,7 +399,7 @@
         '<div class="card"><h3>Version</h3><div class="stat" id="stat-version">—</div><div class="sub">onyx-api</div></div>' +
         '</div>' +
         '<div class="grid" style="margin-top:16px">' +
-        card('Safety plane', stat('Obsidian', 'snapshots · backups · scrub scheduling · device health')) +
+        card('Set up your NAS', '<ol><li><a href="#/storage">Attach an existing disk or USB drive</a>.</li><li><a href="#/files">Browse your files and create folders</a>.</li><li><a href="#/shares">Share folders with Windows, macOS and Linux</a>.</li><li><a href="#/backups">Protect your files with local or cloud backups</a>.</li></ol><p class="sub">Use Attach to keep existing data. Creating a storage pool formats its selected disk.</p>') +
         '</div>';
     }
 
@@ -815,7 +820,7 @@
     }
 
     function showError(err) {
-      var message = err && err.error && err.error.message ? err.error.message : 'The API request failed.';
+      var message = err && err.error && err.error.message ? err.error.message : err && err.message ? err.message : 'The API request failed.';
       var target = document.getElementById('content');
       if (target) target.insertAdjacentHTML('afterbegin', '<div class="card" style="border-color:var(--onyx-danger);color:var(--onyx-danger)">' + esc(message) + '</div>');
     }
@@ -1189,10 +1194,11 @@
       }).catch(function () { select.innerHTML = '<option value="">Providers unavailable</option>'; });
     }
 
-    function renderRemoteFields(providers) {
-      var select = document.getElementById('remote-provider');
-      var fields = document.getElementById('remote-fields');
-      var hint = document.getElementById('remote-hint');
+    function renderRemoteFields(providers, prefix) {
+      prefix = prefix || 'remote';
+      var select = document.getElementById(prefix === 'remote' ? 'remote-provider' : 'settings-provider');
+      var fields = document.getElementById(prefix + '-fields');
+      var hint = document.getElementById(prefix + '-hint');
       if (!select || !fields) return;
       var provider = (providers || []).filter(function (p) { return p.type === select.value; })[0];
       if (!provider) {
@@ -1202,12 +1208,53 @@
       }
       var required = provider.required || [];
       fields.innerHTML = (provider.fields || []).map(function (field) {
+        if (field === 'service_account_credentials') {
+          return '<label>Service-account JSON key<input type="file" accept=".json,application/json" data-remote-file="service_account_credentials" class="search" style="width:100%"><textarea class="search" data-remote-field="service_account_credentials" style="width:100%;min-height:90px" placeholder="Or paste your service-account JSON key" autocomplete="off" spellcheck="false"></textarea></label>';
+        }
         var label = field.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
         if (required.indexOf(field) >= 0) label += ' *';
         var secret = /pass|secret|key$/.test(field);
+        if (field === 'service_account_file') label = 'Existing key-file path (alternative to upload)';
         return '<label>' + esc(label) + '<input class="search" data-remote-field="' + esc(field) + '" style="width:100%;max-width:none"' + (secret ? ' type="password"' : '') + ' autocomplete="off"></label>';
       }).join('');
       if (hint) hint.textContent = provider.hint || '';
+    }
+
+    function collectRemoteParams(container) {
+      var params = {};
+      Array.prototype.forEach.call(container.querySelectorAll('[data-remote-field]'), function (input) {
+        var value = input.value.trim();
+        if (value) params[input.dataset.remoteField] = value;
+      });
+      var files = Array.prototype.slice.call(container.querySelectorAll('[data-remote-file]'));
+      return Promise.resolve().then(function () { return Promise.all(files.map(function (input) {
+        if (!input.files || !input.files.length) return;
+        if (input.files[0].size > 64 * 1024) throw new Error('The service-account JSON key must be smaller than 64 KB.');
+        return input.files[0].text().then(function (text) { params[input.dataset.remoteFile] = text; });
+      })); }).then(function () { return params; });
+    }
+
+    function continueRemoteSetup(name, step, statusID) {
+      var status = document.getElementById(statusID || 'remote-status');
+      if (!status) return;
+      var question = step.question || {};
+      var examples = question.examples || [];
+      var input = question.exclusive && examples.length
+        ? '<select id="remote-setup-answer" class="search">' + examples.map(function (example) { return '<option value="' + esc(example.Value) + '">' + esc(example.Help || example.Value) + '</option>'; }).join('') + '</select>'
+        : '<input id="remote-setup-answer" class="search" type="' + (question.is_password || question.name === 'config_2fa' ? 'password' : 'text') + '" autocomplete="off" value="' + esc(question.default == null ? '' : String(question.default)) + '">';
+      status.innerHTML = '<b>Finish connecting ' + esc(name) + '</b><p class="sub" style="white-space:pre-wrap">' + esc(question.help || 'Complete account setup') + '</p>' + (step.error ? '<p class="sub">' + esc(step.error) + '</p>' : '') + input + '<button id="remote-setup-submit" class="btn primary">Continue</button>';
+      var button = document.getElementById('remote-setup-submit');
+      button.addEventListener('click', function () {
+        var answer = document.getElementById('remote-setup-answer').value;
+        if (question.required && !answer.trim()) { showError({ error: { message: 'An answer is required.' } }); return; }
+        button.disabled = true;
+        apiJSON('/storage/remotes/' + encodeURIComponent(name) + '/configure', { method: 'POST', body: JSON.stringify({ id: step.id, result: answer }) }).then(function (res) {
+          if (res.configuration) { continueRemoteSetup(name, res.configuration, statusID); return; }
+          status.textContent = res.ok ? name + ' is connected and reachable.' : 'Setup completed, but the account could not be reached: ' + res.detail;
+          loadSettingsRemotes().catch(function () {});
+          loadRemoteTargets();
+        }).catch(function (err) { button.disabled = false; showError(err); });
+      });
     }
 
     // oauthRedirect is the set of backends the console can sign in for itself
@@ -1221,10 +1268,10 @@
     // approve access in a browser and the callback lands on 127.0.0.1 of the
     // machine that ran the approval, so the console shows the exact command and
     // takes the token it prints.
-    function connectRemoteAccount(name, type, canRedirect) {
-      var status = document.getElementById('remote-status');
+    function connectRemoteAccount(name, type, canRedirect, statusID) {
+      var status = document.getElementById(statusID || 'remote-status');
       if (!status) return;
-      var command = 'rclone authorize ' + type;
+      var command = 'rclone authorize ' + (type === 'sharepoint' ? 'onedrive' : type);
       var signIn = canRedirect
         ? '<button class="btn primary" id="remote-oauth-start">Sign in with ' + esc(type) + '</button>' +
           '<div id="remote-oauth-result" class="sub" style="margin-top:8px"></div>' +
@@ -1278,6 +1325,7 @@
         }).then(function (res) {
           button.disabled = false;
           button.textContent = 'Connect account';
+          if (res.configuration) { continueRemoteSetup(name, res.configuration, statusID); return; }
           result.textContent = res.ok
             ? name + ' is connected and reachable.'
             : name + ' stored the token but the account could not be reached: ' + res.detail;
@@ -1312,10 +1360,23 @@
         }
         list.innerHTML = names.length
           ? '<div style="display:grid;gap:6px">' + names.map(function (n) {
-            var connect = oauthTypes[details[n]] ? '<button class="btn primary" data-remote-connect="' + esc(n) + '">Connect</button>' : '';
+            var pending = (data.configuration || {})[n];
+            var connect = pending ? '<button class="btn primary" data-remote-continue="' + esc(n) + '">Continue setup</button>' : oauthTypes[details[n]] ? '<button class="btn primary" data-remote-connect="' + esc(n) + '">Connect</button>' : details[n] === 'iclouddrive' ? '<button class="btn" data-remote-reconnect="' + esc(n) + '">Reconnect</button>' : '';
             return '<div style="display:flex;gap:8px;align-items:center"><span class="tag">' + esc(n) + (details[n] ? ' · ' + esc(details[n]) : '') + '</span>' + connect + '<button class="btn" data-remote-check="' + esc(n) + '">Check</button><button class="btn" data-remote-delete="' + esc(n) + '">Remove</button></div>';
           }).join('') + '</div>'
           : 'No cloud/remote targets configured yet.';
+        Array.prototype.forEach.call(list.querySelectorAll('[data-remote-continue]'), function (button) {
+          button.addEventListener('click', function () { continueRemoteSetup(button.dataset.remoteContinue, data.configuration[button.dataset.remoteContinue]); });
+        });
+        Array.prototype.forEach.call(list.querySelectorAll('[data-remote-reconnect]'), function (button) {
+          button.addEventListener('click', function () {
+            var name = button.dataset.remoteReconnect;
+            apiJSON('/storage/remotes/' + encodeURIComponent(name) + '/reconnect', { method: 'POST', body: '{}' }).then(function (res) {
+              if (res.configuration) continueRemoteSetup(name, res.configuration);
+              else document.getElementById('remote-status').textContent = res.ok ? name + ' is connected.' : 'Could not reach the account: ' + res.detail;
+            }).catch(showError);
+          });
+        });
         if (data.error) list.innerHTML += '<div class="sub" style="margin-top:8px">' + esc(data.error) + '</div>';
         Array.prototype.forEach.call(list.querySelectorAll('[data-remote-check]'), function (button) {
           button.addEventListener('click', function () {
@@ -1696,7 +1757,7 @@
     // token is pasted; key-based backends (S3, SMB, SFTP, WebDAV, ...) are
     // configured there too because they need more than a name.
     function viewSettings() {
-      return '<div class="page-head"><div><h1>Settings</h1><p>Current platform connections and dashboard preferences.</p></div></div><div class="grid"><div class="card"><h3>Identity</h3><p class="sub">Cerulean Authentik provides SSO and user identity.</p><a class="btn" href="https://auth.onyx.innotel.us/if/admin/" target="_blank" rel="noopener">Manage identity</a></div><div class="card"><h3>Cloud accounts</h3><p class="sub">Rclone reaches Google Drive, Microsoft OneDrive, SharePoint, Dropbox, S3, SMB, SFTP and more. Create the account here — Onyx writes the remote for you.</p><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end"><label>Provider<select id="settings-provider" class="search" style="width:100%;max-width:none"><option value="">Loading providers…</option></select></label><label>Account name<input id="settings-remote-name" class="search" style="width:100%;max-width:none" placeholder="my-drive" autocomplete="off"></label><button class="btn primary" id="settings-remote-create">Create remote</button><button class="btn" id="settings-refresh-remotes">Check all</button></div><div id="settings-remotes" class="sub" style="margin-top:8px">Loading remotes…</div></div><div class="card"><h3>Appearance</h3><label>Theme<select id="settings-theme" class="search" style="width:100%;margin-top:8px"><option value="dark">Dark</option><option value="light">Light</option></select></label></div></div>';
+      return '<div class="page-head"><div><h1>Settings</h1><p>Current platform connections and dashboard preferences.</p></div></div><div class="grid"><div class="card"><h3>Identity</h3><p class="sub">Cerulean Authentik provides SSO and user identity.</p><a class="btn" href="https://auth.onyx.innotel.us/if/admin/" target="_blank" rel="noopener">Manage identity</a></div><div class="card"><h3>Cloud accounts</h3><p class="sub">Connect Google Drive, Google Cloud Storage, Microsoft OneDrive, SharePoint, Apple iCloud Drive and other storage providers. Enter the provider credentials, then complete any sign-in or verification steps below.</p><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end"><label>Provider<select id="settings-provider" class="search" style="width:100%;max-width:none"><option value="">Loading providers…</option></select></label><label>Account name<input id="settings-remote-name" class="search" style="width:100%;max-width:none" placeholder="my-drive" autocomplete="off"></label><button class="btn primary" id="settings-remote-create">Create remote</button><button class="btn" id="settings-refresh-remotes">Check all</button></div><div id="settings-remote-fields" class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:12px"></div><p id="settings-remote-hint" class="sub"></p><div id="settings-remotes" class="sub" style="margin-top:8px">Loading remotes…</div><div id="settings-remote-status" class="sub" style="margin-top:12px"></div></div><div class="card"><h3>Appearance</h3><label>Theme<select id="settings-theme" class="search" style="width:100%;margin-top:8px"><option value="dark">Dark</option><option value="light">Light</option></select></label></div></div>';
     }
 
     // loadSettingsRemotes fills the provider picker from the same catalog the
@@ -1709,17 +1770,36 @@
         var select = document.getElementById('settings-provider');
         if (select && select.dataset.filled !== 'true') {
           select.innerHTML = '<option value="">Choose a provider…</option>' + providers.map(function (p) {
-            return '<option value="' + esc(p.type) + '">' + esc(p.label) + (p.oauth ? ' (browser approval on Shares)' : '') + '</option>';
+            return '<option value="' + esc(p.type) + '">' + esc(p.label) + (p.oauth ? ' (browser approval)' : '') + '</option>';
           }).join('');
           select.dataset.filled = 'true';
+          select.addEventListener('change', function () { renderRemoteFields(providers, 'settings-remote'); });
         }
         var names = parts[1].remotes || [];
         var details = parts[1].details || {};
         box.innerHTML = names.length
           ? '<div style="display:grid;gap:4px">' + names.map(function (n) {
-            return '<div style="display:flex;gap:8px;align-items:center"><span class="tag">' + esc(n) + (details[n] ? ' · ' + esc(details[n]) : '') + '</span><span data-settings-status="' + esc(n) + '"></span></div>';
+            var pending = (parts[1].configuration || {})[n];
+            var provider = providers.filter(function (p) { return p.type === details[n]; })[0];
+            var connect = pending ? '<button class="btn" data-settings-continue="' + esc(n) + '">Continue setup</button>' : provider && provider.oauth ? '<button class="btn" data-settings-connect="' + esc(n) + '">Connect</button>' : details[n] === 'iclouddrive' ? '<button class="btn" data-settings-reconnect="' + esc(n) + '">Reconnect</button>' : '';
+            return '<div style="display:flex;gap:8px;align-items:center"><span class="tag">' + esc(n) + (details[n] ? ' · ' + esc(details[n]) : '') + '</span><span data-settings-status="' + esc(n) + '"></span>' + connect + '</div>';
           }).join('') + '</div>'
           : 'No rclone remotes configured yet.';
+        Array.prototype.forEach.call(box.querySelectorAll('[data-settings-continue]'), function (button) {
+          button.addEventListener('click', function () { continueRemoteSetup(button.dataset.settingsContinue, parts[1].configuration[button.dataset.settingsContinue], 'settings-remote-status'); });
+        });
+        Array.prototype.forEach.call(box.querySelectorAll('[data-settings-connect]'), function (button) {
+          button.addEventListener('click', function () { var name = button.dataset.settingsConnect; connectRemoteAccount(name, details[name], (parts[0].oauth_redirect || []).indexOf(details[name]) >= 0, 'settings-remote-status'); });
+        });
+        Array.prototype.forEach.call(box.querySelectorAll('[data-settings-reconnect]'), function (button) {
+          button.addEventListener('click', function () {
+            var name = button.dataset.settingsReconnect;
+            apiJSON('/storage/remotes/' + encodeURIComponent(name) + '/reconnect', { method: 'POST', body: '{}' }).then(function (res) {
+              if (res.configuration) continueRemoteSetup(name, res.configuration, 'settings-remote-status');
+              else document.getElementById('settings-remote-status').textContent = res.ok ? name + ' is connected.' : 'Could not reach the account: ' + res.detail;
+            }).catch(showError);
+          });
+        });
       }).catch(function (err) { box.textContent = 'Remotes unavailable'; throw err; });
     }
 
@@ -1846,7 +1926,7 @@
     }
 
     function render(route) {
-      var v = VIEWS.filter(function (x) { return x.id === route; })[0] || VIEWS[0];
+      var v = activeViews().filter(function (x) { return x.id === route; })[0] || VIEWS[0];
       renderNav(v.id);
       document.getElementById('crumbs').innerHTML = '<span>ONYX</span><span>›</span><b>' + esc(v.label) + '</b>';
 
@@ -2019,25 +2099,23 @@
         loadRemoteTargets();
         document.getElementById('remote-save').addEventListener('click', function () {
           var status = document.getElementById('remote-status');
-          var params = {};
-          Array.prototype.forEach.call(document.querySelectorAll('[data-remote-field]'), function (input) {
-            var value = input.value.trim();
-            if (value) params[input.dataset.remoteField] = value;
-          });
-          var body = { name: document.getElementById('remote-name').value.trim(), type: document.getElementById('remote-provider').value, params: params };
+          var body = { name: document.getElementById('remote-name').value.trim(), type: document.getElementById('remote-provider').value };
           if (!body.name || !body.type) {
             showError({ error: { message: 'A target name and a provider are required.' } });
             return;
           }
           if (status) status.textContent = 'Saving target…';
-          apiJSON('/storage/remotes', { method: 'POST', body: JSON.stringify(body) }).then(function (result) {
+          collectRemoteParams(document.getElementById('remote-fields')).then(function (params) { body.params = params; return apiJSON('/storage/remotes', { method: 'POST', body: JSON.stringify(body) }); }).then(function (result) {
             if (status) status.textContent = 'Saved ' + result.name + ' (' + result.type + ').' + (result.next_step ? ' ' + result.next_step : '');
             document.getElementById('remote-name').value = '';
             return loadRemoteTargets().then(function () {
               // An OAuth backend is only half done when it is saved: take the
               // operator straight to the approval step instead of leaving a
               // remote that silently fails every request.
-              if (result.oauth) connectRemoteAccount(result.name, result.type, !!oauthRedirect[result.type]);
+              document.getElementById('remote-fields').innerHTML = '';
+              document.getElementById('remote-provider').value = '';
+              if (result.configuration) continueRemoteSetup(result.name, result.configuration);
+              else if (result.oauth) connectRemoteAccount(result.name, result.type, !!oauthRedirect[result.type]);
             });
           }).catch(showError);
         });
@@ -2141,15 +2219,23 @@
           var name = document.getElementById('settings-remote-name').value.trim();
           var type = document.getElementById('settings-provider').value;
           if (!name || !type) { showError({ error: { message: 'Choose a provider and give the account a name.' } }); return; }
-          var box = document.getElementById('settings-remotes');
-          if (box) box.textContent = 'Creating ' + name + '…';
-          apiJSON('/storage/remotes', { method: 'POST', body: JSON.stringify({ name: name, type: type, params: {} }) }).then(function (result) {
+          var button = document.getElementById('settings-remote-create');
+          var status = document.getElementById('settings-remote-status');
+          button.disabled = true;
+          status.textContent = 'Creating ' + name + '…';
+          collectRemoteParams(document.getElementById('settings-remote-fields')).then(function (params) {
+            return apiJSON('/storage/remotes', { method: 'POST', body: JSON.stringify({ name: name, type: type, params: params }) });
+          }).then(function (result) {
             document.getElementById('settings-remote-name').value = '';
+            document.getElementById('settings-remote-fields').innerHTML = '';
+            document.getElementById('settings-provider').value = '';
+            document.getElementById('settings-remote-hint').textContent = '';
             return loadSettingsRemotes().then(function () {
-              var box2 = document.getElementById('settings-remotes');
-              if (box2) box2.insertAdjacentHTML('afterbegin', '<div class="sub" style="color:var(--onyx-success)">Created ' + esc(result.name) + ' (' + esc(result.type) + ').' + (result.oauth ? ' Approve it on the Shares page — press Connect beside the target and paste the token rclone prints.' : '') + '</div>');
+              status.textContent = 'Created ' + result.name + '.';
+              if (result.configuration) continueRemoteSetup(result.name, result.configuration, 'settings-remote-status');
+              else if (result.oauth) connectRemoteAccount(result.name, result.type, ['drive', 'onedrive', 'sharepoint'].indexOf(result.type) >= 0, 'settings-remote-status');
             });
-          }).catch(showError);
+          }).catch(function (err) { status.textContent = ''; showError(err); }).finally(function () { button.disabled = false; });
         });
       }
       if (v.id === 'backups') {
@@ -2182,6 +2268,12 @@
         .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
         .then(function (s) {
           var services = Array.isArray(s.services) ? s.services : [];
+          if (window.ONYX_MODE !== 'platform') {
+            var required = ['onyx-core', 'onyx-storaged', 'onyx-shared', 'onyx-privd', 'onyx-snapd', 'onyx-backupd'];
+            services = required.map(function (name) {
+              return services.filter(function (service) { return service.name === name; })[0] || { name: name, status: 'UNKNOWN' };
+            });
+          }
           var serving = services.filter(function (service) { return service.status === 'SERVING'; }).length;
           var healthy = services.length > 0 && serving === services.length;
           setStatus(healthy ? 'ok' : 'warn', services.length ? serving + '/' + services.length + ' services' : 'Checking services');
@@ -2239,7 +2331,7 @@
     var paletteIndex = 0;
 
     function commands() {
-      return VIEWS.map(function (v) {
+      return activeViews().map(function (v) {
         return { label: 'Go to ' + v.label, hint: v.section, run: function () { location.hash = '#/' + v.id; } };
       }).concat([
         { label: 'Toggle theme', hint: 'Appearance', run: toggleTheme },
