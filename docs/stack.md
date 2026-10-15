@@ -30,7 +30,7 @@ provides, and explicitly does not own.
 
 ## Provides
 
-- Storage to Monarch, Oasis, Signara, and Capstone
+- Storage to Monarch, Oasis, Signara, Capstone, and OnTrak
 
 ## Consumes
 
