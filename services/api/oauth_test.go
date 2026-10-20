@@ -52,8 +52,8 @@ func TestOAuthCallbackURL(t *testing.T) {
 	proxied := httptest.NewRequest(http.MethodPost, "http://onyx-api:8080/api/v1/storage/remotes/g/oauth/start", nil)
 	proxied.Host = "onyx-api:8080"
 	proxied.Header.Set("X-Forwarded-Proto", "https")
-	proxied.Header.Set("X-Forwarded-Host", "app.onyx.innotel.us")
-	if got := oauthCallbackURL(proxied); got != "https://app.onyx.innotel.us"+callbackPath {
+	proxied.Header.Set("X-Forwarded-Host", "onyx.innotel.us")
+	if got := oauthCallbackURL(proxied); got != "https://onyx.innotel.us"+callbackPath {
 		t.Errorf("proxied request = %q", got)
 	}
 	// A deployment that pins the public URL wins over both.

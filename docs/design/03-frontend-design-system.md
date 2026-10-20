@@ -151,7 +151,7 @@ where the content would have been.
 
 - **Server:** `onyx-web` (nginx) serves `index.html` plus the two Unity files.
   The image is built by `docker/onyx-web/Dockerfile` and published to GHCR.
-- **API:** same-origin `/api/v1`; on `app.onyx.innotel.us` the console calls
+- **API:** same-origin `/api/v1`; on `onyx.innotel.us` the console calls
   `https://api.onyx.innotel.us/api/v1`.
 - **State:** the URL hash is the router (`#/files`, `#/storage`, …); preferences
   (rail, theme, pending search, backup source) live in `localStorage` or

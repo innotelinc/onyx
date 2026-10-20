@@ -108,13 +108,13 @@ print(json.dumps({
     "client_id": "$CLIENT_ID",
     "client_secret": "$CLIENT_SECRET",
     "redirect_uris": [
-        "https://app.$DOMAIN/*",
+        "https://$DOMAIN/*",
         "https://admin.$DOMAIN/*",
         "http://127.0.0.1:8080/*",
         "http://localhost:8080/*",
     ],
     "allowed_redirect_uris": [
-        "https://app.$DOMAIN/*",
+        "https://$DOMAIN/*",
         "https://admin.$DOMAIN/*",
         "http://127.0.0.1:8080/*",
         "http://localhost:8080/*",
@@ -134,7 +134,7 @@ print(json.dumps({
     "name": "ONYX Platform",
     "slug": "onyx-platform",
     "provider": $PROVIDER_PK,
-    "launch_url": "https://app.$DOMAIN/",
+    "launch_url": "https://$DOMAIN/",
 }))
 PY
 )" >/dev/null

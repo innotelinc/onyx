@@ -747,7 +747,7 @@ const rIDKey ctxKey = "onyx_request_id"
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin == "https://app.onyx.innotel.us" || origin == "http://localhost:2080" || origin == "http://127.0.0.1:2080" {
+		if origin == "https://onyx.innotel.us" || origin == "http://localhost:2080" || origin == "http://127.0.0.1:2080" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, X-Onyx-Request-ID")

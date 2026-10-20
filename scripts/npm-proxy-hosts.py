@@ -7,9 +7,12 @@ Integrated into setup.sh. Idempotent end to end:
   2. ensure a Let's Encrypt WILDCARD certificate for *.DOMAIN + DOMAIN,
      issued via DNS-01 with the rfc2136 provider (RFC 2136 dynamic update,
      TSIG key) — the same pattern as the other innotelinc platform projects;
-  3. ensure an NPM proxy host for every subdomain in NPM_SUBDOMAINS,
-     each with the wildcard cert, SSL forced, websockets where enabled;
-  4. print the final URL table.
+  3. ensure an NPM proxy host for every entry in NPM_SUBDOMAINS — `@` is the
+     apex, where the console is served — each with the wildcard cert, SSL
+     forced, websockets where enabled;
+  4. keep the retired `app.<domain>` console host pointing at the apex with a
+     301 when nothing else claims that name;
+  5. print the final URL table.
 
 Configuration comes from the environment (see .env.example):
 
@@ -21,7 +24,8 @@ Configuration comes from the environment (see .env.example):
   TSIG_KEY_NAME    onyx-key.
   TSIG_KEY_SECRET  base64 TSIG secret
   TSIG_KEY_ALGORITHM  hmac-sha256
-  NPM_SUBDOMAINS   "app=onyx-web:80 api=onyx-api:8080 ..." (space separated)
+  NPM_SUBDOMAINS   "@=onyx-web:80 api=onyx-api:8080 ..." (space separated;
+                   `@` is the apex, where the console is served)
 
 No third-party packages: stdlib urllib only. Exits non-zero on any API error.
 """
@@ -43,11 +47,11 @@ TSIG_NAME = os.environ.get("TSIG_KEY_NAME", "")
 TSIG_SECRET = os.environ.get("TSIG_KEY_SECRET", "")
 TSIG_ALGO = os.environ.get("TSIG_KEY_ALGORITHM", "hmac-sha256")
 
-# Device trust (docs/design/11 §10): subdomains gated by TLS client certs.
-# Space-separated subdomain names; empty disables the gate entirely.
+# Device trust (docs/design/11 §10): hosts gated by TLS client certs.
+# Space-separated subdomain names (`@` is the apex); empty disables the gate.
 DEVICE_TRUST_SUBDOMAINS = [
     s.strip()
-    for s in os.environ.get("DEVICE_TRUST_SUBDOMAINS", "app admin").replace(",", " ").split()
+    for s in os.environ.get("DEVICE_TRUST_SUBDOMAINS", "admin").replace(",", " ").split()
     if s.strip()
 ]
 # The device CA is generated on the host by scripts/provision-device-trust.sh
@@ -87,7 +91,7 @@ def with_device_trust(existing: str, subdomain: str) -> str:
 # and the username comes from the Authentik forward-auth header — which is what
 # makes the WebDAV connection string the Shares page copies out a URL that works
 # instead of one that answers 401.
-WEBDAV_SUBDOMAIN = os.environ.get("WEBDAV_SUBDOMAIN", "app").strip() or "app"
+WEBDAV_SUBDOMAIN = os.environ.get("WEBDAV_SUBDOMAIN", "@").strip() or "@"
 WEBDAV_TARGET = os.environ.get("WEBDAV_TARGET", "onyx-davd:8081").strip()
 WEBDAV_IDENTITY_HEADER = "X-Onyx-User"
 WEBDAV_IDENTITY_SOURCE = "$http_x_authentik_username"
@@ -109,6 +113,12 @@ def webdav_location() -> dict:
             f"proxy_set_header {WEBDAV_IDENTITY_HEADER} {WEBDAV_IDENTITY_SOURCE};\n"
         ),
     }
+
+
+def hostname_for(sub: str) -> str:
+    """The hostname a NPM_SUBDOMAINS entry names. `@` (or nothing) is the apex."""
+    sub = sub.strip()
+    return DOMAIN if sub in ("", "@") else f"{sub}.{DOMAIN}"
 
 
 def die(msg: str) -> None:
@@ -198,7 +208,7 @@ def ensure_proxy_hosts(token: str, cert_id: int) -> list[dict]:
         subdomains[sub.strip()] = target.strip()
     if not subdomains:
         subdomains = {
-            "app": "onyx-web:80",
+            "@": "onyx-web:80",
             "api": "onyx-api:8080",
             "auth": "authentic-server:9000",
             "storage": "onyx-objectstore:9000",
@@ -217,7 +227,7 @@ def ensure_proxy_hosts(token: str, cert_id: int) -> list[dict]:
 
     results = []
     for sub, target in sorted(subdomains.items()):
-        fqdn = f"{sub}.{DOMAIN}"
+        fqdn = hostname_for(sub)
         host, _, port = target.partition(":")
         existing = by_domain.get(fqdn)
         gated = "mTLS" if sub in DEVICE_TRUST_SUBDOMAINS else "open"
@@ -230,7 +240,7 @@ def ensure_proxy_hosts(token: str, cert_id: int) -> list[dict]:
             "ssl_forced": True,
             "block_exploits": True,
             "caching_enabled": False,
-            "allow_websocket_upgrade": sub in ("app", "api", "admin"),
+            "allow_websocket_upgrade": sub in ("@", "app", "api", "admin"),
             "access_list_id": "0",
             "advanced_config": with_device_trust(existing.get("advanced_config") if existing else "", sub),
             # The WebDAV surface lives under /webdav on one subdomain (default
@@ -252,11 +262,59 @@ def ensure_proxy_hosts(token: str, cert_id: int) -> list[dict]:
     return results
 
 
+# The console used to live at app.<domain>. Moving it to the apex would break
+# every bookmark and every URL already handed out, so the old name is kept as a
+# permanent 301 instead of being deleted. NPM refuses a redirect on a name that
+# a proxy host still uses, so an operator who has re-pointed `app` at something
+# else keeps their host and is told about it.
+RETIRED_CONSOLE = "app"
+
+
+def console_redirect_payload(cert_id: int) -> dict:
+    return {
+        "domain_names": [hostname_for(RETIRED_CONSOLE)],
+        "forward_scheme": "https",
+        "forward_domain_name": DOMAIN,
+        "forward_http_code": 301,
+        "preserve_path": True,
+        "certificate_id": cert_id,
+        "ssl_forced": True,
+        "http2_support": True,
+        "block_exploits": True,
+        # NPM's schema requires the column even when the redirect needs no
+        # advanced directives; omitting it is a 500 from the insert.
+        "advanced_config": "",
+        # The host only redirects; it never asks for a certificate of its own.
+        "meta": {"letsencrypt_agree": False, "dns_challenge": False},
+    }
+
+
+def ensure_console_redirect(token: str, cert_id: int) -> str:
+    fqdn = hostname_for(RETIRED_CONSOLE)
+    proxies = api("GET", "/api/nginx/proxy-hosts", token)
+    if isinstance(proxies, list) and any(fqdn in (h.get("domain_names") or []) for h in proxies):
+        print(f"  redirect: {fqdn} is still a proxy host, left alone")
+        return "left alone"
+
+    payload = console_redirect_payload(cert_id)
+    redirects = api("GET", "/api/nginx/redirection-hosts", token)
+    if isinstance(redirects, list):
+        for r in redirects:
+            if fqdn in (r.get("domain_names") or []):
+                api("PUT", f"/api/nginx/redirection-hosts/{r['id']}", token, payload)
+                print(f"  redirect: {fqdn} -> https://{DOMAIN} (301, updated)")
+                return "updated"
+    api("POST", "/api/nginx/redirection-hosts", token, payload)
+    print(f"  redirect: {fqdn} -> https://{DOMAIN} (301, created)")
+    return "created"
+
+
 def main() -> None:
     print(f"[npm-proxy-hosts] provisioning NPM at {BASE} for *.{DOMAIN}")
     token = login()
     cert_id = ensure_wildcard_cert(token)
     results = ensure_proxy_hosts(token, cert_id)
+    redirect = ensure_console_redirect(token, cert_id)
 
     print("\nONYX platform endpoints (provisioned):")
     width = max(len(r["fqdn"]) for r in results)
@@ -265,14 +323,15 @@ def main() -> None:
     print(
         "\nWebDAV: https://{fqdn}/webdav/<share> -> {target} (identity header "
         "{header}, from Authentik forward-auth)".format(
-            fqdn=f"{WEBDAV_SUBDOMAIN}.{DOMAIN}", target=WEBDAV_TARGET, header=WEBDAV_IDENTITY_HEADER
+            fqdn=hostname_for(WEBDAV_SUBDOMAIN), target=WEBDAV_TARGET, header=WEBDAV_IDENTITY_HEADER
         )
     )
+    print(f"Old console host: https://{hostname_for(RETIRED_CONSOLE)} -> https://{DOMAIN} ({redirect})")
     if DEVICE_TRUST_SUBDOMAINS:
         print(
             "\nDevice trust: {subs} require a client certificate from the ONYX device CA.\n"
             "Issue device certs with: scripts/provision-device-trust.sh issue <name>".format(
-                subs=", ".join(f"https://{s}.{DOMAIN}" for s in DEVICE_TRUST_SUBDOMAINS)
+                subs=", ".join(f"https://{hostname_for(s)}" for s in DEVICE_TRUST_SUBDOMAINS)
             )
         )
 

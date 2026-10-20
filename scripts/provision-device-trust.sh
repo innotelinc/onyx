@@ -113,7 +113,7 @@ issue_cert() {
      key:       $key          (mode 0600 — keep on the host)
      pkcs12:    $p12   (install on the device via MDM / OS trust store)
 
-   After installing, verify:  curl --cert $crt --key $key https://app.\${DOMAIN:-onyx.innotel.us}/
+   After installing, verify:  curl --cert $crt --key $key https://admin.\${DOMAIN:-onyx.innotel.us}/
    Edge gate is (re)applied by scripts/npm-proxy-hosts.py (DEVICE_TRUST_SUBDOMAINS).
 EOF
 }

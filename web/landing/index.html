@@ -512,14 +512,15 @@ $ <span class="p">bin/onyx</span> <span class="o">share create media /mnt/onyx/p
       <div class="wrap">
         <h2>One platform, six doors<span class="accent">.</span></h2>
         <p class="section-sub">
-          Every surface hangs off its own subdomain with a wildcard Let's Encrypt certificate —
-          provisioned automatically, TLS terminated at Nginx Proxy Manager, SSO via Authentik.
-          Each link below is checked against what the surface actually serves: the API and
-          Backup links open a live endpoint, and <code>admin</code> is reserved until the
-          The console lives at app.onyx.innotel.us; this host and its certificate are reserved for a future operations surface.
+          The console is the apex — <code>onyx.innotel.us</code> — and every other surface hangs
+          off its own subdomain, all under one wildcard Let's Encrypt certificate that covers
+          the apex too: provisioned automatically, TLS terminated at Nginx Proxy Manager, SSO
+          via Authentik. Each link below is checked against what the surface actually serves:
+          the console, API and Backup links open a live endpoint, and <code>admin</code> is
+          reserved until there is an operations surface to put there.
         </p>
         <div class="surfaces">
-          <a class="surface" href="https://app.onyx.innotel.us"><b>App</b><small>app.onyx.innotel.us · placeholder</small><span class="live">live</span></a>
+          <a class="surface" href="https://onyx.innotel.us"><b>Console</b><small>onyx.innotel.us · Unity console</small><span class="live">live</span></a>
           <a class="surface" href="https://api.onyx.innotel.us/api/v1/system/status"><b>API</b><small>api.onyx.innotel.us · /api/v1/system/status</small><span class="live">live</span></a>
           <a class="surface" href="https://auth.onyx.innotel.us"><b>Identity</b><small>auth.onyx.innotel.us · Authentik</small><span class="live">live</span></a>
           <a class="surface" href="https://storage.onyx.innotel.us"><b>Storage</b><small>storage.onyx.innotel.us · S3 (credentials required)</small><span class="live">live</span></a>

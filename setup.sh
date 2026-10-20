@@ -208,7 +208,7 @@ fi
 
 # --- 6. Device trust (docs/design/11 §10) — per DEVICE_TRUST ----------------------
 # Passkeys are provisioned with Authentik in step 4 regardless of mode.
-DT_SUBDOMAINS="${DEVICE_TRUST_SUBDOMAINS:-app admin}"
+DT_SUBDOMAINS="${DEVICE_TRUST_SUBDOMAINS:-admin}"
 case "$DEVICE_TRUST" in
   off)
     log "device trust: off (passkeys remain available via Authentik)"
@@ -227,7 +227,7 @@ case "$DEVICE_TRUST" in
     : "${CERULEAN_API_URL:?set CERULEAN_API_URL in .env (docs/design/11 §10.3)}"
     : "${CERULEAN_API_TOKEN:?set CERULEAN_API_TOKEN in .env}"
     : "${FLEET_ID:?set FLEET_ID in .env}"
-    [ -n "$DT_SUBDOMAINS" ] || DT_SUBDOMAINS="app admin"
+    [ -n "$DT_SUBDOMAINS" ] || DT_SUBDOMAINS="admin"
     dt_json="["; first=1
     for s in $DT_SUBDOMAINS; do
       [ "$first" = 1 ] || dt_json+="," 
@@ -264,7 +264,7 @@ cat <<EOF
 
 ONYX platform is up. Public endpoints (once DNS for *.${DOMAIN} points here):
 
-  App       https://app.${DOMAIN}
+  Console   https://${DOMAIN}
   API       https://api.${DOMAIN}
   Identity  https://auth.${DOMAIN}     (Authentik — first login creates the admin)
   Storage   https://storage.${DOMAIN}  (S3-compatible, static S3_ACCESS_KEY)
@@ -281,7 +281,7 @@ EOF
 elif [ "$DEVICE_TRUST" = "cerulean" ]; then
   cat <<'EOF'
   Certificates are issued from the Cerulean dashboard (MDM-managed);
-  the mTLS gate on app/admin was requested from the Cerulean API.
+  the mTLS gate on admin was requested from the Cerulean API.
 EOF
 fi
 cat <<EOF

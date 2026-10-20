@@ -56,7 +56,7 @@ Primary domain: `onyx.innotel.us`
 
 | Service | URL | Backed by |
 |---------|-----|-----------|
-| App (web UI) | `https://app.onyx.innotel.us` | `onyx-web` — the Unity console (overview, files, storage, snapshots, backups, apps, VMs, shares, objects, users, audit) |
+| Console (web UI) | `https://onyx.innotel.us` | `onyx-web` — the Unity console (overview, files, storage, snapshots, backups, apps, VMs, shares, objects, users, audit) |
 | API gateway | `https://api.onyx.innotel.us` | `onyx-api` — health at `/healthz`, status at `/api/v1/system/status` |
 | Identity / SSO | `https://auth.onyx.innotel.us` | Cerulean Authentik (shared; also served as `auth.cerulean.innotel.us`) |
 | Storage (S3-compatible) | `https://storage.onyx.innotel.us` | `onyx-objectstore` (S3 endpoint — every request needs credentials; buckets are local, cloud-primary or tiered to a remote) |
@@ -65,7 +65,8 @@ Primary domain: `onyx.innotel.us`
 
 All traffic terminates TLS at **Nginx Proxy Manager**, which is provisioned
 automatically by `setup.sh` (via `scripts/npm-proxy-hosts.py`) with a
-Let's Encrypt **wildcard certificate** for `*.onyx.innotel.us`, issued through
+Let's Encrypt **wildcard certificate** for `*.onyx.innotel.us` and the apex
+`onyx.innotel.us`, issued through
 a **TSIG (RFC 2136) DNS-01 challenge** against your DNS server — the same
 pattern used across the innotelinc platform projects.
 
@@ -75,7 +76,8 @@ pattern used across the innotelinc platform projects.
   service (`auth.onyx.innotel.us`); `scripts/provision-authentik.sh` creates
   the ONYX application + OAuth2 provider automatically.
 - **Reverse proxy:** Nginx Proxy Manager, provisioned via its API —
-  wildcard cert, proxy hosts for all six subdomains, WebSocket support.
+  wildcard cert, proxy hosts for the console at the apex and every subdomain,
+  WebSocket support. The old `app.onyx.innotel.us` host is kept as a 301 to the apex.
 - **Runtime:** every service is containerized (Docker); the appliance image
   (`base/`) still ships the native systemd deployment for bare metal.
 - **Storage core:** Btrfs pools, snapshots, backups, hotplug device handling,
@@ -186,7 +188,7 @@ it**, and never paste its values into an issue, a commit message or a doc.
 Vault, referenced as `vault://<mount>/<path>#<key>` and resolved at startup.
 
 `setup.sh` is idempotent: safe to re-run; it prints the final URL table
-(`app`/`api`/`auth`/`storage`/`backup`/`admin` on `onyx.innotel.us`).
+(the console at `onyx.innotel.us`, plus `api`/`auth`/`storage`/`backup`/`admin`).
 
 ### Authentik and NPM modes
 

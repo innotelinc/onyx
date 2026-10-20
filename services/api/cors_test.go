@@ -8,7 +8,7 @@ import (
 
 func TestCORSAllowsDashboardPreflight(t *testing.T) {
 	req := httptest.NewRequest(http.MethodOptions, "/api/v1/system/status", nil)
-	req.Header.Set("Origin", "https://app.onyx.innotel.us")
+	req.Header.Set("Origin", "https://onyx.innotel.us")
 	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
 	resp := httptest.NewRecorder()
 
@@ -19,7 +19,7 @@ func TestCORSAllowsDashboardPreflight(t *testing.T) {
 	if resp.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want %d", resp.Code, http.StatusNoContent)
 	}
-	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "https://app.onyx.innotel.us" {
+	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "https://onyx.innotel.us" {
 		t.Fatalf("allow-origin = %q", got)
 	}
 }

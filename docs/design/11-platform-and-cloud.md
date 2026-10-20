@@ -20,12 +20,13 @@ It is the spec behind `setup.sh`, `docker-compose.yml`,
 
 ### 1.1 Service subdomains
 
-Every public surface is a subdomain of the primary domain, routed by Nginx
-Proxy Manager (NPM), all behind one wildcard TLS certificate:
+The console is served at the primary domain itself; every other public surface
+is a subdomain of it. All of them are routed by Nginx Proxy Manager (NPM),
+behind one wildcard TLS certificate that also names the apex:
 
-| Subdomain | Service | Container | Notes |
-|-----------|---------|-----------|-------|
-| `app.onyx.innotel.us` | Web console (Unity theme) | `onyx-web` | static frontend; talks to `api` + `auth` |
+| Host | Service | Container | Notes |
+|------|---------|-----------|-------|
+| `onyx.innotel.us` | Web console (Unity theme) | `onyx-web` | static frontend; talks to `api` + `auth` |
 | `api.onyx.innotel.us` | HTTP gateway | `onyx-api` | `/api/v1/*`, `/healthz`; also serves `admin` routes |
 | `auth.onyx.innotel.us` | Identity / SSO | `authentik-server` | OIDC provider for every other surface |
 | `storage.onyx.innotel.us` | S3-compatible object storage | `onyx-objectstore` | `GET/PUT/DELETE` buckets+objects; hybrid-cloud tiering |
@@ -46,12 +47,13 @@ provider; local accounts remain as a fallback for offline operation).
 - Bootstrap: `AUTHENTIK_BOOTSTRAP_TOKEN` + `AUTHENTIK_BOOTSTRAP_EMAIL` seed the
   first superuser; `scripts/provision-authentik.sh` waits for readiness, then
   creates the **ONYX Platform** OAuth2 provider and application:
-  - authorization/redirect: `https://app.onyx.innotel.us/*`,
+  - authorization/redirect: `https://onyx.innotel.us/*`,
     `https://admin.onyx.innotel.us/*`, loopback for local dev;
   - client id/secret are written back into `.env` (`AUTHENTIK_CLIENT_ID`/
     `AUTHENTIK_CLIENT_SECRET`) for downstream services.
-- All six subdomains trust `auth.onyx.innotel.us`; NPM protects the
-  `admin`/`app` hosts with Authentik's forward-auth where enabled.
+- Every host trusts `auth.onyx.innotel.us`; NPM protects the `admin` host
+  with Authentik's forward-auth where enabled. The retired `app` host is a
+  301 to the console, so links written before the move keep working.
 - **Passkeys:** the authentication flow carries a WebAuthn stage in
   authentication mode, so enrolled devices confirm sign-in with a platform
   authenticator (docs/design/11 §10).
@@ -342,7 +344,7 @@ instead of an operator's disk.
        local edge  → scripts/npm-proxy-hosts.py (TSIG wildcard + hosts + mTLS gate)
        cerulean edge → skipped; the edge is Cerulean-managed, cert gates are
                        requested in step 6
-  8. print URL table (app/api/auth/storage/backup/admin)
+  8. print URL table (console-at-apex/api/auth/storage/backup/admin)
 ```
 
 Idempotent end to end: re-runs converge (cert reuse, proxy-host update,
