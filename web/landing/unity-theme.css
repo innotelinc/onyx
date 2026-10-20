@@ -89,6 +89,7 @@
   --tone-engineer: #0f766e;
   --tone-lab: #b45309;
   --tone-godmode: #b91c1c;
+  --tone-class: #4f46e5;
   --tone-unity: #0891b2;
 
   --shadow-card: 0 1px 2px rgb(25 20 48 / 5%), 0 10px 30px -14px rgb(25 20 48 / 18%);
@@ -189,6 +190,7 @@
     --tone-engineer: #5eead4;
     --tone-lab: #fbbf24;
     --tone-godmode: #fca5a5;
+    --tone-class: #a5b4fc;
     --tone-unity: #67e8f9;
 
     --shadow-card: 0 1px 2px rgb(0 0 0 / 30%), 0 12px 32px -14px rgb(0 0 0 / 60%);
@@ -236,6 +238,7 @@
   --tone-engineer: #5eead4;
   --tone-lab: #fbbf24;
   --tone-godmode: #fca5a5;
+  --tone-class: #a5b4fc;
   --tone-unity: #67e8f9;
 
   --shadow-card: 0 1px 2px rgb(0 0 0 / 30%), 0 12px 32px -14px rgb(0 0 0 / 60%);
@@ -270,6 +273,7 @@
   --tone-engineer: #0f766e;
   --tone-lab: #a16207;
   --tone-godmode: #b91c1c;
+  --tone-class: #4f46e5;
   --tone-unity: #0891b2;
 
   --shadow-card: 0 1px 2px rgb(16 23 29 / 5%), 0 10px 30px -14px rgb(16 23 29 / 18%);
@@ -314,6 +318,7 @@
   --tone-engineer: #5eead4;
   --tone-lab: #fbbf24;
   --tone-godmode: #fca5a5;
+  --tone-class: #a5b4fc;
   --tone-unity: #67e8f9;
 
   --shadow-card: 0 1px 2px rgb(0 0 0 / 34%), 0 12px 32px -14px rgb(0 0 0 / 62%);
@@ -358,6 +363,7 @@
     --tone-engineer: #5eead4;
     --tone-lab: #fbbf24;
     --tone-godmode: #fca5a5;
+    --tone-class: #a5b4fc;
     --tone-unity: #67e8f9;
 
     --shadow-card: 0 1px 2px rgb(0 0 0 / 34%), 0 12px 32px -14px rgb(0 0 0 / 62%);
@@ -409,6 +415,7 @@
   --tone-engineer: #0f766e;
   --tone-lab: #b45309;
   --tone-godmode: #b91c1c;
+  --tone-class: #4f46e5;
   --tone-unity: #0891b2;
 
   --shadow-card: 0 1px 2px rgb(7 26 43 / 5%), 0 10px 30px -14px rgb(7 26 43 / 18%);
@@ -453,6 +460,7 @@
   --tone-engineer: #5eead4;
   --tone-lab: #fbbf24;
   --tone-godmode: #fda4af;
+  --tone-class: #a5b4fc;
   --tone-unity: #67e8f9;
 
   --shadow-card: 0 1px 2px rgb(0 0 0 / 40%), 0 14px 34px -14px rgb(0 0 0 / 70%);
@@ -498,6 +506,7 @@
     --tone-engineer: #5eead4;
     --tone-lab: #fbbf24;
     --tone-godmode: #fda4af;
+    --tone-class: #a5b4fc;
     --tone-unity: #67e8f9;
 
     --shadow-card: 0 1px 2px rgb(0 0 0 / 40%), 0 14px 34px -14px rgb(0 0 0 / 70%);
@@ -867,4 +876,114 @@
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .glass,
   .glass-strong { background: var(--surface); }
+}
+
+/*
+ * LIQUID — the canvas a glass pane needs
+ *
+ * Adopted from Genie, where the console chrome was rebuilt as glass. The material
+ * itself is already here (the .glass primitives and the --glass-* tokens); what was
+ * missing is the half that makes it read as glass rather than as a translucent
+ * slab: a canvas with something on it. A pane blurred over one flat colour looks
+ * flat.
+ *
+ * Two soft colour fields, fixed behind everything, one the product's own tone and
+ * one the family brand. Both come from tokens, so a product opts in by putting
+ * class="liquid" on its body and gets its own colours in all six rendered states
+ * — no product writes a wash of its own.
+ *
+ * A system preference for less transparency wins over the effect: somebody who
+ * asked for it gets the opaque surface, not a blurrier one.
+ */
+.liquid { background: var(--canvas); }
+.liquid::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      760px 520px at 8% -12%,
+      color-mix(in oklab, var(--brand) 22%, transparent),
+      transparent 68%
+    ),
+    radial-gradient(
+      720px 560px at 104% 112%,
+      color-mix(in oklab, var(--tone, var(--brand)) 18%, transparent),
+      transparent 70%
+    ),
+    var(--canvas);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .liquid::before { background: var(--canvas); }
+  .glass,
+  .glass-strong {
+    background: var(--surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+/* ══ the glass default ══════════════════════════════════════════════════════ */
+
+/*
+ * Unity ships the material, not only the tokens.
+ *
+ * The `.glass` utilities above are opt-in, which put the decision in each
+ * product's markup: two of them painted their own opaque slabs and the family
+ * stopped looking like one family. This block makes the shared primitives wear
+ * the material by default, so a product picks up the look by using the primitive
+ * it already uses for a panel or a dialog — no markup change, nothing to adopt.
+ *
+ * Nothing here reaches a product's own classes. A page that has not been
+ * converted is unchanged; a page that uses `.ot-panel` or a dialog is glass from
+ * the moment it loads. That is the whole of the rollout, and the reason it can be
+ * one block instead of six pull requests.
+ *
+ * The two fallbacks are the same rules the utilities carry, kept in step with
+ * them on purpose: no `backdrop-filter` means the opaque surface, and a person
+ * who asked the system for less transparency means the same.
+ */
+.ot-panel,
+dialog,
+[role="dialog"] {
+  background: var(--glass-tint);
+  border-color: var(--glass-line);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+/* A dialog is read *through*, so it gets the stronger tint the utility reserves
+   for menus and focused composers. */
+dialog,
+[role="dialog"] {
+  background: var(--glass-tint-strong);
+  box-shadow: var(--glass-shadow-pop);
+}
+
+/* The page under it: one canvas, whatever the product's own body rule says. The
+   colour is a token, so this is the light canvas in light mode and each scheme's
+   own in dark — it is not a repaint. */
+body {
+  background-color: var(--canvas);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .ot-panel,
+  dialog,
+  [role="dialog"] {
+    background: var(--surface);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .ot-panel,
+  dialog,
+  [role="dialog"] {
+    background: var(--surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
