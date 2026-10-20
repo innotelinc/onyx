@@ -49,7 +49,13 @@ use onyx::{
 };
 use registry::Registry;
 
-const VERSION: &str = "0.4.0-dev";
+// Release builds inject the tag as ONYX_VERSION (see docker/onyx-storaged.Dockerfile);
+// a plain `docker compose build` (no build args) keeps the current release default,
+// matching services/version.Version so the stack reports one version.
+const VERSION: &str = match option_env!("ONYX_VERSION") {
+    Some(version) => version,
+    None => "0.4.0",
+};
 
 /// Retries when connecting to onyx-privd at startup (dev.sh starts privd first,
 /// but the socket can become writable a moment before privd accepts).

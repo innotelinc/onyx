@@ -35,7 +35,13 @@ use onyx::health_check_response::ServingStatus as StatusValue;
 use onyx::privd_server::{Privd, PrivdServer};
 use onyx::{HealthCheckRequest, HealthCheckResponse, PrivOp, PrivRequest, PrivResponse};
 
-const VERSION: &str = "0.4.0-dev";
+// Release builds inject the tag as ONYX_VERSION (see docker/onyx-privd.Dockerfile);
+// a plain `docker compose build` (no build args) keeps the current release default,
+// matching services/version.Version so the stack reports one version.
+const VERSION: &str = match option_env!("ONYX_VERSION") {
+    Some(version) => version,
+    None => "0.4.0",
+};
 const CMD_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn main() -> ExitCode {

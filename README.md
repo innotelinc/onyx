@@ -224,6 +224,19 @@ pass the tag and commit explicitly, for example:
 make build VERSION=0.4.0 COMMIT=$(git rev-parse HEAD)
 ```
 
+Container builds read the same values — `VERSION` and `COMMIT` are build
+arguments on every image:
+
+```bash
+VERSION=0.4.0 COMMIT=$(git rev-parse HEAD) docker compose build
+```
+
+Both daemon families report it: the Go services through `-ldflags`, and the Rust
+data-plane daemons (`onyx-privd`, `onyx-storaged`) through `ONYX_VERSION` at
+compile time. Omitting `VERSION` leaves the development `0.4.0-dev` in place — a
+stack built without it says so on the status page instead of claiming the
+release number.
+
 The REST surface remains `/api/v1`: additive changes stay in v1, while breaking
 changes require a new major API namespace. `GET /api/v1/system/version` exposes
 the release version, API namespace, codename, and commit.

@@ -4,6 +4,10 @@
 # daemon reaches privileged operations only through its gRPC socket.
 FROM rust:1-slim-bookworm AS build
 ARG TARGETARCH
+# The Rust services report their version from a compile-time constant, so the
+# release tag is injected as an environment variable the build reads.
+ARG VERSION=0.4.0-dev
+ENV ONYX_VERSION=${VERSION}
 # musl-tools is the native toolchain for the builder's own architecture; the
 # x86_64 musl cross-toolchain only exists on the amd64 package. CI builds both
 # platforms with buildx (the arm64 pass under QEMU), so the cross target is
