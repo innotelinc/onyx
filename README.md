@@ -236,7 +236,8 @@ VERSION=0.4.0 COMMIT=$(git rev-parse HEAD) docker compose build
 or let the checkout answer for itself, which is what a deployment should do:
 
 ```bash
-make docker-build     # scripts/docker-rebuild.sh: VERSION=$(git describe), COMMIT=$(git rev-parse --short HEAD)
+make docker-build                  # VERSION=$(git describe)  COMMIT=$(git rev-parse --short HEAD)
+bash scripts/docker-rebuild.sh     # the same, where make is not installed (the deploy host has no make)
 ```
 
 Both daemon families report it: the Go services through `-ldflags`, and the Rust

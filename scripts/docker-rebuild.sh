@@ -116,4 +116,9 @@ if [ "${#failed[@]}" -gt 0 ]; then
 fi
 
 log "=== ALL BUILT — VERSION=$VERSION COMMIT=$COMMIT"
-log "    next: docker compose up -d  (recreate so containers pick up the new images)"
+# --force-recreate, not a plain `up -d`: on this estate compose has twice left a
+# container running the previous image after the tag moved (onyx-api on 20 Oct,
+# onyx-web the same night), and a stale container is invisible — it is up, it
+# answers, it just reports the old build. Recreating costs seconds.
+log "    next: docker compose up -d --force-recreate"
+log "    then: docker compose ps  +  curl -s localhost:2081/api/v1/system/version"
