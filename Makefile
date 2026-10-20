@@ -25,7 +25,7 @@ VERSION ?= 0.4.0-dev
 COMMIT ?= unknown
 GO_LDFLAGS := -X github.com/innotelinc/onyx/services/version.Version=$(VERSION) -X github.com/innotelinc/onyx/services/version.Commit=$(COMMIT)
 
-.PHONY: bootstrap gen gen-check build check vet test e2e dev install clean
+.PHONY: bootstrap gen gen-check build check vet test e2e dev install image docker-build clean
 
 ## bootstrap — download repo-local Go + protoc toolchains and codegen plugins
 bootstrap:
@@ -105,6 +105,17 @@ install: build
 ## ostree on a Debian 13 host; see base/compose.sh --help and base/manifest.json)
 image: build
 	@bash base/compose.sh
+
+## docker-build — rebuild the compose images stamped with this checkout
+##
+## VERSION and COMMIT are compile-time build arguments, so an image built
+## without them reports the development defaults (0.4.0-dev / unknown) no matter
+## which commit it came from. This target reads both from git — the values a
+## deployment should never have to remember — and builds one service at a time.
+## Override for a release: make docker-build VERSION=v0.4.1
+## One service only:        make docker-build SERVICES=onyx-api
+docker-build:
+	@bash scripts/docker-rebuild.sh $(SERVICES)
 
 ## clean — remove build artifacts, dev state and staged installs (keeps .tools/)
 clean:
