@@ -1,0 +1,23 @@
+#!/bin/sh
+# Run every enabled ONYX backup job.
+#
+# `onyx-backupd` stores each job's cron `schedule` but has no runner of its own,
+# so the schedule is only honoured by something outside it asking. This is that
+# something: one pass over the job list, one run request per enabled job. Adding
+# a job in ONYX is therefore enough to have it run — there is no second place to
+# register it.
+set -eu
+
+API="${ONYX_API:-https://api.onyx.innotel.us/api/v1}"
+
+ids="$(curl -fsS "$API/backup-jobs" | python3 -c 'import json, sys
+for job in json.load(sys.stdin).get("jobs", []):
+    if job.get("enabled", True):
+        print(job["id"])')"
+
+for id in $ids; do
+  printf '%s run %s: ' "$(date -u +%FT%TZ)" "$id"
+  curl -fsS -X POST -H 'content-type: application/json' -d '{}' \
+    "$API/backup-jobs/$id/run"
+  printf '\n'
+done

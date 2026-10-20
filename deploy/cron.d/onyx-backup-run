@@ -1,0 +1,7 @@
+# ONYX backup jobs: `onyx-backupd` stores a job's `schedule` but has no runner of
+# its own, so nothing fires unless something outside asks. This is that
+# something — see deploy/libexec/onyx-backup-run. Install both:
+#
+#   install -m 0755 deploy/libexec/onyx-backup-run /usr/local/bin/onyx-backup-run.sh
+#   install -m 0644 deploy/cron.d/onyx-backup-run   /etc/cron.d/onyx-backup-run
+0 2 * * * root /usr/local/bin/onyx-backup-run.sh >> /var/log/onyx-backup-run.log 2>&1
