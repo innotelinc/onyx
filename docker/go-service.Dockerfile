@@ -16,7 +16,14 @@ COPY services ./services
 COPY sdk ./sdk
 # SERVICE is the daemon name (onyx-api); the source lives in services/<dir>
 # without the onyx- prefix. Map name -> source directory.
-RUN case "${SERVICE}" in \
+#
+# The Go build cache is a cache mount, not a layer: VERSION and COMMIT are
+# build arguments, so a release stamp changes this RUN's key and every daemon
+# recompiles. Without a shared build cache that is ten full module compiles on
+# the same small host; with it, nine of them reuse the first one's packages.
+# It holds only compiled packages — nothing from it reaches the image.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    case "${SERVICE}" in \
       onyx-api) DIR=api ;; \
       onyx-core) DIR=core ;; \
       onyx-shared) DIR=shared ;; \

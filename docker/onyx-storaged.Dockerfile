@@ -23,7 +23,14 @@ COPY . .
 # Static musl build: the alpine runtime is musl — the default glibc-targeting
 # build produces a binary the runtime can't even load ("not found" from the
 # dynamic loader).
-RUN mkdir -p /out \
+#
+# The crate registry and the target directory are cache mounts: VERSION is
+# injected at compile time, so a release stamp re-runs this build, and a full
+# dependency compile from scratch on a two-core host is the difference between
+# minutes and an hour. Compiled output only — nothing here lands in the image.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/services/storaged/target \
+    mkdir -p /out \
     && if [ "${TARGETARCH:-amd64}" = "amd64" ]; then MUSL_TARGET=x86_64-unknown-linux-musl; else MUSL_TARGET=aarch64-unknown-linux-musl; fi \
     && cargo build --release --target "${MUSL_TARGET}" \
        --manifest-path services/storaged/Cargo.toml \
