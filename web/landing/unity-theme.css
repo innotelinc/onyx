@@ -79,15 +79,58 @@
   --unknown: #6b6b76;
   --unknown-soft: #efeff3;
 
-  /* The four products' identifying colours. A tone is a *label*, never the only
+  /* The products' identifying colours. A tone is a *label*, never the only
      signal: every tile also carries the product's name in text. */
   --tone-its: #4d6b00;
   --tone-tix: #0a5c9e;
   --tone-sentinel: #b0246a;
   --tone-sync: #05685e;
+  --tone-genie: #7c3aed;
+  --tone-engineer: #0f766e;
+  --tone-lab: #b45309;
+  --tone-godmode: #b91c1c;
+  --tone-unity: #0891b2;
 
   --shadow-card: 0 1px 2px rgb(25 20 48 / 5%), 0 10px 30px -14px rgb(25 20 48 / 18%);
   --shadow-pop: 0 8px 28px -8px rgb(25 20 48 / 26%);
+
+  /*
+   * ── Liquid glass ───────────────────────────────────────────────────────
+   *
+   * A surface made of light rather than of a solid colour: a translucent tint
+   * over whatever is behind it, a hairline edge brighter than the tint (the
+   * "light catch" on a pane's rim), a soft drop shadow to lift it off the
+   * canvas, and a blur of the content underneath.
+   *
+   * The tokens are mixed from the *scheme's own* surface and ink, so they are
+   * defined once here instead of six times — the value of `--surface` is resolved
+   * where the glass is used, not where this block is written. A light scheme gets
+   * white frosted panes, a dark one gets smoked glass, and a product does not have
+   * to know which it is to use them.
+   *
+   * `--glass-tint` is the everyday pane (sidebar, rail, composer); the `-strong`
+   * one is for something that must stay readable over busy content (a dialog, a
+   * menu). Both keep enough opacity that text contrast does not depend on the blur
+   * being supported.
+   */
+  --glass-tint: color-mix(in srgb, var(--surface) 66%, transparent);
+  --glass-tint-strong: color-mix(in srgb, var(--surface) 86%, transparent);
+  --glass-tint-soft: color-mix(in srgb, var(--surface) 42%, transparent);
+  --glass-line: color-mix(in srgb, var(--ink) 12%, transparent);
+  --glass-line-bright: color-mix(in srgb, #ffffff 55%, transparent);
+  --glass-sheen: linear-gradient(
+    180deg,
+    color-mix(in srgb, #ffffff 22%, transparent),
+    transparent 38%
+  );
+  --glass-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 8%, transparent),
+    0 24px 60px -32px color-mix(in srgb, var(--ink) 55%, transparent);
+  --glass-shadow-pop: 0 1px 0 color-mix(in srgb, #ffffff 45%, transparent) inset,
+    0 2px 6px color-mix(in srgb, var(--ink) 10%, transparent),
+    0 30px 70px -28px color-mix(in srgb, var(--ink) 60%, transparent);
+  --glass-blur: 20px;
+  --glass-saturate: 140%;
+  --glass-radius: 16px;
 
   --radius-sm: 8px;
   --radius: 12px;
@@ -142,6 +185,11 @@
     --tone-tix: #6cc0ff;
     --tone-sentinel: #ff7cb4;
     --tone-sync: #3fd3c1;
+    --tone-genie: #c4b5fd;
+    --tone-engineer: #5eead4;
+    --tone-lab: #fbbf24;
+    --tone-godmode: #fca5a5;
+    --tone-unity: #67e8f9;
 
     --shadow-card: 0 1px 2px rgb(0 0 0 / 30%), 0 12px 32px -14px rgb(0 0 0 / 60%);
     --shadow-pop: 0 10px 34px -8px rgb(0 0 0 / 66%);
@@ -184,6 +232,11 @@
   --tone-tix: #6cc0ff;
   --tone-sentinel: #ff7cb4;
   --tone-sync: #3fd3c1;
+  --tone-genie: #c4b5fd;
+  --tone-engineer: #5eead4;
+  --tone-lab: #fbbf24;
+  --tone-godmode: #fca5a5;
+  --tone-unity: #67e8f9;
 
   --shadow-card: 0 1px 2px rgb(0 0 0 / 30%), 0 12px 32px -14px rgb(0 0 0 / 60%);
   --shadow-pop: 0 10px 34px -8px rgb(0 0 0 / 66%);
@@ -213,6 +266,11 @@
   --tone-tix: #1f6feb;
   --tone-sentinel: #9d174d;
   --tone-sync: #0f766e;
+  --tone-genie: #7c3aed;
+  --tone-engineer: #0f766e;
+  --tone-lab: #a16207;
+  --tone-godmode: #b91c1c;
+  --tone-unity: #0891b2;
 
   --shadow-card: 0 1px 2px rgb(16 23 29 / 5%), 0 10px 30px -14px rgb(16 23 29 / 18%);
 }
@@ -252,6 +310,11 @@
   --tone-tix: #79c0ff;
   --tone-sentinel: #ff7b72;
   --tone-sync: #56d4dd;
+  --tone-genie: #d0bcff;
+  --tone-engineer: #5eead4;
+  --tone-lab: #fbbf24;
+  --tone-godmode: #fca5a5;
+  --tone-unity: #67e8f9;
 
   --shadow-card: 0 1px 2px rgb(0 0 0 / 34%), 0 12px 32px -14px rgb(0 0 0 / 62%);
 }
@@ -291,6 +354,11 @@
     --tone-tix: #79c0ff;
     --tone-sentinel: #ff7b72;
     --tone-sync: #56d4dd;
+    --tone-genie: #d0bcff;
+    --tone-engineer: #5eead4;
+    --tone-lab: #fbbf24;
+    --tone-godmode: #fca5a5;
+    --tone-unity: #67e8f9;
 
     --shadow-card: 0 1px 2px rgb(0 0 0 / 34%), 0 12px 32px -14px rgb(0 0 0 / 62%);
   }
@@ -337,6 +405,11 @@
   --tone-tix: #0f6fd1;
   --tone-sentinel: #0e7f9c;
   --tone-sync: #0f766e;
+  --tone-genie: #7c3aed;
+  --tone-engineer: #0f766e;
+  --tone-lab: #b45309;
+  --tone-godmode: #b91c1c;
+  --tone-unity: #0891b2;
 
   --shadow-card: 0 1px 2px rgb(7 26 43 / 5%), 0 10px 30px -14px rgb(7 26 43 / 18%);
 }
@@ -376,6 +449,11 @@
   --tone-tix: #6cb6ff;
   --tone-sentinel: #4fd0e8;
   --tone-sync: #56d4dd;
+  --tone-genie: #d0bcff;
+  --tone-engineer: #5eead4;
+  --tone-lab: #fbbf24;
+  --tone-godmode: #fda4af;
+  --tone-unity: #67e8f9;
 
   --shadow-card: 0 1px 2px rgb(0 0 0 / 40%), 0 14px 34px -14px rgb(0 0 0 / 70%);
   --shadow-pop: 0 10px 34px -8px rgb(0 0 0 / 70%);
@@ -416,6 +494,11 @@
     --tone-tix: #6cb6ff;
     --tone-sentinel: #4fd0e8;
     --tone-sync: #56d4dd;
+    --tone-genie: #d0bcff;
+    --tone-engineer: #5eead4;
+    --tone-lab: #fbbf24;
+    --tone-godmode: #fda4af;
+    --tone-unity: #67e8f9;
 
     --shadow-card: 0 1px 2px rgb(0 0 0 / 40%), 0 14px 34px -14px rgb(0 0 0 / 70%);
     --shadow-pop: 0 10px 34px -8px rgb(0 0 0 / 70%);
@@ -608,3 +691,180 @@
   font-weight: 600;
 }
 .ot-theme svg { width: 13px; height: 13px; }
+
+/* ── the front door ────────────────────────────────────────────────────────
+ * The sign-in gate, the masthead above it and the footer below it — the page a
+ * person is handed when they follow a link to a product they are not yet signed
+ * in to. It lives here rather than in each product's stylesheet for the reason
+ * `.ot-theme` does: nobody chooses which product they arrive at first, and six
+ * front doors drawn six ways is drift that nothing fails on.
+ *
+ * A product brings two things of its own and nothing else. Its name, in the
+ * wordmark, and its tone — `--tone-<product>` is where the mark's gradient lands,
+ * which is why that token must exist in every scheme and every mode. The mark
+ * itself is one silhouette everywhere, the shield, with the product's own stroke
+ * inside it: the family is recognisable at a glance and the product is still
+ * legible. `.masthead__mark` is the same shape at the masthead's size.
+ */
+.page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.page__main { flex: 1; padding: var(--space-5) 0 var(--space-6); }
+
+.masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 16px 0 14px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+/* `text-decoration: none` is on the base rule rather than only on `:hover` because
+   this is a link the browser would otherwise underline by default — and the two
+   products that never reset anchors globally (Genie and Sentinel) were the ones
+   showing it. The name is a wordmark here, not a link somebody is meant to click. */
+.masthead__brand { display: flex; align-items: center; gap: 9px; color: var(--ink); text-decoration: none; }
+.masthead__brand:hover { text-decoration: none; }
+.masthead__brand strong {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.masthead__brand span {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+}
+.masthead__mark { width: 30px; height: 30px; flex: none; }
+.masthead__tools { display: flex; align-items: center; gap: 10px; }
+
+.footer {
+  padding: 16px 0 26px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--ink-faint);
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* The gate: one centred card holding the mark, the name and the single control.
+   A column with its own rhythm rather than a margin on each child, because the
+   card also has to hold an error, or the sentence that says no provider is
+   configured here, and the gap is what keeps it from looking collapsed in any of
+   those cases. `width: 100%` because the product that wraps it in a centred flex
+   row would otherwise shrink the card to its content. */
+.gate {
+  width: 100%;
+  max-width: 420px;
+  margin: 9vh auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 32px 28px 28px;
+  text-align: center;
+}
+/* The mark and the name are one lockup, so they are one column: the shield above
+   the words at every product, rather than beside them at one of them. */
+.gate__mark-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.gate__mark {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--ink);
+}
+.gate__mark span { color: var(--brand); }
+.gate__mark-svg {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 12%));
+}
+
+/* An anchor, not a button: the handshake is a browser navigation, and fetching it
+   is what breaks it. */
+.sso-button {
+  display: block;
+  text-align: center;
+  /* The same reset as the masthead's: an anchor is underlined by default, and this
+     one is a button. Left to the products, two of the six drew it underlined. */
+  text-decoration: none;
+  background: var(--brand);
+  border: 1px solid var(--brand);
+  border-radius: var(--radius-sm);
+  padding: 11px 13px;
+  color: var(--brand-ink);
+  font-weight: 650;
+  font-size: 13.5px;
+}
+.sso-button:hover { text-decoration: none; filter: brightness(1.06); }
+
+/* ══ liquid glass — the shared surface treatment ═════════════════════════════ */
+
+/*
+ * `.glass` is a pane; `.glass-strong` is a pane something is read *through*
+ * (menus, dialogs, the composer while it is focused). They are utilities because
+ * the treatment is the same everywhere: tint, hairline, sheen, lift, blur. A
+ * product that wants a different radius overrides `--glass-radius` on the element
+ * rather than redeclaring the four properties.
+ *
+ * `@supports` is not politeness: without `backdrop-filter` the tint would show the
+ * canvas through it and text would sit on a moving background. The fallback is the
+ * opaque surface, which is what a glass pane is pretending to be.
+ */
+.glass,
+.glass-strong {
+  position: relative;
+  background: var(--glass-tint);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--glass-radius);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+/*
+ * The sheen is a separate layer rather than a second background, because a pane's
+ * children paint above its background but *below* a pseudo-element only when it is
+ * positioned — this one is, and `pointer-events: none` keeps it out of the way of
+ * the controls sitting on the pane.
+ */
+.glass::before,
+.glass-strong::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--glass-sheen);
+  pointer-events: none;
+}
+
+.glass-strong {
+  background: var(--glass-tint-strong);
+  box-shadow: var(--glass-shadow-pop);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass,
+  .glass-strong { background: var(--surface); }
+}

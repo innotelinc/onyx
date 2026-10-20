@@ -13,7 +13,7 @@ own pace.
 |---|----------|----------------|
 | 01 | [Product Vision](01-product-vision.md) | Why Onyx exists, who it's for, positioning vs. competitors, principles, roadmap |
 | 02 | [Technical Architecture](02-technical-architecture.md) | System layers, stack decisions, module map, data flow, performance budgets |
-| 03 | [Frontend Design System](03-frontend-design-system.md) | "Prism" design language, tokens, components, file explorer UX, a11y |
+| 03 | [Frontend Design System](03-frontend-design-system.md) | The Unity theme, console shell, overview, command palette, a11y |
 | 04 | [Backend Service Architecture](04-backend-service-architecture.md) | Service inventory, IPC, config/state layout, privilege model, observability |
 | 05 | [Storage Subsystem](05-storage-subsystem.md) | Btrfs pools, subvolume layout, snapshots, quotas, scrub, sharing protocols |
 | 06 | [API Specification](06-api-specification.md) | REST + WebSocket conventions, endpoint catalog, error model, versioning |
@@ -40,7 +40,7 @@ The single most important decisions, in one place:
 | Root filesystem | OSTree-managed, read-only, A/B | Atomic updates, rollback, tamper resistance |
 | Primary filesystem | Btrfs | Snapshots, checksums, compression, quotas at low RAM cost vs. ZFS |
 | System language | Rust (data plane), Go (control plane) | Rust for FS-level safety, Go for fast, safe API/orchestration code |
-| Frontend | TypeScript + React SPA, "Prism" design system | Fast iteration, rich UX; served from the gateway |
+| Frontend | Static HTML/CSS/JS console on the shared Unity theme | No build step on the appliance; served by `onyx-web` |
 | Apps | Docker containers + Compose, AppArmor/seccomp | Largest ecosystem, familiar to maintainers |
 | System DB | SQLite (WAL) per service | Zero-administration, transactional, no separate server |
 | Auth | Authentik (OIDC/SSO) as the platform IdP; local accounts + TOTP/WebAuthn fallback | Every service signs in through `auth.onyx.innotel.us` |

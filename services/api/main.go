@@ -363,11 +363,16 @@ func (s *server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		s.writeGRPCError(w, r, err)
 		return
 	}
+	// The version endpoint describes *this gateway's* release. The coreVersion
+	// it read from the daemon is kept beside it rather than substituted for it:
+	// a partial rollout must not make an old core look like a new gateway (or
+	// the reverse).
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version":     resp.CoreVersion,
-		"api_version": releaseversion.APIVersion,
-		"codename":    releaseversion.Codename,
-		"commit":      releaseversion.Commit,
+		"version":      releaseversion.Version,
+		"api_version":  releaseversion.APIVersion,
+		"codename":     releaseversion.Codename,
+		"commit":       releaseversion.Commit,
+		"core_version": resp.CoreVersion,
 	})
 }
 
@@ -380,6 +385,12 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := protoMessage(resp)
+	// The release is part of the status a console shows: the daemons report their
+	// own coreVersion, while the codename and commit identify the build of this
+	// gateway. Without them the overview can only print a bare number.
+	out["version"] = releaseversion.Version
+	out["codename"] = releaseversion.Codename
+	out["commit"] = releaseversion.Commit
 	// SecretOps health: "ok" | "not-configured" | "error: <detail>". Cerulean
 	// Vault is the platform's only secret store, so this is the one SecretOps
 	// field the status reports (docs/stack.md).

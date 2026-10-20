@@ -10,7 +10,7 @@
 ONYX is a lightweight, privacy-first NAS *and* infrastructure platform for hardware you
 already own — a mini-PC, a server, an old laptop. Enterprise-grade storage safety
 (Btrfs snapshots, checksums, scrubs), CasaOS/ZimaOS-level app and VM hosting, and a calm,
-keyboard-first interface (the *Prism* design system) — in a stack that boots in under a
+keyboard-first interface (the shared *Unity* theme) — in a stack that boots in under a
 minute and idles under 512 MB RAM.
 
 [![CI](https://github.com/innotelinc/onyx/actions/workflows/ci.yml/badge.svg)](https://github.com/innotelinc/onyx/actions/workflows/ci.yml)
@@ -39,7 +39,7 @@ minute and idles under 512 MB RAM.
 > virtualization, S3-compatible object storage, backup management, cloud synchronization
 > and application hosting in one self-hosted stack — SSO everywhere via Cerulean
 > Authentik, safe by default with Btrfs snapshots and atomic A/B rollback, and no cloud
-> account required. Currently at **v0.4 "Jade"**: the control/data plane, Prism admin surface,
+> account required. Currently at **v0.4 "Jade"**: the control/data plane, the Unity console,
 > user/share permission metadata, snapshots, backup jobs and SMART-backed device health are
 > shipped, together with the app store and container runtime, virtual machines on
 > libvirt/KVM, the full share-protocol surface (SMB, NFS, FTP, SFTP, WebDAV, rsync) and
@@ -56,7 +56,7 @@ Primary domain: `onyx.innotel.us`
 
 | Service | URL | Backed by |
 |---------|-----|-----------|
-| App (web UI) | `https://app.onyx.innotel.us` | `onyx-web` — the Prism console (files, storage, snapshots, backups, apps, VMs, shares, objects, users) |
+| App (web UI) | `https://app.onyx.innotel.us` | `onyx-web` — the Unity console (overview, files, storage, snapshots, backups, apps, VMs, shares, objects, users, audit) |
 | API gateway | `https://api.onyx.innotel.us` | `onyx-api` — health at `/healthz`, status at `/api/v1/system/status` |
 | Identity / SSO | `https://auth.onyx.innotel.us` | Cerulean Authentik (shared; also served as `auth.cerulean.innotel.us`) |
 | Storage (S3-compatible) | `https://storage.onyx.innotel.us` | `onyx-objectstore` (S3 endpoint — every request needs credentials; buckets are local, cloud-primary or tiered to a remote) |
@@ -97,7 +97,7 @@ pattern used across the innotelinc platform projects.
   `GET /api/v1/system/status` reports SecretOps health (`vault:`). The legacy
   Infisical profile, its setup scripts and the `infisical://` resolver have been
   removed.
-- **Landing page:** [`web/landing/`](web/landing/) — static, Prism-styled
+- **Landing page:** [`web/landing/`](web/landing/) — static, Unity-styled
   project page published to <https://innotelinc.github.io/onyx/> by
   [`.github/workflows/pages.yml`](.github/workflows/pages.yml).
 - **Design-doc site:** the eleven documents in [`docs/design/`](docs/design/)
@@ -121,7 +121,7 @@ pattern used across the innotelinc platform projects.
 ## Design documents
 
 The full specification lives in [`docs/design/`](docs/design/README.md) —
-eleven documents covering product vision, architecture, the Prism design
+eleven documents covering product vision, architecture, the Unity design
 system, backend services, storage, API, security, user management, the app
 ecosystem, installer/update design, and the new **platform & cloud layer**
 (`11-platform-and-cloud.md`: Authentik, NPM provisioning, wildcard TSIG certs,
@@ -130,7 +130,7 @@ management, AI advisor, object storage + hybrid cloud).
 
 ## Status
 
-**Phase: v0.3 "Obsidian" — safety surfaces shipped.** The appliance
+**Phase: v0.4 "Jade" — the platform release is shipped.** The appliance
 skeleton is complete and installable: `onyx-core` (Go control plane),
 `onyx-api` (HTTP gateway), `onyx-shared` (Go share manager), `onyx-storaged` +
 `onyx-privd` (Rust data plane), and the `onyx` CLI, wired together via gRPC
@@ -159,7 +159,7 @@ On top of that, the **platform layer** is in place:
   `onyx-davd`, `onyx-ai`, `onyx-objectstore`) with proto contracts — see
   [`services/README.md`](services/README.md).
 
-The v0.2 Flint and v0.3 Obsidian foundations are integrated: the Prism shell reads
+The v0.2 Flint and v0.3 Obsidian foundations are integrated: the Unity console reads
 the versioned API, user roles and share grants persist without storing credentials,
 snapshots survive restarts, backup jobs retain history, and the API exposes rollback,
 recovery reports, and SMART-backed device health.
@@ -168,7 +168,10 @@ recovery reports, and SMART-backed device health.
 (`onyx-appd`), virtual machines run on libvirt/KVM with their disks on the pool
 (`onyx-vmm`), shares speak SMB, NFS, FTP, SFTP, WebDAV and rsync, and
 `onyx-objectstore` serves S3 buckets that are local, cloud-primary or tiered to a
-remote — see [docs/design/11](docs/design/11-platform-and-cloud.md).
+remote — see [docs/design/11](docs/design/11-platform-and-cloud.md). The console
+is rebuilt on the shared Unity theme: an overview that leads with capacity and
+health, a collapsible rail, a command palette that also searches the pool, and
+inline scrub and snapshot forms. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Quick start (Docker platform)
 
@@ -214,11 +217,11 @@ scripts/dev.sh stop
 ## Versioning
 
 The release version is defined once in `services/version` and injected into every
-Go binary at build time. Development builds use `0.1.0-dev`; release builds should
+Go binary at build time. Development builds use `0.4.0-dev`; release builds should
 pass the tag and commit explicitly, for example:
 
 ```bash
-make build VERSION=0.2.0 COMMIT=$(git rev-parse HEAD)
+make build VERSION=0.4.0 COMMIT=$(git rev-parse HEAD)
 ```
 
 The REST surface remains `/api/v1`: additive changes stay in v1, while breaking
@@ -296,7 +299,7 @@ docker/        per-service Dockerfiles for the containerized platform
 services/      onyx-api, onyx-core, onyx-shared, onyx-snapd, onyx-backupd, onyx-vmm,
                onyx-appd, onyx-ai, onyx-objectstore (Go) · onyx-storaged, onyx-privd (Rust)
 proto/         gRPC contracts (source of truth) + generated stubs
-web/           landing page (GitHub Pages) · Prism design system + React SPA (planned, v0.2)
+web/           landing page (GitHub Pages) · Unity theme assets
 sdk/           onyx-sdk Go client + onyx CLI, Apache-2.0 (TS client planned)
 installer/     ISO + SBC image design; the script installer lives in scripts/
 scripts/       bootstrap, local dev runner, onyx-install, npm-proxy-hosts.py,

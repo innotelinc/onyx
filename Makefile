@@ -1,4 +1,4 @@
-# Onyx — v0.1 "Cinder" skeleton build.
+# Onyx — v0.4 "Jade" build.
 #
 # Toolchain is repo-local (never touches the system):
 #   make bootstrap   # downloads Go + protoc into .tools/
@@ -21,7 +21,7 @@ export PROTOC     := $(TOOLS)/protoc/bin/protoc
 
 PREFIX ?= /usr/local
 DESTDIR ?=
-VERSION ?= 0.3.0-dev
+VERSION ?= 0.4.0-dev
 COMMIT ?= unknown
 GO_LDFLAGS := -X github.com/innotelinc/onyx/services/version.Version=$(VERSION) -X github.com/innotelinc/onyx/services/version.Commit=$(COMMIT)
 

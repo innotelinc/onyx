@@ -196,7 +196,7 @@ reconnect.
   time so all daemons report the same artifact identity.
 - Deprecations: marked `Deprecated: true` in OpenAPI, minimum 2 minor releases before removal.
 - The OpenAPI document is published at `/api/v1/openapi.json` and drives the typed SDKs and
-  the Prism form generator (schemas → forms), so UI forms and API validation never drift.
+  the console's form validation, so UI forms and API validation never drift.
 
 ## 8. AI-assisted admin surface
 

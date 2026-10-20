@@ -25,7 +25,7 @@ Proxy Manager (NPM), all behind one wildcard TLS certificate:
 
 | Subdomain | Service | Container | Notes |
 |-----------|---------|-----------|-------|
-| `app.onyx.innotel.us` | Web UI (Prism SPA, v0.2) | `onyx-web` | static frontend; talks to `api` + `auth` |
+| `app.onyx.innotel.us` | Web console (Unity theme) | `onyx-web` | static frontend; talks to `api` + `auth` |
 | `api.onyx.innotel.us` | HTTP gateway | `onyx-api` | `/api/v1/*`, `/healthz`; also serves `admin` routes |
 | `auth.onyx.innotel.us` | Identity / SSO | `authentik-server` | OIDC provider for every other surface |
 | `storage.onyx.innotel.us` | S3-compatible object storage | `onyx-objectstore` | `GET/PUT/DELETE` buckets+objects; hybrid-cloud tiering |

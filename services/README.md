@@ -28,8 +28,8 @@ assembled by `onyx-api`.
 
 | Service | Lang | Location | Contract (`proto/onyx/v1/`) | Platform surface |
 |---------|------|----------|-----------------------------|------------------|
-| `onyx-snapd` | Go | [`snapd/`](snapd/) | `snapd.proto` | Btrfs snapshots: create/list/delete/rollback (roadmap v0.3) |
-| `onyx-backupd` | Go | [`backupd/`](backupd/) | `backupd.proto` | Backup jobs, schedules, restore + Backup Intelligence hooks (v0.3) |
+| `onyx-snapd` | Go | [`snapd/`](snapd/) | `snapd.proto` | Btrfs snapshots: create/list/delete/rollback (v0.3, shipped) |
+| `onyx-backupd` | Go | [`backupd/`](backupd/) | `backupd.proto` | Backup jobs, schedules, restore + Backup Intelligence hooks (v0.3, shipped) |
 | `onyx-vmm` | Go | [`vmm/`](vmm/) | `vmm.proto` | Virtualization: VM inventory in SQLite, images on the pool, libvirt/KVM lifecycle through `virsh` (v0.4) |
 | `onyx-appd` | Go | [`appd/`](appd/) | `appd.proto` | App store: persistent install records, per-install config, container lifecycle on Docker (v0.4) |
 | `onyx-ai` | Go | [`ai/`](ai/) | `ai.proto` | AI Storage Advisor + Backup Intelligence (v0.5) |

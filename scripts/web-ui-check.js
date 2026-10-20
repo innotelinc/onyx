@@ -19,7 +19,10 @@ const vm = require('vm');
 const uiPath = path.join(__dirname, '..', 'docker', 'onyx-web', 'index.html');
 const html = fs.readFileSync(uiPath, 'utf8');
 
-const start = html.indexOf('<script>');
+// The page has a small pre-paint theme snippet and the theme switch in the
+// head; the application is the last inline script. Taking the first one would
+// instrument the theme decision rather than the console.
+const start = html.lastIndexOf('<script>');
 const end = html.indexOf('</script>', start);
 if (start < 0 || end < 0) {
   console.error('web-ui-check: no inline <script> found in ' + uiPath);
@@ -31,6 +34,7 @@ const code = html.slice(start + '<script>'.length, end);
 const hook =
   '\n    globalThis.__onyx = { loadStorageOverview: loadStorageOverview, formatBytes: formatBytes,' +
   ' viewShares: viewShares, viewStorage: viewStorage, viewFiles: viewFiles,' +
+  ' viewDashboard: viewDashboard, viewScrub: viewScrub, shareConnections: shareConnections,' +
   ' viewApps: viewApps, viewVMs: viewVMs, viewObjects: viewObjects, loadBuckets: loadBuckets,' +
   ' loadUsers: loadUsers, viewUsers: viewUsers, userSambaPanel: userSambaPanel,' +
   ' shareAccessPanel: shareAccessPanel, shareAuditPanel: shareAuditPanel,' +
@@ -42,7 +46,9 @@ function element(id) {
   return {
     id: id || '', innerHTML: '', textContent: '', value: '', checked: false,
     disabled: false, style: {}, dataset: {},
-    classList: { add() {}, remove() {}, contains() { return false; } },
+    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+    setAttribute() {}, getAttribute() { return null; }, removeAttribute() {}, toggleAttribute() {},
+    closest() { return null; }, scrollIntoView() {},
     addEventListener() {}, querySelectorAll: () => [], querySelector: () => null,
     appendChild() {}, insertAdjacentHTML() {}, focus() {}, click() {},
   };
@@ -57,7 +63,13 @@ const sandbox = {
   document: {
     getElementById: (id) => (elements[id] || (elements[id] = element(id))),
     querySelectorAll: () => [], querySelector: () => null,
-    documentElement: { dataset: {} }, addEventListener() {}, createElement: element, body: element(),
+    documentElement: {
+      dataset: {},
+      setAttribute() {}, getAttribute() { return null; }, removeAttribute() {},
+      classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+    },
+    addEventListener() {}, createElement: element,
+    body: Object.assign(element(), { classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } } }),
   },
   window: {
     location: { hash: '', hostname: 'localhost' }, addEventListener() {}, open() {}, prompt() {},
@@ -163,7 +175,34 @@ const cases = [
   const storage = ui.viewStorage();
   check('Storage page has a capacity card', storage.includes('id="storage-card"'));
   check('Storage page has a working refresh control', storage.includes('id="storage-refresh"'));
+  check('Storage page reaches scrub maintenance', storage.includes('id="storage-scrub"'));
   check('Files page has room for the storage notice', ui.viewFiles().includes('id="file-storage-warning"'));
+
+  // --- the redesigned shell -------------------------------------------------
+  // The console wears the shared Unity theme, and its left rail is the only
+  // navigation and the only collapse control. The old right-hand activity rail
+  // was hard-coded placeholder text, so its absence is as important as the new
+  // overview's presence.
+  check('the console serves the shared Unity theme', html.includes('/unity-theme.css') && html.includes('/unity-theme.js'));
+  check('ONYX wears the operations scheme', html.includes('data-scheme="operations"'));
+  check('the rail is the only collapse control', html.includes('id="rail-toggle"') && !html.includes('id="collapse"'));
+  check('the stale activity rail is gone', !html.includes('aria-label="Activity"') && !html.includes('System status endpoint connected'));
+
+  const dashboard = ui.viewDashboard();
+  check('Overview leads with capacity', dashboard.includes('id="overview-capacity-ring"') && dashboard.includes('id="overview-capacity-pct"'));
+  check('Overview has a needs-attention queue', dashboard.includes('id="overview-attention"'));
+  check('Overview reads the access trail', dashboard.includes('id="overview-activity"'));
+  check('Overview lists pools and services', dashboard.includes('id="overview-pools"') && dashboard.includes('id="overview-services"'));
+  check('the stale safety-plane card is gone', !dashboard.includes('Safety plane') && !dashboard.includes('Obsidian'));
+
+  const scrub = ui.viewScrub();
+  check('Scrub page lists pools rather than asking for a name', scrub.includes('id="scrub-pools"') && !scrub.includes('id="scrub-configure"'));
+
+  // Connection strings are built per protocol. A malformed map here used to
+  // return undefined and throw in the Shares list, so the count is pinned.
+  const connections = ui.shareConnections({ name: 'media', path: '/mnt/onyx/main-pool/media', protocols: ['SHARE_PROTOCOL_SMB', 'SHARE_PROTOCOL_NFS'] });
+  check('share connections cover every protocol', connections.length === 3, JSON.stringify(connections));
+  check('share connections use the protocol names', connections.map((pair) => pair[0]).join(',').includes('SMB (macOS / Linux)') && connections.map((pair) => pair[1]).join(',').includes('smb://'), JSON.stringify(connections));
 
   // --- Shares: who can reach a share, and whether SMB will actually let them ---
   // A grant is rendered into smb.conf's `valid users`, and Samba treats a name
@@ -249,6 +288,8 @@ const cases = [
 
   const navIDs = (ui.views || []).map((view) => view.id);
   check('the nav offers the VMs and Objects pages', navIDs.includes('vms') && navIDs.includes('objects'), 'ids=' + navIDs);
+  check('the nav starts at the Overview', navIDs[0] === 'overview', 'ids=' + navIDs);
+  check('Scrub is a storage action, not a top-level destination', !navIDs.includes('scrub'), 'ids=' + navIDs);
 
   // A tiered bucket has to show the remote it mirrors to and its eviction
   // policy; a local bucket must not claim a cloud target it does not have.

@@ -77,7 +77,7 @@ onyx/
 │   ├── bus/               # onyx-bus       — event bus (Go)
 │   └── privd/             # onyx-privd     — privilege helper (Rust)
 ├── proto/                 # gRPC + OpenAPI contracts (source of truth)
-├── web/                   # React SPA ("Prism" design system)
+├── web/                   # static landing page and Unity theme assets
 ├── sdk/                   # onyx-sdk (Go + TS clients, app SDK)
 ├── installer/             # ISO, SBC images, script installer
 └── docs/                  # design docs, RFCs, ops runbooks

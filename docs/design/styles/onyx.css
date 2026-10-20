@@ -1,10 +1,10 @@
-/* ONYX Prism theme for the MkDocs Material design-doc site.
+/* ONYX design-doc theme for the MkDocs Material site.
  *
- * Maps the Prism tokens (docs/design/03 §2) onto Material's CSS variables:
+ * Maps the legacy --onyx-* aliases (docs/design/03 §2) onto Material's CSS variables:
  * dark-only (matching the landing page), "Onyx Blue" accent, zinc-family
  * neutrals, calm motion. White text is the contract: no light scheme ships.
  *
- * Readability: the Prism secondary/muted neutrals (#9aa3b0/#6b7480) are tuned
+ * Readability: the secondary/muted neutrals (#9aa3b0/#6b7480) are tuned
  * for large surfaces and read too dim as body text on dark backgrounds, so the
  * dark scheme lifts them to #cdd6e0/#a8b2bf (≥ 9:1 on #0b0d10 — the same
  * values as the landing page); the light scheme lifts to #3d4550/#5b6470.
@@ -71,7 +71,7 @@
   background: rgba(18, 21, 26, 0.92);
 }
 
-/* ---- Shape & motion (Prism §2.3) ---------------------------------------- */
+/* ---- Shape & motion (Unity §2.3) ---------------------------------------- */
 .md-header__title,
 .md-nav__item,
 .md-typeset .md-typeset__table {
@@ -88,7 +88,7 @@
   transition: color 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-/* Headlines: tight leading, no decorative display face (Prism §2.2). */
+/* Headlines: tight leading, no decorative display face (Unity §2.2). */
 .md-typeset h1,
 .md-typeset h2,
 .md-typeset h3 {
@@ -96,7 +96,7 @@
 }
 
 /* Code copy buttons already come from Material; keep tabular numbers in
- * tables so sizes/stats scan cleanly (Prism §2.2). */
+ * tables so sizes/stats scan cleanly (Unity §2.2). */
 .md-typeset table {
   font-variant-numeric: tabular-nums;
 }

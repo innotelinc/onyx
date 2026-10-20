@@ -24,7 +24,7 @@ SELF="$(cd "$(dirname "$0")" && pwd)"
 MANIFEST="$SELF/manifest.json"
 OUT="$SELF"
 FIRMWARE=1
-VERSION="${VERSION:-0.3.0-dev}"
+VERSION="${VERSION:-0.4.0-dev}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --output-dir) OUT="$2"; shift 2 ;;
