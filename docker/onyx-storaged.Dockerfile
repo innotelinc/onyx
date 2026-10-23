@@ -7,7 +7,7 @@ FROM rust:1-slim-bookworm AS build
 ARG TARGETARCH
 # The Rust services report their version from a compile-time constant, so the
 # release tag is injected as an environment variable the build reads.
-ARG VERSION=0.4.0-dev
+ARG VERSION=0.5.0-dev
 ENV ONYX_VERSION=${VERSION}
 # musl-tools is the native toolchain for the builder's own architecture; the
 # x86_64 musl cross-toolchain only exists on the amd64 package. CI builds both
@@ -28,8 +28,13 @@ COPY . .
 # injected at compile time, so a release stamp re-runs this build, and a full
 # dependency compile from scratch on a two-core host is the difference between
 # minutes and an hour. Compiled output only — nothing here lands in the image.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/services/storaged/target \
+#
+# The caches are per-service and `sharing=locked` because CI builds every image
+# at once: a shared registry cache let two cargo processes unpack the same crate
+# into it concurrently, and the second one failed with
+# "failed to unpack package ... File exists".
+RUN --mount=type=cache,id=cargo-registry-storaged,sharing=locked,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=cargo-target-storaged,sharing=locked,target=/src/services/storaged/target \
     mkdir -p /out \
     && if [ "${TARGETARCH:-amd64}" = "amd64" ]; then MUSL_TARGET=x86_64-unknown-linux-musl; else MUSL_TARGET=aarch64-unknown-linux-musl; fi \
     && cargo build --release --target "${MUSL_TARGET}" \

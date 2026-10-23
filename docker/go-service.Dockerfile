@@ -6,7 +6,7 @@ ARG SERVICE
 
 FROM golang:1.27-bookworm AS build
 ARG SERVICE
-ARG VERSION=0.4.0-dev
+ARG VERSION=0.5.0-dev
 ARG COMMIT=unknown
 WORKDIR /src
 COPY go.mod go.sum ./
