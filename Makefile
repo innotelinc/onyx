@@ -1,4 +1,4 @@
-# Onyx — v0.4 "Jade" build.
+# Onyx — v0.5 "Quartz" build.
 #
 # Toolchain is repo-local (never touches the system):
 #   make bootstrap   # downloads Go + protoc into .tools/
@@ -21,7 +21,7 @@ export PROTOC     := $(TOOLS)/protoc/bin/protoc
 
 PREFIX ?= /usr/local
 DESTDIR ?=
-VERSION ?= 0.4.0-dev
+VERSION ?= 0.5.0-dev
 COMMIT ?= unknown
 GO_LDFLAGS := -X github.com/innotelinc/onyx/services/version.Version=$(VERSION) -X github.com/innotelinc/onyx/services/version.Commit=$(COMMIT)
 
@@ -109,7 +109,7 @@ image: build
 ## docker-build — rebuild the compose images stamped with this checkout
 ##
 ## VERSION and COMMIT are compile-time build arguments, so an image built
-## without them reports the development defaults (0.4.0-dev / unknown) no matter
+## without them reports the development defaults (0.5.0-dev / unknown) no matter
 ## which commit it came from. This target reads both from git — the values a
 ## deployment should never have to remember — and builds one service at a time.
 ## Override for a release: make docker-build VERSION=v0.4.1

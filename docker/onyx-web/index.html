@@ -584,6 +584,7 @@
       shares: I('<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5 8.6 10.5"/>'),
       users: I('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>'),
       audit: I('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>'),
+      advisor: I('<path d="M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3.5"/>'),
       settings: I('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>'),
       scrub: I('<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="4"/>'),
       arrow: I('<path d="M5 12h14M13 6l6 6-6 6"/>'),
@@ -607,6 +608,7 @@
       { id: 'shares',    label: 'Shares',    icon: ICONS.shares,   section: 'Platform',  sub: 'Publish a folder over SMB, NFS, FTP, SFTP, WebDAV or rsync.' },
       { id: 'users',     label: 'Users',     icon: ICONS.users,    section: 'Platform',  sub: 'Authentik identities mirrored with an ONYX role.' },
       { id: 'audit',     label: 'Audit',     icon: ICONS.audit,    section: 'Platform',  sub: 'Grants, revocations and refusals in the access trail.' },
+      { id: 'advisor',   label: 'Advisor',   icon: ICONS.advisor,  section: 'Platform',  sub: 'What the AI advisor makes of pool health and backup reliability.' },
       { id: 'settings',  label: 'Settings',  icon: ICONS.settings, section: 'Platform',  sub: 'Identity, cloud accounts and appearance.' }
     ];
 
@@ -2227,6 +2229,59 @@
       }).catch(showError);
     }
 
+    /* The advisor is a reading of the platform, not a second source of truth:
+     * onyx-ai receives the pool telemetry onyx-api assembled and the backup
+     * report onyx-backupd recorded, and returns findings plus a narrative. A
+     * failure in either half is shown in place — one panel can still answer
+     * when the other cannot. */
+    function viewAdvisor() {
+      return '<div class="page-head"><div><p>Storage health and backup reliability, reviewed by onyx-ai. Findings are deterministic; a configured model only rewrites the summary.</p></div>' +
+        '<button class="btn" id="advisor-refresh">Refresh</button></div>' +
+        '<div class="grid" id="advisor-summary"><div class="card"><h3>Storage health</h3><div class="stat">—</div><div class="sub">Reading pool telemetry…</div></div>' +
+        '<div class="card"><h3>Backup health</h3><div class="stat">—</div><div class="sub">Reading the backup report…</div></div></div>' +
+        '<div class="card" style="margin-top:16px" id="advisor-storage"><h3>Storage findings</h3><div class="empty"><b>Asking the advisor…</b>Pool capacity, snapshots and scrub state.</div></div>' +
+        '<div class="card" style="margin-top:16px" id="advisor-backups"><h3>Backup findings</h3><div class="empty"><b>Asking the advisor…</b>Job success, recovery points and trends.</div></div>';
+    }
+
+    function advisorFinding(finding) {
+      var severity = String(finding.severity || 'info').toLowerCase();
+      var badge = severity === 'critical' ? 'bad' : (severity === 'warning' ? 'warn' : '');
+      return '<div class="event" style="display:block;border-bottom:1px solid var(--onyx-border);padding-bottom:10px">' +
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="badge' + (badge ? ' ' + badge : '') + '">' + esc(severity) + '</span><b>' + esc(finding.summary || finding.code || 'Finding') + '</b></div>' +
+        '<div class="sub" style="margin-top:4px">' + esc(finding.detail || '') + '</div>' +
+        (finding.action ? '<div class="sub" style="margin-top:4px"><b>Next:</b> ' + esc(finding.action) + '</div>' : '') + '</div>';
+    }
+
+    function advisorPanel(id, data, label) {
+      var box = document.getElementById(id);
+      if (!box) return;
+      if (!data) { box.innerHTML = '<h3>' + esc(label) + '</h3><div class="empty"><b>Advisor unavailable</b>onyx-ai did not answer this request.</div>'; return; }
+      var findings = data.findings || [];
+      var warnings = data.warnings || [];
+      box.innerHTML = '<h3>' + esc(label) + '</h3>' +
+        (warnings.length ? '<div class="sub" style="color:var(--onyx-warning);margin-bottom:8px">' + warnings.map(esc).join('<br>') + '</div>' : '') +
+        (data.narrative ? '<p class="sub" style="margin:0 0 12px">' + esc(data.narrative) + '</p>' : '') +
+        (findings.length ? '<div style="display:grid;gap:10px">' + findings.map(advisorFinding).join('') + '</div>' : '<div class="empty"><b>Nothing to flag</b>The advisor found no concerns in what it was given.</div>');
+    }
+
+    function loadAdvisor() {
+      var storage = document.getElementById('advisor-storage');
+      var backups = document.getElementById('advisor-backups');
+      var summary = document.getElementById('advisor-summary');
+      if (!storage && !backups) return;
+      var one = apiJSON('/ai/advisor').catch(function (error) { return { __error: error }; });
+      var two = apiJSON('/ai/backup-advice').catch(function (error) { return { __error: error }; });
+      return Promise.all([one, two]).then(function (results) {
+        var storageData = results[0] && results[0].__error ? null : results[0];
+        var backupData = results[1] && results[1].__error ? null : results[1];
+        advisorPanel('advisor-storage', storageData, 'Storage findings');
+        advisorPanel('advisor-backups', backupData, 'Backup findings');
+        if (summary) summary.innerHTML =
+          '<div class="card"><h3>Storage health</h3><div class="stat">' + (storageData && storageData.health != null ? Math.round(Number(storageData.health) * 100) + '%' : '—') + '</div><div class="sub">' + (storageData && (storageData.findings || []).length ? (storageData.findings || []).length + ' finding(s)' : 'no findings') + '</div></div>' +
+          '<div class="card"><h3>Backup health</h3><div class="stat">' + (backupData && backupData.health != null ? Math.round(Number(backupData.health) * 100) + '%' : '—') + '</div><div class="sub">' + (backupData && (backupData.findings || []).length ? (backupData.findings || []).length + ' finding(s)' : 'no findings') + '</div></div>';
+      });
+    }
+
     function render(route) {
       // `#/dashboard` was the old landing page; it stays a working link so a
       // bookmark, a README or an operator's muscle memory is never a 404.
@@ -2253,6 +2308,7 @@
       else if (id === 'users') body = viewUsers();
       else if (id === 'search') body = viewSearch();
       else if (id === 'audit') body = viewAudit();
+      else if (id === 'advisor') body = viewAdvisor();
       else if (id === 'settings') body = viewSettings();
       else body = viewDashboard();
       document.getElementById('content').innerHTML = body;
@@ -2269,6 +2325,15 @@
         } catch (e) {}
       }
       if (id === 'audit') loadAudit();
+      if (id === 'advisor') {
+        var advisorRefresh = document.getElementById('advisor-refresh');
+        if (advisorRefresh) advisorRefresh.addEventListener('click', function () {
+          advisorRefresh.disabled = true;
+          advisorRefresh.textContent = 'Refreshing…';
+          loadAdvisor().then(function () { advisorRefresh.disabled = false; advisorRefresh.textContent = 'Refresh'; });
+        });
+        loadAdvisor();
+      }
       if (id === 'overview' || id === 'dashboard') {
         loadStatus();
         var dashRefresh = document.getElementById('dashboard-refresh');

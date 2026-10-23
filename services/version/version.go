@@ -10,11 +10,11 @@ const (
 	// new major namespace; additive changes remain v1.
 	APIVersion = "v1"
 	// Codename identifies the current roadmap milestone.
-	Codename = "Jade"
+	Codename = "Quartz"
 )
 
 var (
-	Version = "0.4.0"
+	Version = "0.5.0"
 	Commit  = "unknown"
 )
 

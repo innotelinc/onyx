@@ -1,5 +1,5 @@
 # onyx-ai — AI Storage Advisor + Backup Intelligence (docs/design/11 §6.5).
-# v0.1 runs local heuristics; the optional provider hook lands with v0.5.
+# v0.5 runs the local heuristics and can use the optional provider hook.
 [Unit]
 Description=Onyx AI advisor service
 After=local-fs.target onyx-storaged.service onyx-backupd.service

@@ -87,10 +87,11 @@ Kubernetes, tape backup, S3 *serving* (outbound only), AD domain *controller* (j
 | **v0.2 "Flint"** | Files | Web UI shell + design system, file explorer, SMB/NFS shares, users & permissions |
 | **v0.3 "Obsidian"** | Safety | Snapshots + rollback UI, scrub scheduling, backup jobs, SMART monitoring, notifications |
 | **v0.4 "Jade"** | Apps | App store + sandboxing, Docker integration, VMs, object storage + hybrid cloud, SFTP/FTP/WebDAV/Rsync protocol surface — **shipped as v0.4.0** |
-| **v0.5 "Quartz"** | Intelligence | AI admin assistant, mobile companion, automation; audit reporting and pool-wide search landed early in v0.4.0 |
+| **v0.5 "Quartz"** | Intelligence | AI Storage Advisor + Backup Intelligence, audit reporting and pool-wide search — **shipped as v0.5.0**; the mobile companion and broader automation remain future work |
 | **v1.0** | Release | Security audit, docs, hardening, LTS update channel |
 
-> **Status (October 2026).** v0.4 "Jade" shipped as **v0.4.0** on 2026-10-20. The
+> **Status (October 2026).** v0.5 "Quartz" shipped as **v0.5.0** on 2026-10-23, on
+> top of v0.4 "Jade" (**v0.4.0**, 2026-10-20). The
 > v0.2 Flint console has versioned API-backed snapshot, backup, user-role and
 > share-permission views; Obsidian added persistent snapshot catalogs and backup
 > histories, rollback and recovery-report endpoints, plus SMART-backed device
@@ -101,8 +102,9 @@ Kubernetes, tape backup, S3 *serving* (outbound only), AD domain *controller* (j
 > cloud-primary or tiered to a remote (`onyx-objectstore`). v0.4.0 also rebuilds
 > the console on the shared **Unity** theme: an overview for capacity, health and
 > attention; a single collapsible left rail; a command palette that also searches
-> the pool; and inline scrub and snapshot workflows. v0.5 "Quartz" is next for the
-> intelligence surfaces.
+> the pool; and inline scrub and snapshot workflows. Quartz adds the intelligence
+> surfaces: the AI Storage Advisor and Backup Intelligence behind an Advisor page,
+> the audit report and CSV export, and pool-wide search.
 
 ## 8. Open-source governance and licensing
 

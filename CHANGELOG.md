@@ -4,6 +4,38 @@ All notable changes to ONYX are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and ONYX uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-10-23 — "Quartz"
+
+The intelligence milestone: the platform can now read its own telemetry and say
+what needs attention, with the same evidence trail underneath.
+
+### Added
+
+- **AI Storage Advisor.** `onyx-ai` reviews pool capacity, snapshot cadence and
+  scrub state assembled by `onyx-api` and returns findings, a 0..1 health score
+  and a plain-language narrative. The heuristics are deterministic and local; an
+  optional local or BYO-key model (`OMNIROUTE_BASE_URL` or
+  `AI_PROVIDER`/`AI_API_KEY`/`AI_MODEL`) can rewrite the narrative but never the
+  findings, and a failed model call falls back to the local summary.
+- **Backup Intelligence.** The backup report from `onyx-backupd` is reviewed for
+  failed runs, a low success ratio, a degrading trend and a stale recovery
+  point, with the same findings/narrative shape.
+- **Advisor page in the console.** Storage health, backup health and every
+  finding — severity, detail and the suggested next step — are readable without
+  a shell, and each panel reports unavailable telemetry instead of inventing a
+  clean bill of health.
+- **Audit report.** `GET /api/v1/audit` summarizes the access trail (grants,
+  revocations, refusals, the shares and names refused most) and exports the
+  same events as CSV; `GET /api/v1/files/search` searches the pool by name,
+  kind, size and age.
+
+### Changed
+
+- The version reported by `/api/v1/system/status` and `bin/onyx version` is now
+  `0.5.0` / `Quartz`.
+- `onyx-ai` is part of the platform release rather than a planned service, and
+  its systemd unit documents the provider hook that now exists.
+
 ## [0.4.0] — 2026-10-20 — "Jade"
 
 The platform milestone, and the console that makes it usable: the app store,

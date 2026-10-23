@@ -22,9 +22,10 @@ Small, single-purpose daemons (docs/design/04#1-service-inventory). Each service
 
 The containerized platform adds these daemons, each a gRPC service (proto
 contract + server + wiring) that Dockerizes and ships in the compose stack. The
-v0.4 "Jade" surfaces are implemented; `onyx-ai` is the v0.5 milestone, and its
-advisor inputs (pool capacity, snapshot cadence, scrub status) are already
-assembled by `onyx-api`.
+v0.4 "Jade" surfaces are implemented, and v0.5 "Quartz" adds `onyx-ai`: its
+advisor inputs (pool capacity, snapshot cadence, scrub status) are assembled by
+`onyx-api`, and the console's Advisor page reads both its storage and backup
+readings.
 
 | Service | Lang | Location | Contract (`proto/onyx/v1/`) | Platform surface |
 |---------|------|----------|-----------------------------|------------------|
@@ -32,7 +33,7 @@ assembled by `onyx-api`.
 | `onyx-backupd` | Go | [`backupd/`](backupd/) | `backupd.proto` | Backup jobs, schedules, restore + Backup Intelligence hooks (v0.3, shipped) |
 | `onyx-vmm` | Go | [`vmm/`](vmm/) | `vmm.proto` | Virtualization: VM inventory in SQLite, images on the pool, libvirt/KVM lifecycle through `virsh` (v0.4) |
 | `onyx-appd` | Go | [`appd/`](appd/) | `appd.proto` | App store: persistent install records, per-install config, container lifecycle on Docker (v0.4) |
-| `onyx-ai` | Go | [`ai/`](ai/) | `ai.proto` | AI Storage Advisor + Backup Intelligence (v0.5) |
+| `onyx-ai` | Go | [`ai/`](ai/) | `ai.proto` | AI Storage Advisor + Backup Intelligence, with deterministic findings and an optional model narrative (v0.5, shipped) |
 | `onyx-objectstore` | Go | [`objectstore/`](objectstore/) | `objectstore.proto` | S3-compatible object storage + hybrid cloud tiering: LOCAL, CLOUD and TIERED buckets over the shared rclone remote catalog (v0.4) |
 | `onyx-davd` | Go | [`davd/`](davd/) | — (HTTP: WebDAV, plus gRPC `Health`) | WebDAV endpoint for WebDAV-enabled shares: mounts the share table onyx-shared renders, trusts the gateway's identity header, **enforces the share's per-user grants** (a name outside `allowed_users` gets 403, a `readonly_users` grant cannot write, the index is filtered), **reports every refusal to core's access trail** (queued, so the audit never sits on the request path), config-watch reloads (v0.4) |
 

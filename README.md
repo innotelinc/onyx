@@ -39,11 +39,12 @@ minute and idles under 512 MB RAM.
 > virtualization, S3-compatible object storage, backup management, cloud synchronization
 > and application hosting in one self-hosted stack — SSO everywhere via Cerulean
 > Authentik, safe by default with Btrfs snapshots and atomic A/B rollback, and no cloud
-> account required. Currently at **v0.4 "Jade"**: the control/data plane, the Unity console,
+> account required. Currently at **v0.5 "Quartz"**: the control/data plane, the Unity console,
 > user/share permission metadata, snapshots, backup jobs and SMART-backed device health are
 > shipped, together with the app store and container runtime, virtual machines on
 > libvirt/KVM, the full share-protocol surface (SMB, NFS, FTP, SFTP, WebDAV, rsync) and
-> S3-compatible object storage with hybrid-cloud tiering. The v0.5 intelligence milestone is next.
+> S3-compatible object storage with hybrid-cloud tiering, plus the v0.5 intelligence
+> surfaces: the AI Storage Advisor, Backup Intelligence, audit reporting and pool-wide search.
 >
 > **Landing page:** [innotelinc.github.io/onyx](https://innotelinc.github.io/onyx) ·
 > **Design docs:** [innotelinc.github.io/onyx/docs](https://innotelinc.github.io/onyx/docs)
@@ -132,7 +133,7 @@ management, AI advisor, object storage + hybrid cloud).
 
 ## Status
 
-**Phase: v0.4 "Jade" — the platform release is shipped.** The appliance
+**Phase: v0.5 "Quartz" — the intelligence release is shipped.** The appliance
 skeleton is complete and installable: `onyx-core` (Go control plane),
 `onyx-api` (HTTP gateway), `onyx-shared` (Go share manager), `onyx-storaged` +
 `onyx-privd` (Rust data plane), and the `onyx` CLI, wired together via gRPC
@@ -166,14 +167,17 @@ the versioned API, user roles and share grants persist without storing credentia
 snapshots survive restarts, backup jobs retain history, and the API exposes rollback,
 recovery reports, and SMART-backed device health.
 
-**v0.4 Jade** adds the platform surfaces: apps from the store run as containers
-(`onyx-appd`), virtual machines run on libvirt/KVM with their disks on the pool
-(`onyx-vmm`), shares speak SMB, NFS, FTP, SFTP, WebDAV and rsync, and
-`onyx-objectstore` serves S3 buckets that are local, cloud-primary or tiered to a
-remote — see [docs/design/11](docs/design/11-platform-and-cloud.md). The console
-is rebuilt on the shared Unity theme: an overview that leads with capacity and
-health, a collapsible rail, a command palette that also searches the pool, and
-inline scrub and snapshot forms. See [CHANGELOG.md](CHANGELOG.md).
+**v0.5 Quartz** adds the intelligence surfaces. `onyx-ai` reviews pool telemetry
+and the backup report and returns deterministic findings, a 0..1 health score and
+a narrative, with an optional local or BYO-key model that can rewrite the prose
+(never the findings). The console's **Advisor** page shows both readings, and
+the audit report and advanced search now have their own surfaces. v0.4 Jade
+remains underneath: apps from the store run as containers (`onyx-appd`),
+virtual machines run on libvirt/KVM with their disks on the pool (`onyx-vmm`),
+shares speak SMB, NFS, FTP, SFTP, WebDAV and rsync, and `onyx-objectstore`
+serves S3 buckets that are local, cloud-primary or tiered to a remote — see
+[docs/design/11](docs/design/11-platform-and-cloud.md). See
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Quick start (Docker platform)
 
@@ -219,18 +223,18 @@ scripts/dev.sh stop
 ## Versioning
 
 The release version is defined once in `services/version` and injected into every
-Go binary at build time. Development builds use `0.4.0-dev`; release builds should
+Go binary at build time. Development builds use `0.5.0-dev`; release builds should
 pass the tag and commit explicitly, for example:
 
 ```bash
-make build VERSION=0.4.0 COMMIT=$(git rev-parse HEAD)
+make build VERSION=0.5.0 COMMIT=$(git rev-parse HEAD)
 ```
 
 Container builds read the same values — `VERSION` and `COMMIT` are build
 arguments on every image. Pass them yourself:
 
 ```bash
-VERSION=0.4.0 COMMIT=$(git rev-parse HEAD) docker compose build
+VERSION=0.5.0 COMMIT=$(git rev-parse HEAD) docker compose build
 ```
 
 or let the checkout answer for itself, which is what a deployment should do:
@@ -242,7 +246,7 @@ bash scripts/docker-rebuild.sh     # the same, where make is not installed (the 
 
 Both daemon families report it: the Go services through `-ldflags`, and the Rust
 data-plane daemons (`onyx-privd`, `onyx-storaged`) through `ONYX_VERSION` at
-compile time. Omitting `VERSION` leaves the development `0.4.0-dev` in place — a
+compile time. Omitting `VERSION` leaves the development `0.5.0-dev` in place — a
 stack built without it says so on the status page instead of claiming the
 release number.
 

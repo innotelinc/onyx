@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # docker-rebuild.sh — build every compose image with the version it actually is.
 #
-# The stack spent a release reporting `0.4.0-dev` / `commit: unknown` because
+# The stack spent a release reporting `0.5.0-dev` / `commit: unknown` because
 # VERSION and COMMIT are build arguments with development defaults, and nothing
 # on the host ever passed them:
 #
-#   args: { VERSION: "${VERSION:-0.4.0-dev}", COMMIT: "${COMMIT:-unknown}" }
+#   args: { VERSION: "${VERSION:-0.5.0-dev}", COMMIT: "${COMMIT:-unknown}" }
 #
 # A default that is honest in development becomes a lie in a deployment: the
 # status page claimed a number no commit had. This script reads both values from
