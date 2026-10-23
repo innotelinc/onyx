@@ -53,6 +53,19 @@ jobs:
             dockerfile: docker/go-service.Dockerfile
           - service: onyx-objectstore
             dockerfile: docker/go-service.Dockerfile
+          # onyx-davd belongs here — it is a compose service like the rest, and the
+          # 2026-10-23 v0.5.0 deployment had to build it locally because the
+          # release never publishes it. Adding the entry now fails the whole
+          # matrix: the GHCR package `onyx-oss-platform/onyx-davd` already exists
+          # under the innotelinc user but is not linked to this repository, so the
+          # Actions token is refused with "denied: permission_denied:
+          # write_package". Link that package to innotelinc/onyx (package
+          # settings → Manage Actions access), then add:
+          #
+          #   - service: onyx-davd
+          #     dockerfile: docker/go-service.Dockerfile
+          #
+          # beside onyx-objectstore and the next release publishes it.
           - service: onyx-storaged
             dockerfile: docker/onyx-storaged.Dockerfile
           - service: onyx-privd
