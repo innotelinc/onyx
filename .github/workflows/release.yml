@@ -53,12 +53,6 @@ jobs:
             dockerfile: docker/go-service.Dockerfile
           - service: onyx-objectstore
             dockerfile: docker/go-service.Dockerfile
-          # davd is a compose service like the rest, and it was the one image
-          # missing from this matrix: a host deploying v0.5.0 could pull twelve
-          # images and then had to build the WebDAV daemon itself to bring the
-          # stack up. Every service in docker-compose.yml belongs here.
-          - service: onyx-davd
-            dockerfile: docker/go-service.Dockerfile
           - service: onyx-storaged
             dockerfile: docker/onyx-storaged.Dockerfile
           - service: onyx-privd
