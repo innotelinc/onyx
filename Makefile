@@ -71,12 +71,13 @@ build: gen
 	@cp services/privd/target/debug/onyx-privd $(BIN)/onyx-privd
 	@echo "built: onyx-core onyx-api onyx-shared onyx-snapd onyx-backupd onyx-vmm onyx-appd onyx-ai onyx-objectstore onyx-davd onyx-storaged onyx-privd onyx (in bin/)"
 
-## check — vet + test all Go and Rust code (+ the Prism UI script when node is present)
+## check — vet + test all Go and Rust code (+ the Prism UI and release-matrix
+## scripts when node is present)
 check: vet test
 	@cd services/storaged && cargo test --quiet
 	@cd services/privd && cargo test --quiet
-	@if command -v node >/dev/null 2>&1; then node scripts/web-ui-check.js; \
-	else echo "node not found — skipping scripts/web-ui-check.js"; fi
+	@if command -v node >/dev/null 2>&1; then node scripts/web-ui-check.js && node scripts/release-matrix-check.js; \
+	else echo "node not found — skipping scripts/web-ui-check.js and scripts/release-matrix-check.js"; fi
 
 ## e2e — drive a *running* compose stack (app install, tiered bucket sync/evict)
 ## through the gateway; POOL_DEVICE=/dev/sdX or POOL_IMAGE=<file> (a loop device
